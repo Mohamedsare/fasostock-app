@@ -1,0 +1,1628 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:drift/drift.dart' as drift;
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+
+import '../../../core/config/routes.dart';
+import '../../../core/constants/permissions.dart';
+import '../../../core/connectivity/connectivity_service.dart';
+import '../../../core/errors/app_error_handler.dart';
+import '../../../core/utils/app_toast.dart';
+import '../../../core/utils/client_request_id.dart';
+import '../../../data/local/drift/app_database.dart';
+import '../../../data/models/product.dart';
+import '../../../data/models/sale.dart';
+import '../../../data/models/store.dart';
+import '../../../data/repositories/sales_repository.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/company_provider.dart';
+import '../../../providers/offline_providers.dart';
+import '../../../providers/permissions_provider.dart';
+import '../../../providers/pos_cart_settings_provider.dart';
+import '../../../providers/sales_page_provider.dart';
+import '../../../shared/utils/format_currency.dart';
+import '../pos/services/receipt_thermal_print_service.dart';
+import '../pos/widgets/receipt_ticket_dialog.dart';
+import 'pos_quick_constants.dart';
+import 'pos_quick_models.dart';
+import 'widgets/barcode_scanner_dialog.dart';
+import 'widgets/pos_quick_cart_tile.dart';
+import 'widgets/pos_quick_left_zone.dart';
+import 'widgets/pos_quick_right_zone.dart';
+
+/// POS Caisse Rapide ? interface type alimentation/sup?rette, ticket thermique, offline+sync.
+class PosQuickPage extends ConsumerStatefulWidget {
+  const PosQuickPage({super.key, required this.storeId});
+
+  final String storeId;
+
+  @override
+  ConsumerState<PosQuickPage> createState() => _PosQuickPageState();
+}
+
+class _PosQuickPageState extends ConsumerState<PosQuickPage> {
+  final SalesRepository _salesRepo = SalesRepository();
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _discountController = TextEditingController();
+  final TextEditingController _amountReceivedController =
+      TextEditingController();
+
+  List<PosCartItem> _cart = [];
+  double _discount = 0;
+  double _amountReceived = 0;
+  bool _amountReceivedTouched = false;
+  bool _creating = false;
+  ReceiptTicketData? _receiptData;
+  bool _syncTriggeredOnce = false;
+  Timer? _periodicSyncTimer;
+  DateTime? _lastStockLimitToastAt;
+  PaymentMethod _paymentMethod = PaymentMethod.cash;
+  String? _selectedCategoryId;
+  String _currentTime = '';
+  Timer? _clockTimer;
+  StreamSubscription<bool>? _connectivitySubscription;
+
+  /// Sync toutes les 15 s tant que la caisse est ouverte ? nouveaux produits visibles tr?s vite (magasinier sur un autre poste).
+  static const Duration _periodicSyncInterval = Duration(seconds: 15);
+
+  @override
+  void initState() {
+    super.initState();
+    _updateTime();
+    _clockTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _updateTime(),
+    );
+    _periodicSyncTimer = Timer.periodic(_periodicSyncInterval, (_) {
+      if (!mounted) return;
+      Future.microtask(() => _refreshSync());
+    });
+    _connectivitySubscription = ConnectivityService
+        .instance
+        .onConnectivityChanged
+        .listen((_) {
+          if (mounted) setState(() {});
+        });
+  }
+
+  void _updateTime() {
+    if (!mounted) return;
+    final t = DateFormat('HH:mm').format(DateTime.now());
+    if (t != _currentTime) setState(() => _currentTime = t);
+  }
+
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    _periodicSyncTimer?.cancel();
+    _connectivitySubscription?.cancel();
+    _searchController.dispose();
+    _discountController.dispose();
+    _amountReceivedController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refreshSync() async {
+    final auth = context.read<AuthProvider>();
+    final company = context.read<CompanyProvider>();
+    final uid = auth.user?.id;
+    if (uid != null) {
+      try {
+        await ref
+            .read(syncServiceV2Provider)
+            .sync(
+              userId: uid,
+              companyId: company.currentCompanyId,
+              storeId: widget.storeId,
+            );
+      } catch (e, st) {
+        AppErrorHandler.log(e, st);
+      }
+    }
+  }
+
+  /// Filtre par recherche, cat?gorie, actifs et masque les produits en rupture (stock = 0).
+  List<Product> _filteredProducts(
+    List<Product> products,
+    Map<String, int> stockByProductId,
+  ) {
+    final search = _searchController.text.trim().toLowerCase();
+    return products.where((p) {
+      if (!p.isActive) return false;
+      if ((stockByProductId[p.id] ?? 0) <= 0)
+        return false; // Ne pas afficher les produits sans stock en caisse rapide.
+      if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId)
+        return false;
+      if (search.isEmpty) return true;
+      if (p.name.toLowerCase().contains(search)) return true;
+      if (p.sku?.toLowerCase().contains(search) ?? false) return true;
+      if (p.barcode?.contains(search) ?? false) return true;
+      return false;
+    }).toList();
+  }
+
+  double get _subtotal => PosQuickCartLogic.subtotal(_cart);
+  double get _total => PosQuickCartLogic.totalWithDiscount(_cart, _discount);
+  bool get _canPay => PosQuickCartLogic.canPay(_cart, _total);
+  int get _cartItemCount => _cart.fold(0, (n, c) => n + c.quantity);
+
+  List<PosCartItem> _stockWarnings(Map<String, int> stockByProductId) => _cart
+      .where((c) => (stockByProductId[c.productId] ?? 0) < c.quantity)
+      .toList();
+
+  void _addToCart(Product p, Map<String, int> stockByProductId) {
+    final stock = stockByProductId[p.id] ?? 0;
+    setState(() {
+      PosCartItem? existing;
+      try {
+        existing = _cart.firstWhere((c) => c.productId == p.id);
+      } catch (_) {
+        existing = null;
+      }
+      if (existing != null) {
+        final newQty = existing.quantity + 1;
+        if (stock >= 0 && newQty > stock) {
+          _showStockLimitToast();
+          return;
+        }
+        existing.quantity = newQty;
+        existing.total = newQty * existing.unitPrice;
+      } else {
+        if (stock <= 0) return;
+        _cart.add(
+          PosCartItem(
+            productId: p.id,
+            name: p.name,
+            sku: p.sku,
+            unit: p.unit,
+            quantity: 1,
+            unitPrice: p.salePrice,
+            total: p.salePrice,
+            imageUrl: p.productImages?.isNotEmpty == true
+                ? p.productImages!.first.url
+                : null,
+          ),
+        );
+      }
+    });
+  }
+
+  void _updateQty(
+    String productId,
+    int delta,
+    Map<String, int> stockByProductId,
+  ) {
+    final stock = stockByProductId[productId] ?? 0;
+    setState(() {
+      _cart = _cart
+          .map((c) {
+            if (c.productId != productId) return c;
+            final q = (c.quantity + delta).clamp(0, 999);
+            if (stock >= 0 && q > stock) {
+              _showStockLimitToast();
+              return c;
+            }
+            c.quantity = q;
+            c.total = q * c.unitPrice;
+            return c;
+          })
+          .where((c) => c.quantity > 0)
+          .toList();
+    });
+  }
+
+  void _showStockLimitToast() {
+    final now = DateTime.now();
+    final last = _lastStockLimitToastAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastStockLimitToastAt = now;
+    AppToast.info(context, 'Quantité ajustée au stock disponible.');
+  }
+
+  List<CreateSalePaymentInput> _buildPayments() {
+    return [CreateSalePaymentInput(method: _paymentMethod, amount: _total)];
+  }
+
+  Future<void> _handlePayment(
+    Store? store,
+    Map<String, int> stockByProductId,
+  ) async {
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (companyId == null || userId == null || store == null || !_canPay)
+      return;
+    if (_stockWarnings(stockByProductId).isNotEmpty) {
+      AppToast.error(context, 'Stock insuffisant pour certains articles.');
+      return;
+    }
+    if (_paymentMethod == PaymentMethod.cash &&
+        _amountReceivedTouched &&
+        _amountReceived < _total) {
+      AppToast.error(context, 'Montant reçu insuffisant.');
+      return;
+    }
+    if (_cart.any((c) => c.quantity < 1)) {
+      AppToast.error(
+        context,
+        'Quantité invalide pour un ou plusieurs articles.',
+      );
+      return;
+    }
+    final isOnline = ConnectivityService.instance.isOnline;
+    setState(() => _creating = true);
+
+    Future<void> saveOfflineAndShowReceipt(
+      List<CreateSalePaymentInput> payments, {
+      required String successMessage,
+    }) async {
+      final localId = 'sale_${DateTime.now().millisecondsSinceEpoch}';
+      final pendingSaleId = 'pending:$localId';
+      final now = DateTime.now();
+      final isoNow = now.toUtc().toIso8601String();
+
+      final payload = {
+        'p_company_id': companyId,
+        'p_store_id': widget.storeId,
+        'p_customer_id': null,
+        'p_created_by': userId,
+        'p_items': _cart
+            .map(
+              (c) => {
+                'product_id': c.productId,
+                'quantity': c.quantity,
+                'unit_price': c.unitPrice,
+                'discount': 0,
+              },
+            )
+            .toList(),
+        'p_payments': payments
+            .map(
+              (p) => {
+                'method': p.method.value,
+                'amount': p.amount,
+                'reference': p.reference,
+              },
+            )
+            .toList(),
+        'p_discount': _discount,
+        'p_sale_mode': SaleMode.quickPos.value,
+        'p_document_type': DocumentType.thermalReceipt.value,
+        'p_client_request_id': newClientRequestId(),
+      };
+
+      final db = ref.read(appDatabaseProvider);
+      await db.enqueuePendingAction(
+        'sale',
+        jsonEncode({'local_id': localId, 'rpc': payload}),
+      );
+
+      await db.upsertLocalSale(
+        LocalSalesCompanion.insert(
+          id: pendingSaleId,
+          companyId: companyId,
+          storeId: widget.storeId,
+          customerId: const drift.Value(null),
+          saleNumber: '— (hors ligne)',
+          status: 'completed',
+          subtotal: drift.Value(_subtotal),
+          discount: drift.Value(_discount),
+          tax: const drift.Value(0),
+          total: _total,
+          createdBy: userId,
+          createdAt: isoNow,
+          updatedAt: isoNow,
+          synced: const drift.Value(false),
+          saleMode: drift.Value(SaleMode.quickPos.value),
+          documentType: drift.Value(DocumentType.thermalReceipt.value),
+        ),
+      );
+      await db.upsertLocalSaleItems(
+        _cart.map(
+          (c) => LocalSaleItemsCompanion.insert(
+            id: 'pending_item_${pendingSaleId}_${c.productId}',
+            saleId: pendingSaleId,
+            productId: c.productId,
+            quantity: c.quantity,
+            unitPrice: c.unitPrice,
+            total: c.total,
+            createdAt: isoNow,
+          ),
+        ),
+      );
+
+      for (final c in _cart) {
+        final current = stockByProductId[c.productId] ?? 0;
+        final newQty = (current - c.quantity).clamp(0, 0x7FFFFFFF);
+        await db.upsertInventory(widget.storeId, c.productId, newQty, isoNow);
+      }
+
+      if (!mounted) return;
+      ref.invalidate(inventoryQuantitiesStreamProvider(widget.storeId));
+      final receipt = ReceiptTicketData(
+        storeName: store.name,
+        storeAddress: store.address,
+        storePhone: store.phone,
+        saleNumber: '— (hors ligne)',
+        items: _cart
+            .map(
+              (c) => ReceiptItemData(
+                name: c.name,
+                quantity: c.quantity,
+                unitPrice: c.unitPrice,
+                total: c.total,
+              ),
+            )
+            .toList(),
+        subtotal: _subtotal,
+        discount: _discount,
+        total: _total,
+        paymentMethod: _paymentMethod == PaymentMethod.cash
+            ? 'Espèces'
+            : (_paymentMethod == PaymentMethod.card ? 'Carte' : 'Mobile money'),
+        amountReceived:
+            _paymentMethod == PaymentMethod.cash &&
+                _amountReceivedTouched &&
+                _amountReceived > 0
+            ? _amountReceived
+            : null,
+        change:
+            _paymentMethod == PaymentMethod.cash && _amountReceived >= _total
+            ? _amountReceived - _total
+            : null,
+      );
+      setState(() {
+        _cart = [];
+        _discount = 0;
+        _amountReceived = 0;
+        _amountReceivedTouched = false;
+        _creating = false;
+        _receiptData = receipt;
+      });
+      _discountController.clear();
+      _amountReceivedController.clear();
+      if (MediaQuery.sizeOf(context).width < 900) Navigator.of(context).pop();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showReceiptIfNeeded());
+      Future.microtask(() => _refreshSync());
+      AppToast.success(context, successMessage);
+    }
+
+    try {
+      final payments = _buildPayments();
+      if (!isOnline) {
+        try {
+          await saveOfflineAndShowReceipt(
+            payments,
+            successMessage:
+                'Vente enregistrée localement. Synchronisation à la reconnexion.',
+          );
+          return;
+        } catch (e, st) {
+          AppErrorHandler.log(e, st);
+          if (!mounted) return;
+          setState(() => _creating = false);
+          AppToast.error(
+            context,
+            ErrorMapper.toMessage(
+              e,
+              fallback: 'Impossible d\'enregistrer la vente. Réessayez.',
+            ),
+          );
+          return;
+        }
+      }
+      final sale = await _salesRepo.create(
+        CreateSaleInput(
+          companyId: companyId,
+          storeId: widget.storeId,
+          customerId: null,
+          items: _cart
+              .map(
+                (c) => CreateSaleItemInput(
+                  productId: c.productId,
+                  quantity: c.quantity,
+                  unitPrice: c.unitPrice,
+                  discount: 0,
+                ),
+              )
+              .toList(),
+          discount: _discount,
+          payments: payments,
+          saleMode: SaleMode.quickPos,
+          documentType: DocumentType.thermalReceipt,
+        ),
+        userId,
+      );
+      if (!mounted) return;
+      try {
+        await ref.read(salesOfflineRepositoryProvider).upsertSale(sale);
+      } catch (e2, st2) {
+        AppErrorHandler.log(e2, st2);
+        // Vente d?j? cr??e c?t? serveur ; on continue pour afficher le ticket
+      }
+      if (!mounted) return;
+      ref.invalidate(
+        salesStreamProvider((companyId: companyId, storeId: widget.storeId)),
+      );
+      final receipt = ReceiptTicketData(
+        storeName: store.name,
+        storeAddress: store.address,
+        storePhone: store.phone,
+        saleNumber: sale.saleNumber,
+        items: _cart
+            .map(
+              (c) => ReceiptItemData(
+                name: c.name,
+                quantity: c.quantity,
+                unitPrice: c.unitPrice,
+                total: c.total,
+              ),
+            )
+            .toList(),
+        subtotal: _subtotal,
+        discount: _discount,
+        total: _total,
+        paymentMethod: _paymentMethod == PaymentMethod.cash
+            ? 'Espèces'
+            : (_paymentMethod == PaymentMethod.card ? 'Carte' : 'Mobile money'),
+        amountReceived:
+            _paymentMethod == PaymentMethod.cash &&
+                _amountReceivedTouched &&
+                _amountReceived > 0
+            ? _amountReceived
+            : null,
+        change:
+            _paymentMethod == PaymentMethod.cash && _amountReceived >= _total
+            ? _amountReceived - _total
+            : null,
+      );
+      setState(() {
+        _cart = [];
+        _discount = 0;
+        _amountReceived = 0;
+        _amountReceivedTouched = false;
+        _creating = false;
+        _receiptData = receipt;
+      });
+      _discountController.clear();
+      _amountReceivedController.clear();
+      if (MediaQuery.sizeOf(context).width < 900) Navigator.of(context).pop();
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showReceiptIfNeeded(),
+      );
+      AppToast.success(
+        context,
+        'Vente #${sale.saleNumber} enregistrée. Total: ${formatCurrency(sale.total)}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      if (ErrorMapper.isNetworkError(e)) {
+        try {
+          await saveOfflineAndShowReceipt(
+            _buildPayments(),
+            successMessage:
+                'Connexion perdue. Vente enregistrée localement. Synchronisation à la reconnexion.',
+          );
+          return;
+        } catch (e2, st2) {
+          AppErrorHandler.log(e2, st2);
+          if (!mounted) return;
+          setState(() => _creating = false);
+          AppToast.error(
+            context,
+            ErrorMapper.toMessage(
+              e2,
+              fallback:
+                  'Impossible d\'enregistrer la vente en local. Réessayez.',
+            ),
+          );
+          return;
+        }
+      } else {
+        setState(() => _creating = false);
+        AppErrorHandler.show(context, e);
+      }
+    }
+  }
+
+  void _showReceiptIfNeeded() {
+    final data = _receiptData;
+    if (data == null || !mounted || !context.mounted) return;
+    final posSettings = context.read<PosCartSettingsProvider>();
+    if (posSettings.posQuickAutoPrint) {
+      final ticket = data;
+      setState(() => _receiptData = null);
+      unawaited(
+        ReceiptThermalPrintService.printReceipt(ticket)
+            .then((_) {
+              if (mounted) {
+                AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
+              }
+            })
+            .catchError((Object e) {
+              if (mounted) {
+                AppErrorHandler.show(
+                  context,
+                  e,
+                  fallback:
+                      'Impossible d\'imprimer le ticket. Vérifiez l\'imprimante.',
+                );
+              }
+            }),
+      );
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => ReceiptTicketDialog(
+        data: data,
+        // Sync + unawaited : l’impression ne bloque ni le dialog ni la caisse.
+        onPrint: () {
+          if (dialogCtx.mounted) {
+            Navigator.of(dialogCtx).pop();
+          }
+          if (mounted) {
+            AppToast.info(context, 'Impression en cours...');
+          }
+          unawaited(
+            ReceiptThermalPrintService.printReceipt(data)
+                .then((_) {
+                  if (mounted) {
+                    AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
+                  }
+                })
+                .catchError((Object e) {
+                  if (mounted) {
+                    AppErrorHandler.show(
+                      context,
+                      e,
+                      fallback: 'Impossible d\'imprimer le ticket.',
+                    );
+                  }
+                }),
+          );
+        },
+      ),
+    ).then((_) {
+      if (mounted) setState(() => _receiptData = null);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isNarrow = MediaQuery.sizeOf(context).width < 900;
+    final permissions = context.watch<PermissionsProvider>();
+    if (!permissions.hasLoaded) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Caisse rapide')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!permissions.hasPermission(Permissions.salesCreate)) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Caisse rapide')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.lock_rounded,
+                  size: 64,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Vous n'avez pas l'autorisation d'effectuer des ventes (caisse rapide).",
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () => context.go(AppRoutes.stores),
+                  icon: const Icon(Icons.list_rounded),
+                  label: const Text('Retour aux boutiques'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final productsAsync = ref.watch(productsStreamProvider(companyId ?? ''));
+    final stockAsync = ref.watch(
+      inventoryQuantitiesStreamProvider(widget.storeId),
+    );
+    final storesAsync = ref.watch(storesStreamProvider(companyId ?? ''));
+
+    final products = productsAsync.value ?? [];
+    final stockByProductId = stockAsync.value ?? {};
+    final stores = storesAsync.value ?? [];
+    Store? store;
+    try {
+      store = stores.firstWhere((s) => s.id == widget.storeId);
+    } catch (_) {}
+
+    final loading =
+        productsAsync.isLoading ||
+        stockAsync.isLoading ||
+        (store == null &&
+            (storesAsync.isLoading ||
+                (storesAsync.hasValue && stores.isNotEmpty)));
+    String? error;
+    if (companyId == null || widget.storeId.isEmpty) {
+      error = 'Boutique non sélectionnée.';
+    } else if (store == null && storesAsync.hasValue && stores.isNotEmpty) {
+      error = 'Boutique introuvable.';
+    } else if (productsAsync.hasError) {
+      error = AppErrorHandler.toUserMessage(productsAsync.error!);
+    } else if (store == null && !storesAsync.isLoading && stores.isEmpty) {
+      error = 'Aucune boutique. Connectez-vous une fois pour synchroniser.';
+    }
+
+    if (!_syncTriggeredOnce &&
+        companyId != null &&
+        products.isEmpty &&
+        !productsAsync.isLoading) {
+      _syncTriggeredOnce = true;
+      Future.microtask(() => _refreshSync());
+    }
+
+    if (loading) {
+      return Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: theme.colorScheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Chargement...',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (error != null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Caisse rapide')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.storefront_rounded,
+                  size: 64,
+                  color: theme.colorScheme.error,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  error,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () => context.go(AppRoutes.stores),
+                  icon: const Icon(Icons.list_rounded),
+                  label: const Text('Choisir une boutique'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final filtered = _filteredProducts(products, stockByProductId);
+    final categories =
+        ref.watch(categoriesStreamProvider(companyId ?? '')).valueOrNull ?? [];
+    final auth = context.read<AuthProvider>();
+    final caissierName =
+        auth.profile?.fullName ?? auth.user?.email ?? 'Caissier';
+
+    final isOnline = ConnectivityService.instance.isOnline;
+    return Scaffold(
+      body: Column(
+        children: [
+          _buildPosHeader(store!, caissierName),
+          if (!isOnline) _buildOfflineBanner(),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!isNarrow)
+                  Expanded(
+                    flex: 65,
+                    child: PosQuickLeftZone(
+                      searchController: _searchController,
+                      selectedCategoryId: _selectedCategoryId,
+                      categories: categories,
+                      filteredProducts: filtered,
+                      stockByProductId: stockByProductId,
+                      onSearchChanged: (_) => setState(() {}),
+                      onSearchSubmitted: (value) =>
+                          _addByBarcode(value, products, stockByProductId),
+                      onCategorySelected: (id) =>
+                          setState(() => _selectedCategoryId = id),
+                      onAddToCart: (p) => _addToCart(p, stockByProductId),
+                      onScanPressed: () =>
+                          _openBarcodeScanner(products, stockByProductId),
+                      onRefresh: _refreshSync,
+                    ),
+                  ),
+                if (!isNarrow)
+                  Expanded(
+                    flex: 35,
+                    child: PosQuickRightZone(
+                      cartItemCount: _cartItemCount,
+                      cartTiles: _buildQuickCartTiles(stockByProductId),
+                      footer: _buildRightZoneFooter(store, stockByProductId),
+                    ),
+                  ),
+                if (isNarrow)
+                  Expanded(
+                    child: PosQuickLeftZone(
+                      searchController: _searchController,
+                      selectedCategoryId: _selectedCategoryId,
+                      categories: categories,
+                      filteredProducts: filtered,
+                      stockByProductId: stockByProductId,
+                      onSearchChanged: (_) => setState(() {}),
+                      onSearchSubmitted: (value) =>
+                          _addByBarcode(value, products, stockByProductId),
+                      onCategorySelected: (id) =>
+                          setState(() => _selectedCategoryId = id),
+                      onAddToCart: (p) => _addToCart(p, stockByProductId),
+                      onScanPressed: () =>
+                          _openBarcodeScanner(products, stockByProductId),
+                      onRefresh: _refreshSync,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (isNarrow) _buildMobileBottomBar(theme, store, stockByProductId),
+        ],
+      ),
+    );
+  }
+
+  /// Banni?re discr?te quand hors ligne : les ventes sont enregistr?es localement.
+  Widget _buildOfflineBanner() {
+    return Material(
+      color: Colors.amber.shade700,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.cloud_off_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Hors ligne : les ventes seront enregistrées localement et synchronisées à la reconnexion.',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Header ~60px, fond orange #F97316, texte blanc. Sur mobile: layout compact pour ?viter overflow.
+  Widget _buildPosHeader(Store store, String caissierName) {
+    final isNarrow = MediaQuery.sizeOf(context).width < 600;
+    return Container(
+      height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(color: PosQuickColors.orangePrincipal),
+      child: isNarrow
+          ? _buildPosHeaderMobile(store, caissierName)
+          : _buildPosHeaderDesktop(store, caissierName),
+    );
+  }
+
+  Widget _buildPosHeaderDesktop(Store store, String caissierName) {
+    return Row(
+      children: [
+        Icon(Icons.store_rounded, color: Colors.white, size: 28),
+        const SizedBox(width: 10),
+        Text(
+          'POS Caisse Rapide',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(width: 24),
+        Text(
+          'Boutique : ${store.name}',
+          style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13),
+        ),
+        const SizedBox(width: 16),
+        Text(
+          'Caissier : $caissierName',
+          style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13),
+        ),
+        const SizedBox(width: 16),
+        Text(
+          'Heure : $_currentTime',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const Spacer(),
+        IconButton(
+          onPressed: () => _openSalesHistory(),
+          icon: const Icon(
+            Icons.history_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
+          tooltip: 'Historique ventes',
+        ),
+        IconButton(
+          onPressed: () => _openPosSettings(store),
+          icon: const Icon(
+            Icons.settings_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
+          tooltip: 'Paramètres',
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 24),
+          onPressed: () => context.go(AppRoutes.stores),
+          tooltip: 'Quitter POS',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPosHeaderMobile(Store store, String caissierName) {
+    return Row(
+      children: [
+        Icon(Icons.store_rounded, color: Colors.white, size: 24),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'POS Caisse Rapide',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              Text(
+                '${store.name} • $_currentTime',
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 11,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          onPressed: () => _openSalesHistory(),
+          icon: const Icon(
+            Icons.history_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
+          tooltip: 'Historique',
+          style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+        IconButton(
+          onPressed: () => _openPosSettings(store),
+          icon: const Icon(
+            Icons.settings_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
+          tooltip: 'Paramètres',
+          style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 24),
+          onPressed: () => context.go(AppRoutes.stores),
+          tooltip: 'Quitter',
+          style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+        ),
+      ],
+    );
+  }
+
+  /// Ouvre la page Ventes en filtrant sur la boutique courante.
+  void _openSalesHistory() {
+    context.read<CompanyProvider>().setCurrentStoreId(widget.storeId);
+    context.read<SalesPageProvider>().setFilters(storeId: widget.storeId);
+    context.read<SalesPageProvider>().invalidate();
+    context.go(AppRoutes.sales);
+  }
+
+  /// Affiche les param?tres caisse (boutique en lecture seule ; impression automatique modifiable).
+  void _openPosSettings(Store store) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.paddingOf(ctx).bottom),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Paramètres caisse',
+                  style: Theme.of(
+                    ctx,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 16),
+                _infoRow(ctx, 'Boutique', store.name),
+                const SizedBox(height: 8),
+                _infoRow(
+                  ctx,
+                  'Remise autorisée',
+                  store.posDiscountEnabled ? 'Oui' : 'Non',
+                ),
+                const SizedBox(height: 8),
+                _infoRow(ctx, 'Devise', store.currency ?? 'XOF'),
+                const SizedBox(height: 16),
+                Builder(
+                  builder: (_) {
+                    final posCart = ctx.watch<PosCartSettingsProvider>();
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Impression automatique',
+                                style: Theme.of(ctx).textTheme.bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                              Text(
+                                'Après chaque vente, ne pas afficher le dialogue ticket (gain de temps).',
+                                style: Theme.of(ctx).textTheme.bodySmall
+                                    ?.copyWith(
+                                      color: Theme.of(
+                                        ctx,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: posCart.posQuickAutoPrint,
+                          onChanged: (value) =>
+                              posCart.setPosQuickAutoPrint(value),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Les autres paramètres de la boutique sont gérés par l\'administrateur.',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Fermer'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(BuildContext context, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 140,
+          child: Text(
+            '$label :',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+        Expanded(
+          child: Text(value, style: Theme.of(context).textTheme.bodyMedium),
+        ),
+      ],
+    );
+  }
+
+  /// Ouvre le scan cam?ra (Android/iOS/Web). Sur Windows/Linux, indique d'utiliser le champ + lecteur USB.
+  void _openBarcodeScanner(
+    List<Product> products,
+    Map<String, int> stockByProductId,
+  ) {
+    final platform = Theme.of(context).platform;
+    if (platform == TargetPlatform.windows ||
+        platform == TargetPlatform.linux) {
+      AppToast.info(
+        context,
+        'Sur PC, utilisez le champ de recherche avec un lecteur de code-barres USB.',
+      );
+      return;
+    }
+    showBarcodeScannerDialog(
+      context: context,
+      onDetected: (code) => _addByBarcode(code, products, stockByProductId),
+    );
+  }
+
+  List<Widget> _buildQuickCartTiles(Map<String, int> stockByProductId) {
+    return _cart
+        .map(
+          (c) => PosQuickCartTile(
+            item: c,
+            stock: stockByProductId[c.productId] ?? 0,
+            onQtyDelta: (delta) =>
+                _updateQty(c.productId, delta, stockByProductId),
+            onRemove: () =>
+                _updateQty(c.productId, -c.quantity, stockByProductId),
+          ),
+        )
+        .toList();
+  }
+
+  Widget _buildRightZoneFooter(
+    Store? store,
+    Map<String, int> stockByProductId,
+  ) {
+    final showDiscount = store?.posDiscountEnabled ?? false;
+    final isCash = _paymentMethod == PaymentMethod.cash;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: PosQuickColors.fondPrincipal,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: PosQuickColors.bordure),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Sous-total',
+                    style: TextStyle(color: PosQuickColors.textePrincipal),
+                  ),
+                  Text(
+                    formatCurrency(_subtotal),
+                    style: const TextStyle(
+                      color: PosQuickColors.textePrincipal,
+                    ),
+                  ),
+                ],
+              ),
+              if (showDiscount || _discount > 0) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Remise',
+                      style: TextStyle(color: PosQuickColors.textePrincipal),
+                    ),
+                    Text(
+                      formatCurrency(_discount),
+                      style: const TextStyle(
+                        color: PosQuickColors.textePrincipal,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'TOTAL',
+                    style: TextStyle(
+                      color: PosQuickColors.textePrincipal,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    formatCurrency(_total),
+                    style: const TextStyle(
+                      color: PosQuickColors.orangePrincipal,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 22,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Expanded(child: _paymentButton('CASH', PaymentMethod.cash)),
+              const SizedBox(width: 8),
+              Expanded(child: _paymentButton('CARTE', PaymentMethod.card)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _paymentButton('MOBILE', PaymentMethod.mobile_money),
+              ),
+            ],
+          ),
+        ),
+        if (showDiscount)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: TextField(
+              controller: _discountController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (v) {
+                final n = double.tryParse(v.replaceAll(',', '.')) ?? 0;
+                setState(() => _discount = n.clamp(0, double.infinity));
+              },
+              decoration: InputDecoration(
+                labelText: 'Remise',
+                hintText: '0',
+                filled: true,
+                fillColor: PosQuickColors.fondPrincipal,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+          ),
+        if (isCash) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: TextField(
+              controller: _amountReceivedController,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              onChanged: (v) {
+                setState(() {
+                  _amountReceivedTouched = true;
+                  _amountReceived =
+                      (double.tryParse(v.replaceAll(',', '.')) ?? 0).clamp(
+                        0,
+                        double.infinity,
+                      );
+                });
+              },
+              decoration: InputDecoration(
+                labelText: 'Montant reçu',
+                hintText: _total > 0 ? formatCurrency(_total) : '0',
+                filled: true,
+                fillColor: PosQuickColors.fondPrincipal,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+          ),
+          if (_amountReceivedTouched && _amountReceived > 0)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Monnaie à rendre',
+                    style: TextStyle(color: PosQuickColors.textePrincipal),
+                  ),
+                  Text(
+                    _amountReceived >= _total
+                        ? formatCurrency(_amountReceived - _total)
+                        : '—',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: _amountReceived >= _total
+                          ? PosQuickColors.orangePrincipal
+                          : Colors.red,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => setState(() {
+                    _cart = [];
+                    _discount = 0;
+                    _amountReceived = 0;
+                    _amountReceivedTouched = false;
+                    _discountController.clear();
+                    _amountReceivedController.clear();
+                  }),
+                  style: OutlinedButton.styleFrom(
+                    backgroundColor: PosQuickColors.fondSecondaire,
+                    foregroundColor: PosQuickColors.textePrincipal,
+                    side: const BorderSide(color: PosQuickColors.bordure),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: const Text('Annuler vente'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: FilledButton.icon(
+                  onPressed:
+                      (_canPay &&
+                          _stockWarnings(stockByProductId).isEmpty &&
+                          !_creating)
+                      ? () => _handlePayment(store, stockByProductId)
+                      : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: PosQuickColors.orangePrincipal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: _creating
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.print_rounded, size: 22),
+                  label: Text(
+                    _creating ? 'Enregistrement...' : 'VALIDER ET IMPRIMER',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Recherche un produit par code-barres (exact) et l'ajoute au panier.
+  void _addByBarcode(
+    String code,
+    List<Product> products,
+    Map<String, int> stockByProductId,
+  ) {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) return;
+    Product? product;
+    try {
+      product = products.firstWhere(
+        (p) => p.barcode != null && p.barcode!.trim() == trimmed && p.isActive,
+      );
+    } catch (_) {}
+    if (product == null) {
+      AppToast.error(context, 'Aucun produit avec ce code-barres.');
+      return;
+    }
+    _addToCart(product, stockByProductId);
+    _searchController.clear();
+    setState(() {});
+  }
+
+  Widget _paymentButton(String label, PaymentMethod method) {
+    final selected = _paymentMethod == method;
+    return FilledButton(
+      onPressed: () => setState(() => _paymentMethod = method),
+      style: FilledButton.styleFrom(
+        backgroundColor: selected
+            ? PosQuickColors.orangePrincipal
+            : PosQuickColors.fondSecondaire,
+        foregroundColor: selected
+            ? Colors.white
+            : PosQuickColors.textePrincipal,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  void _openCartSheet(Store? store, Map<String, int> stockByProductId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.sizeOf(context).height * 0.85,
+        decoration: const BoxDecoration(
+          color: PosQuickColors.fondSecondaire,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.shopping_cart_rounded,
+                        color: PosQuickColors.orangePrincipal,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: PosQuickColors.textePrincipal,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (_cart.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 32),
+                        child: Center(
+                          child: Text(
+                            'Panier vide',
+                            style: TextStyle(
+                              color: PosQuickColors.textePrincipal,
+                            ),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      ..._buildQuickCartTiles(stockByProductId).map(
+                        (w) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: w,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'TOTAL',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: PosQuickColors.textePrincipal,
+                            ),
+                          ),
+                          Text(
+                            formatCurrency(_total),
+                            style: const TextStyle(
+                              color: PosQuickColors.orangePrincipal,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 52,
+                        child: FilledButton.icon(
+                          onPressed:
+                              (_canPay &&
+                                  _stockWarnings(stockByProductId).isEmpty &&
+                                  !_creating)
+                              ? () async {
+                                  await _handlePayment(store, stockByProductId);
+                                  if (context.mounted)
+                                    Navigator.of(context).pop();
+                                }
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: PosQuickColors.orangePrincipal,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                          icon: _creating
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.print_rounded),
+                          label: Text(
+                            _creating
+                                ? 'Enregistrement...'
+                                : 'VALIDER ET IMPRIMER',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileBottomBar(
+    ThemeData theme,
+    Store? store,
+    Map<String, int> stockByProductId,
+  ) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        12,
+        16,
+        12 + MediaQuery.paddingOf(context).bottom,
+      ),
+      decoration: const BoxDecoration(
+        color: PosQuickColors.fondPrincipal,
+        border: Border(top: BorderSide(color: PosQuickColors.bordure)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _openCartSheet(store, stockByProductId),
+                borderRadius: BorderRadius.circular(12),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.shopping_cart_rounded,
+                          color: PosQuickColors.orangePrincipal,
+                          size: 26,
+                        ),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text(
+                              'Panier',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: PosQuickColors.textePrincipal,
+                              ),
+                            ),
+                            Text(
+                              '$_cartItemCount article${_cartItemCount != 1 ? 's' : ''} • ${formatCurrency(_total)}',
+                              style: TextStyle(
+                                color: PosQuickColors.textePrincipal
+                                    .withOpacity(0.7),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            height: 48,
+            child: FilledButton(
+              onPressed: () => _openCartSheet(store, stockByProductId),
+              style: FilledButton.styleFrom(
+                backgroundColor: PosQuickColors.orangePrincipal,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Voir / Payer'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

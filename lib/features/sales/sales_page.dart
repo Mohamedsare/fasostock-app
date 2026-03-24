@@ -1,0 +1,1036 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'dart:typed_data';
+import 'dart:convert';
+import '../../../core/config/routes.dart';
+import '../../../core/constants/permissions.dart';
+import '../../../core/errors/app_error_handler.dart';
+import '../../../core/utils/app_toast.dart';
+import '../../../data/models/sale.dart';
+import '../../../data/models/store.dart';
+import '../../../data/repositories/sales_repository.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/company_provider.dart';
+import '../../../providers/offline_providers.dart';
+import '../../../providers/permissions_provider.dart';
+import '../../../providers/sales_page_provider.dart';
+import '../../../shared/utils/format_currency.dart';
+import '../../../shared/widgets/company_load_error_screen.dart';
+import '../../../shared/utils/share_csv.dart';
+import 'utils/sales_csv.dart';
+import 'widgets/sale_detail_dialog.dart';
+
+const _statusLabels = {
+  SaleStatus.draft: 'Brouillon',
+  SaleStatus.completed: 'Complétée',
+  SaleStatus.cancelled: 'Annulée',
+  SaleStatus.refunded: 'Remboursée',
+};
+
+/// Type document pour la liste : priorité à document_type (stocké en local), puis sale_mode. Sans info → Thermique.
+bool _isA4Invoice(Sale s) {
+  if (s.documentType == DocumentType.a4Invoice) return true;
+  if (s.documentType == DocumentType.thermalReceipt) return false;
+  if (s.saleMode == SaleMode.invoicePos) return true;
+  if (s.saleMode == SaleMode.quickPos) return false;
+  return false; // champs null (anciennes ventes ou pas encore synchronisées)
+}
+
+Widget _documentTypeChip(Sale s, BuildContext context) {
+  final theme = Theme.of(context);
+  final isA4 = _isA4Invoice(s);
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: isA4
+          ? theme.colorScheme.primaryContainer.withOpacity(0.8)
+          : theme.colorScheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          isA4 ? Icons.description_rounded : Icons.receipt_long_rounded,
+          size: 14,
+          color: isA4 ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          isA4 ? 'A4' : 'Thermique',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: isA4 ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+String _formatDateTime(String iso) {
+  try {
+    final d = DateTime.parse(iso);
+    return DateFormat('dd/MM/yyyy HH:mm', 'fr_FR').format(d.toLocal());
+  } catch (_) {
+    return iso;
+  }
+}
+
+/// Page Ventes — design pro : en-tête, cartes d’action, filtres, tableau/liste.
+class SalesPage extends ConsumerStatefulWidget {
+  const SalesPage({super.key});
+
+  @override
+  ConsumerState<SalesPage> createState() => _SalesPageState();
+}
+
+const int _salesPageSize = 20;
+
+class _SalesPageState extends ConsumerState<SalesPage> {
+  final SalesRepository _repo = SalesRepository();
+  bool _syncTriggeredForEmpty = false;
+  int _currentPage = 0;
+  String _lastFilterKey = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadCompaniesIfNeeded();
+    });
+  }
+
+  void _loadCompaniesIfNeeded() {
+    final auth = context.read<AuthProvider>();
+    final company = context.read<CompanyProvider>();
+    if (auth.user != null && company.companies.isEmpty && !company.loading) {
+      final userId = auth.user?.id;
+      if (userId != null) company.loadCompanies(userId);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final currentStoreId = context.read<CompanyProvider>().currentStoreId;
+    final provider = context.read<SalesPageProvider>();
+    if (companyId != null) {
+      if (provider.filterStoreId.isEmpty && currentStoreId != null) {
+        provider.setFilters(storeId: currentStoreId);
+      }
+      provider.loadIfNeeded(companyId);
+    }
+  }
+
+  Future<void> _refresh() async {
+    final auth = context.read<AuthProvider>();
+    final company = context.read<CompanyProvider>();
+    final userId = auth.user?.id;
+    if (userId != null) {
+      try {
+        await ref.read(syncServiceV2Provider).sync(userId: userId, companyId: company.currentCompanyId, storeId: company.currentStoreId);
+      } catch (_) {}
+    }
+  }
+
+  void _openDetail(String saleId) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => SaleDetailDialog(
+        saleId: saleId,
+        onClose: () => Navigator.of(ctx).pop(),
+      ),
+    );
+  }
+
+  Future<void> _cancelSale(Sale sale) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Annuler cette vente ?'),
+        content: const Text('Le stock sera rétabli. Cette action est irréversible.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            child: const Text('Oui, annuler'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final storeId = context.read<SalesPageProvider>().filterStoreId;
+    try {
+      await _repo.cancel(sale.id);
+      if (!mounted) return;
+      await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
+      if (!mounted) return;
+      ref.invalidate(salesStreamProvider((
+        companyId: companyId ?? '',
+        storeId: storeId.isEmpty ? null : storeId,
+      )));
+      Future.microtask(() => _refresh());
+      if (mounted) AppToast.success(context, 'Vente annulée');
+    } catch (e) {
+      if (mounted) AppErrorHandler.show(context, e);
+    }
+  }
+
+  void _exportCsv(List<Sale> sales) {
+    if (sales.isEmpty) return;
+    final csv = salesToCsv(sales);
+    final date = DateTime.now().toIso8601String().substring(0, 10);
+    final filename = 'ventes-$date.csv';
+    final bytes = Uint8List.fromList(utf8.encode(csv));
+    saveCsvFile(filename: filename, bytes: bytes).then((saved) {
+      if (!mounted) return;
+      if (saved) AppToast.success(context, 'CSV enregistré');
+    });
+  }
+
+  List<Sale> _applyFilters(List<Sale> sales, SalesPageProvider provider) {
+    var list = sales;
+    if (provider.filterStatus != null) list = list.where((s) => s.status == provider.filterStatus).toList();
+    if (provider.filterFrom.isNotEmpty) list = list.where((s) => s.createdAt.compareTo(provider.filterFrom) >= 0).toList();
+    if (provider.filterTo.isNotEmpty) list = list.where((s) => s.createdAt.compareTo('${provider.filterTo}T23:59:59.999Z') <= 0).toList();
+    return list;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final company = context.watch<CompanyProvider>();
+    final permissions = context.watch<PermissionsProvider>();
+    final provider = context.watch<SalesPageProvider>();
+    final companyId = company.currentCompanyId;
+    final canAccessSales = permissions.hasPermission(Permissions.salesView) ||
+        permissions.hasPermission(Permissions.salesCreate) ||
+        permissions.hasPermission(Permissions.salesInvoiceA4);
+    if (permissions.hasLoaded && !canAccessSales) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Ventes')),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.lock_rounded, size: 64, color: Theme.of(context).colorScheme.error),
+              const SizedBox(height: 16),
+              Text("Vous n'avez pas accès à cette page.", textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyLarge),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final storeIdForStream = provider.filterStoreId.isEmpty ? null : provider.filterStoreId;
+    final asyncSales = ref.watch(salesStreamProvider((companyId: companyId ?? '', storeId: storeIdForStream)));
+    final sales = asyncSales.valueOrNull ?? [];
+    final filtered = _applyFilters(sales, provider);
+    final totalCount = filtered.length;
+    final pageCount = totalCount == 0 ? 0 : ((totalCount - 1) ~/ _salesPageSize) + 1;
+    final filterKey = '${provider.filterStoreId}|${provider.filterStatus}|${provider.filterFrom}|${provider.filterTo}';
+    if (filterKey != _lastFilterKey) {
+      _lastFilterKey = filterKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _currentPage = 0);
+      });
+    }
+    final effectivePage = pageCount > 0 && _currentPage >= pageCount ? pageCount - 1 : _currentPage;
+    if (effectivePage != _currentPage) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _currentPage = effectivePage);
+      });
+    }
+    final paginatedList = filtered.skip(effectivePage * _salesPageSize).take(_salesPageSize).toList();
+    final loading = asyncSales.isLoading;
+    final error = asyncSales.hasError && asyncSales.error != null
+        ? AppErrorHandler.toUserMessage(asyncSales.error)
+        : null;
+
+    final currentStoreId = company.currentStoreId;
+    final stores = company.stores;
+    Store? currentStore;
+    try {
+      currentStore = currentStoreId != null ? stores.firstWhere((s) => s.id == currentStoreId) : null;
+    } catch (_) {}
+    final isWide = MediaQuery.sizeOf(context).width >= 900;
+
+    if (company.loading && company.companies.isEmpty) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (company.loadError != null && company.companies.isEmpty) {
+      return CompanyLoadErrorScreen(
+        message: company.loadError!,
+        title: 'Ventes',
+        appBar: isWide ? null : AppBar(title: const Text('Ventes')),
+      );
+    }
+    if (companyId == null) {
+      return Scaffold(
+        appBar: isWide ? null : AppBar(title: const Text('Ventes')),
+        body: const Center(child: Text('Aucune entreprise. Contactez l’administrateur.')),
+      );
+    }
+
+    if (sales.isEmpty && !loading && error == null && !_syncTriggeredForEmpty) {
+      _syncTriggeredForEmpty = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _refresh(); });
+    }
+    if (sales.isNotEmpty) _syncTriggeredForEmpty = false;
+
+    final description = currentStore != null ? 'Ventes — ${currentStore.name}' : 'Sélectionnez une boutique';
+
+    return Scaffold(
+      appBar: isWide ? null : AppBar(title: const Text('Ventes')),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.symmetric(horizontal: isWide ? 32 : 20, vertical: isWide ? 28 : 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeader(context, description, filtered.length, filtered),
+              const SizedBox(height: 24),
+              _buildActions(context, currentStoreId, filtered.length, filtered),
+              const SizedBox(height: 24),
+              _buildFiltersCard(context, stores, provider),
+              const SizedBox(height: 24),
+              if (error != null) ...[
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        const SizedBox(height: 12),
+                        TextButton.icon(
+                          onPressed: _refresh,
+                          icon: const Icon(Icons.refresh_rounded, size: 18),
+                          label: const Text('Réessayer'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+              ],
+              if (loading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (filtered.isEmpty)
+                _buildEmptyState(context)
+              else ...[
+                _buildSalesList(context, isWide, paginatedList),
+                if (pageCount > 1) ...[
+                  const SizedBox(height: 16),
+                  _buildPagination(context, totalCount, pageCount, effectivePage),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, String description, int salesCount, List<Sale> salesForExport) {
+    final theme = Theme.of(context);
+    final narrow = MediaQuery.sizeOf(context).width < 560;
+    final permissions = context.read<PermissionsProvider>();
+    final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
+    final filledBtn = canCreateSale && context.read<CompanyProvider>().currentStoreId != null
+        ? FilledButton.icon(
+            onPressed: () {
+              final id = context.read<CompanyProvider>().currentStoreId;
+              if (id != null) context.go(AppRoutes.posQuick(id));
+            },
+            icon: const Icon(Icons.add_rounded, size: 20),
+            label: const Text('Nouvelle vente'),
+          )
+        : null;
+    final actionWidgets = [
+      OutlinedButton.icon(
+        onPressed: salesCount == 0 ? null : () => _exportCsv(salesForExport),
+        icon: const Icon(Icons.download_rounded, size: 18),
+        label: const Text('Enregistrer CSV'),
+      ),
+      if (filledBtn != null) filledBtn,
+    ];
+    return narrow
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Ventes',
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.4,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Wrap(spacing: 8, runSpacing: 8, children: actionWidgets),
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Ventes',
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: actionWidgets,
+                ),
+              ),
+            ],
+          );
+  }
+
+  Widget _buildActions(BuildContext context, String? currentStoreId, int salesCount, List<Sale> salesForExport) {
+    final permissions = context.read<PermissionsProvider>();
+    final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
+    final canInvoiceA4 = permissions.hasPermission(Permissions.salesInvoiceA4);
+    final width = MediaQuery.sizeOf(context).width;
+    final isMobile = width < 600;
+    const double gap = 12.0;
+
+    final cards = <Widget>[
+      _ActionCard(
+        icon: Icons.point_of_sale_rounded,
+        title: 'Caisse rapide',
+        subtitle: 'Ticket thermique',
+        accent: true,
+        enabled: canCreateSale && currentStoreId != null,
+        onTap: canCreateSale && currentStoreId != null
+            ? () => context.go(AppRoutes.posQuick(currentStoreId))
+            : null,
+      ),
+      if (canInvoiceA4)
+        _ActionCard(
+          icon: Icons.description_rounded,
+          title: 'Facture A4',
+          subtitle: 'Vente détaillée',
+          accent: true,
+          enabled: currentStoreId != null,
+          onTap: currentStoreId != null
+              ? () => context.go(AppRoutes.pos(currentStoreId))
+              : null,
+        ),
+      _ActionCard(
+        icon: Icons.shopping_cart_rounded,
+        title: 'Historique des ventes',
+        subtitle: '$salesCount vente(s)',
+        accent: false,
+        enabled: true,
+        onTap: null,
+      ),
+    ];
+
+    if (isMobile) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < cards.length; i++) ...[
+            if (i > 0) const SizedBox(height: gap),
+            cards[i],
+          ],
+        ],
+      );
+    }
+
+    final spacing = width < 500 ? gap : 20.0;
+    return Row(
+      children: [
+        Expanded(child: cards[0]),
+        if (canInvoiceA4) ...[
+          SizedBox(width: spacing),
+          Expanded(child: cards[1]),
+        ],
+        SizedBox(width: spacing),
+        Expanded(child: cards.last),
+      ],
+    );
+  }
+
+  Widget _buildFiltersCard(BuildContext context, List<Store> stores, SalesPageProvider provider) {
+    final theme = Theme.of(context);
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final isMobileFilters = MediaQuery.sizeOf(context).width < 500;
+    final seenStoreIds = <String>{};
+    final distinctStores = stores.where((s) => seenStoreIds.add(s.id)).toList();
+    final storeValue = provider.filterStoreId.isNotEmpty &&
+            distinctStores.any((s) => s.id == provider.filterStoreId)
+        ? provider.filterStoreId
+        : null;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: EdgeInsets.all(isMobileFilters ? 16 : 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Filtres',
+              style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: isMobileFilters ? 0 : 12,
+              runSpacing: 16,
+              crossAxisAlignment: WrapCrossAlignment.end,
+              children: [
+                SizedBox(
+                  width: isMobileFilters ? double.infinity : 200,
+                  height: 56,
+                  child: DropdownButtonFormField<String>(
+                    value: storeValue,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      labelText: 'Boutique',
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Toutes boutiques')),
+                      ...distinctStores.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis))),
+                    ],
+                    onChanged: (v) {
+                      provider.setFilters(storeId: v ?? '');
+                      if (companyId != null) provider.load(companyId, force: true);
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: isMobileFilters ? double.infinity : 160,
+                  height: 56,
+                  child: DropdownButtonFormField<SaleStatus?>(
+                    value: provider.filterStatus,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      labelText: 'Statut',
+                    ),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Tous')),
+                      ...SaleStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(_statusLabels[s] ?? s.name))),
+                    ],
+                    onChanged: (v) {
+                      provider.setFilters(status: v);
+                      if (companyId != null) provider.load(companyId, force: true);
+                    },
+                  ),
+                ),
+                _DateChip(
+                  label: 'Du',
+                  value: provider.filterFrom,
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (d != null && mounted) {
+                      provider.setFilters(from: DateFormat('yyyy-MM-dd').format(d));
+                      if (companyId != null) provider.load(companyId, force: true);
+                    }
+                  },
+                ),
+                _DateChip(
+                  label: 'Au',
+                  value: provider.filterTo,
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: context,
+                      initialDate: DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (d != null && mounted) {
+                      provider.setFilters(to: DateFormat('yyyy-MM-dd').format(d));
+                      if (companyId != null) provider.load(companyId, force: true);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+        child: Column(
+          children: [
+            Icon(Icons.shopping_cart_outlined, size: 56, color: theme.colorScheme.outline),
+            const SizedBox(height: 16),
+            Text(
+              'Aucune vente',
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Créez une vente depuis le POS en sélectionnant une boutique.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            if (context.read<CompanyProvider>().currentStoreId != null) ...[
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: () {
+                  final id = context.read<CompanyProvider>().currentStoreId;
+                  if (id != null) context.go(AppRoutes.posQuick(id));
+                },
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Ouvrir la caisse'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesList(BuildContext context, bool isWide, List<Sale> sales) {
+    if (isWide) {
+      return _SalesTable(
+        sales: sales,
+        onView: _openDetail,
+        onCancel: _cancelSale,
+      );
+    }
+    return _SalesCardList(
+      sales: sales,
+      onView: _openDetail,
+      onCancel: _cancelSale,
+    );
+  }
+
+  Widget _buildPagination(BuildContext context, int totalCount, int pageCount, int currentPageIndex) {
+    final theme = Theme.of(context);
+    final start = currentPageIndex * _salesPageSize + 1;
+    final end = (currentPageIndex + 1) * _salesPageSize;
+    final endClamped = end > totalCount ? totalCount : end;
+    final isNarrow = MediaQuery.sizeOf(context).width < 500;
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (!isNarrow)
+              Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Text(
+                  '$start – $endClamped sur $totalCount',
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+            IconButton.filled(
+              onPressed: currentPageIndex > 0 ? () => setState(() => _currentPage--) : null,
+              icon: const Icon(Icons.chevron_left_rounded, size: 26),
+              style: IconButton.styleFrom(
+                backgroundColor: currentPageIndex > 0 ? theme.colorScheme.primary : null,
+                foregroundColor: currentPageIndex > 0 ? theme.colorScheme.onPrimary : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Page ${currentPageIndex + 1} / $pageCount',
+              style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(width: 12),
+            IconButton.filled(
+              onPressed: currentPageIndex < pageCount - 1 ? () => setState(() => _currentPage++) : null,
+              icon: const Icon(Icons.chevron_right_rounded, size: 26),
+              style: IconButton.styleFrom(
+                backgroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.primary : null,
+                foregroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.onPrimary : null,
+              ),
+            ),
+            if (isNarrow) ...[
+              const SizedBox(width: 12),
+              Text(
+                '$start – $endClamped / $totalCount',
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionCard extends StatelessWidget {
+  const _ActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.accent,
+    required this.enabled,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool accent;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+    final padding = isMobile ? 16.0 : 24.0;
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: accent && enabled
+            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.4), width: 2)
+            : BorderSide.none,
+      ),
+      child: Material(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 88),
+            child: Padding(
+              padding: EdgeInsets.all(padding),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(isMobile ? 10 : 14),
+                    decoration: BoxDecoration(
+                      color: (accent && enabled ? theme.colorScheme.primary : theme.colorScheme.outline).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      icon,
+                      size: isMobile ? 28 : 32,
+                      color: accent && enabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  SizedBox(height: isMobile ? 10 : 14),
+                  Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: enabled ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DateChip extends StatelessWidget {
+  const _DateChip({required this.label, required this.value, required this.onTap});
+
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: theme.dividerColor),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            const SizedBox(width: 8),
+            Icon(Icons.calendar_today_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 8),
+            Text(value.isEmpty ? '—' : value, style: theme.textTheme.bodyMedium),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Color _statusColor(SaleStatus status, BuildContext context) {
+  switch (status) {
+    case SaleStatus.completed:
+      return const Color(0xFF059669);
+    case SaleStatus.cancelled:
+    case SaleStatus.refunded:
+      return const Color(0xFFDC2626);
+    case SaleStatus.draft:
+      return Theme.of(context).colorScheme.onSurfaceVariant;
+  }
+}
+
+class _SalesTable extends StatelessWidget {
+  const _SalesTable({
+    required this.sales,
+    required this.onView,
+    required this.onCancel,
+  });
+
+  final List<Sale> sales;
+  final void Function(String saleId) onView;
+  final void Function(Sale sale) onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withOpacity(0.6)),
+          columns: const [
+            DataColumn(label: Text('Numéro')),
+            DataColumn(label: Text('Type')),
+            DataColumn(label: Text('Date')),
+            DataColumn(label: Text('Boutique')),
+            DataColumn(label: Text('Client')),
+            DataColumn(label: Text('Total'), numeric: true),
+            DataColumn(label: Text('Statut')),
+            DataColumn(label: Text('Actions')),
+          ],
+          rows: sales.map((s) {
+            return DataRow(
+              cells: [
+                DataCell(Text(s.saleNumber, style: const TextStyle(fontWeight: FontWeight.w600))),
+                DataCell(_documentTypeChip(s, context)),
+                DataCell(Text(_formatDateTime(s.createdAt))),
+                DataCell(Text(s.store?.name ?? '—')),
+                DataCell(Text(s.customer?.name ?? '—')),
+                DataCell(Text(formatCurrency(s.total), style: const TextStyle(fontWeight: FontWeight.w600))),
+                DataCell(
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _statusColor(s.status, context).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _statusLabels[s.status] ?? s.status.name,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: _statusColor(s.status, context),
+                      ),
+                    ),
+                  ),
+                ),
+                DataCell(Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.visibility_rounded, size: 20),
+                      onPressed: () => onView(s.id),
+                      tooltip: 'Voir le détail',
+                    ),
+                    if (s.status == SaleStatus.completed)
+                      IconButton(
+                        icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),
+                        onPressed: () => onCancel(s),
+                        tooltip: 'Annuler la vente',
+                      ),
+                  ],
+                )),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _SalesCardList extends StatelessWidget {
+  const _SalesCardList({
+    required this.sales,
+    required this.onView,
+    required this.onCancel,
+  });
+
+  final List<Sale> sales;
+  final void Function(String saleId) onView;
+  final void Function(Sale sale) onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      children: sales.map((s) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: InkWell(
+              onTap: () => onView(s.id),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            s.saleNumber,
+                            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        _documentTypeChip(s, context),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _statusColor(s.status, context).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _statusLabels[s.status] ?? s.status.name,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _statusColor(s.status, context),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _formatDateTime(s.createdAt),
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                    if (s.store != null || s.customer != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          [s.store?.name, s.customer?.name].where((e) => e != null && e.isNotEmpty).join(' · '),
+                          style: theme.textTheme.bodySmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Text(
+                          formatCurrency(s.total),
+                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                          onPressed: () => onView(s.id),
+                          tooltip: 'Voir le détail',
+                        ),
+                        if (s.status == SaleStatus.completed)
+                          IconButton(
+                            icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),
+                            onPressed: () => onCancel(s),
+                            tooltip: 'Annuler la vente',
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
