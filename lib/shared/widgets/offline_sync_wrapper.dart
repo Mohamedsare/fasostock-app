@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/connectivity/connectivity_service.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
@@ -53,8 +54,26 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _dbReady) {
-      if (_isOnline) _runSync(silent: true);
-      _reloadPermissions();
+      unawaited(_onAppResumed());
+    }
+  }
+
+  /// Après veille (surtout Windows / desktop), le JWT peut être expiré avant les requêtes PostgREST.
+  /// Tente un refresh **avant** sync / permissions pour limiter les `PGRST303` / « JWT expired ».
+  Future<void> _onAppResumed() async {
+    await _refreshSessionBestEffort();
+    if (!mounted) return;
+    if (_isOnline) _runSync(silent: true);
+    _reloadPermissions();
+  }
+
+  Future<void> _refreshSessionBestEffort() async {
+    try {
+      final client = Supabase.instance.client;
+      if (client.auth.currentSession == null) return;
+      await client.auth.refreshSession();
+    } catch (_) {
+      // Refresh token expiré ou erreur réseau : l’utilisateur verra « Session expirée » si besoin.
     }
   }
 

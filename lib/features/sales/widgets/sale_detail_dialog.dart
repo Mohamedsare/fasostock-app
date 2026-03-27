@@ -229,6 +229,8 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
       storeAddress: store?.address,
       storePhone: store?.phone,
       saleNumber: sale.saleNumber,
+      saleId: sale.id,
+      cashierName: '—',
       items: sale.saleItems!
           .map((i) => ReceiptItemData(
                 name: i.product?.name ?? '—',

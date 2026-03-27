@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../pos_quick/pos_quick_constants.dart';
 
 /// Panneau latéral du panier POS : en-tête "Articles (n)", liste des lignes, footer (récap + paiement).
 class PosCartPanel extends StatelessWidget {
@@ -15,63 +16,43 @@ class PosCartPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Container(
-      margin: const EdgeInsets.fromLTRB(0, 16, 20, 16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
-        boxShadow: [
-          BoxShadow(
-            color: theme.colorScheme.shadow.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        color: PosQuickColors.fondSecondaire,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
               children: [
                 Text(
-                  'Articles ($cartItemCount)',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w500,
+                  'Panier · $cartItemCount article${cartItemCount != 1 ? 's' : ''}',
+                  style: const TextStyle(
+                    color: PosQuickColors.textePrincipal,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
                   ),
                 ),
-                const SizedBox(width: 10),
-                Icon(Icons.shopping_cart_rounded, size: 22, color: theme.colorScheme.primary),
-                const SizedBox(width: 10),
-                Text('Panier', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: cartTiles.isEmpty
-                ? Center(
+                ? const Center(
                     child: Text(
                       'Panier vide',
-                      style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: TextStyle(color: PosQuickColors.textePrincipal),
                     ),
                   )
                 : ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: cartTiles.length,
                     itemBuilder: (context, index) => cartTiles[index],
                   ),
           ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: footer,
-          ),
+          footer,
         ],
       ),
     );

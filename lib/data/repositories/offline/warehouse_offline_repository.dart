@@ -1,6 +1,12 @@
 import '../../local/drift/app_database.dart';
+import '../warehouse_dispatch_input.dart';
 import '../../models/warehouse_movement.dart';
 import '../../models/warehouse_stock_line.dart';
+
+String? _imageUrlFromLocalProduct(LocalProduct? p) {
+  final u = p?.imageUrl?.trim();
+  return (u != null && u.isNotEmpty) ? u : null;
+}
 
 /// Magasin : lecture Drift (sync pull) ; écritures via pending + RPC au push.
 class WarehouseOfflineRepository {
@@ -9,6 +15,7 @@ class WarehouseOfflineRepository {
   final AppDatabase _db;
 
   /// Stream combiné inventaire + produits pour l’UI offline-first.
+  /// Les miniatures (`imageUrl`) viennent de [LocalProduct.imageUrl] (rempli au pull produits) — pas du RPC stock dépôt.
   Stream<List<WarehouseStockLine>> watchStockLines(String companyId) {
     if (companyId.isEmpty) return Stream.value([]);
     return _db.watchLocalWarehouseInventory(companyId).asyncMap((invRows) async {
@@ -21,6 +28,7 @@ class WarehouseOfflineRepository {
           productId: r.productId,
           quantity: r.quantity,
           productName: p?.name ?? '—',
+          imageUrl: _imageUrlFromLocalProduct(p),
           sku: p?.sku,
           unit: p?.unit ?? 'pce',
           avgUnitCost: r.avgUnitCost,
@@ -59,5 +67,25 @@ class WarehouseOfflineRepository {
         );
       }).toList();
     });
+  }
+
+  /// Bons de sortie dépôt — cache Drift, mis à jour au pull sync.
+  Stream<List<WarehouseDispatchInvoiceSummary>> watchDispatchInvoices(String companyId) {
+    if (companyId.isEmpty) return Stream.value([]);
+    return _db.watchLocalWarehouseDispatchInvoices(companyId).map(
+          (rows) => rows.map(_mapDispatchSummary).toList(),
+        );
+  }
+
+  static WarehouseDispatchInvoiceSummary _mapDispatchSummary(LocalWarehouseDispatchInvoice r) {
+    return WarehouseDispatchInvoiceSummary(
+      id: r.id,
+      companyId: r.companyId,
+      documentNumber: r.documentNumber,
+      createdAt: r.createdAt,
+      customerId: r.customerId,
+      customerName: r.customerName,
+      notes: r.notes,
+    );
   }
 }

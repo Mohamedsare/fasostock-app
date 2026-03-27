@@ -5,6 +5,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/warehouse_stock_line.dart';
 import '../../data/repositories/warehouse_repository.dart';
+import 'warehouse_ui_helpers.dart';
 
 /// Correction d'inventaire sur le stock **dépôt** (écart, casse, inventaire physique).
 class WarehouseAdjustmentDialog extends StatefulWidget {
@@ -81,7 +82,8 @@ class _WarehouseAdjustmentDialogState extends State<WarehouseAdjustmentDialog> {
       AppToast.success(context, 'Stock dépôt mis à jour.');
       Navigator.pop(context);
       await widget.onSuccess();
-    } catch (e) {
+    } catch (e, st) {
+      WarehouseUi.logOp('adjustment', e, st);
       if (widget.onOfflineEnqueue != null && ErrorMapper.isNetworkError(e)) {
         await widget.onOfflineEnqueue!({
           'company_id': widget.companyId,

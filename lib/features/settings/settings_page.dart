@@ -40,6 +40,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _clearingProducts = false;
   bool _clearingStock = false;
   bool _clearingStockMovements = false;
+  bool _clearingWarehouseStock = false;
+  bool _clearingWarehouseMovements = false;
   String? _dangerScopeStoreId;
   String? _profileError;
   String? _passwordError;
@@ -69,7 +71,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<void> _saveProfile() async {
-    final user = context.read<AuthProvider>().user;
+    final authProvider = context.read<AuthProvider>();
+    final user = authProvider.user;
     if (user == null) return;
     setState(() {
       _savingProfile = true;
@@ -77,12 +80,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     });
     try {
       await _repo.updateProfile(user.id, fullName: _fullNameController.text.trim().isEmpty ? null : _fullNameController.text.trim());
-      await context.read<AuthProvider>().refreshProfile();
-      if (mounted) {
-        setState(() => _savingProfile = false);
-        AppToast.success(context, 'Profil mis à jour');
-      }
-    } catch (e) {
+      if (!mounted) return;
+      await authProvider.refreshProfile(signOutIfProfileStillMissing: false);
+      if (!mounted) return;
+      setState(() => _savingProfile = false);
+      AppToast.success(context, 'Profil mis à jour');
+    } catch (e, st) {
+      AppErrorHandler.log('Settings.saveProfile: $e', st);
       if (mounted) {
         setState(() {
           _savingProfile = false;
@@ -117,7 +121,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         });
         AppToast.success(context, 'Mot de passe mis à jour');
       }
-    } catch (e) {
+    } catch (e, st) {
+      AppErrorHandler.log('Settings.changePassword: $e', st);
       if (mounted) {
         setState(() {
           _changingPassword = false;
@@ -194,7 +199,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ],
             if (permissions.isOwner && company.currentCompanyId != null) ...[
               _buildDangerHistoryCard(
-                context,
                 company.currentCompanyId!,
                 company.stores,
               ),
@@ -439,7 +443,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withOpacity(0.3),
+                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -522,7 +526,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: theme.dividerColor),
               ),
@@ -546,7 +550,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.errorContainer.withOpacity(0.3),
+                  color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
@@ -636,7 +640,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 20),
             if (companies.length > 1) ...[
               DropdownButtonFormField<String>(
-                value: company.currentCompanyId,
+                initialValue: company.currentCompanyId,
                 decoration: InputDecoration(
                   labelText: 'Entreprise',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -672,7 +676,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ],
             if (stores.isNotEmpty) ...[
               DropdownButtonFormField<String?>(
-                value: company.currentStoreId,
+                initialValue: company.currentStoreId,
                 decoration: InputDecoration(
                   labelText: 'Boutique',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -832,7 +836,6 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Widget _buildDangerHistoryCard(
-    BuildContext context,
     String companyId,
     List<Store> stores,
   ) {
@@ -845,7 +848,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: danger.withOpacity(0.55), width: 1.2),
+        side: BorderSide(color: danger.withValues(alpha: 0.55), width: 1.2),
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -874,7 +877,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
-              value: _dangerScopeStoreId,
+              initialValue: _dangerScopeStoreId,
               isExpanded: true,
               decoration: InputDecoration(
                 labelText: 'Périmètre de suppression',
@@ -899,6 +902,145 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ),
               ],
               onChanged: (v) => setState(() => _dangerScopeStoreId = v),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: danger.withValues(alpha: 0.28),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.warehouse_rounded, size: 18, color: danger),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Magasin (dépôt)',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: danger,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Suppression dédiée au dépôt central de l'entreprise (stock + mouvements du magasin).",
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (_dangerScopeStoreId != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Astuce: repassez le périmètre sur « Toute l’entreprise » pour activer ces actions dépôt.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: (_clearingWarehouseStock || _dangerScopeStoreId != null)
+                            ? null
+                            : () => _confirmAndRunDangerAction(
+                                  title: 'Vider le stock du magasin ?',
+                                  body:
+                                      'Le stock du dépôt central sera remis à zéro. Les stocks boutiques ne sont pas concernés.',
+                                  actionLabel: 'Vider stock magasin',
+                                  run: () async {
+                                    setState(() => _clearingWarehouseStock = true);
+                                    try {
+                                      final deleted =
+                                          await _repo.clearWarehouseStock(companyId);
+                                      await ref
+                                          .read(appDatabaseProvider)
+                                          .clearLocalWarehouseStock(companyId);
+                                      await _refreshAfterDangerAction();
+                                      if (!mounted) return;
+                                      AppToast.success(
+                                        context,
+                                        'Stock magasin vidé ($deleted ligne(s) supprimée(s)).',
+                                      );
+                                    } finally {
+                                      if (mounted) {
+                                        setState(() => _clearingWarehouseStock = false);
+                                      }
+                                    }
+                                  },
+                                ),
+                        icon: _clearingWarehouseStock
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.warehouse_rounded, size: 18),
+                        label: const Text('Vider stock magasin'),
+                        style: OutlinedButton.styleFrom(foregroundColor: danger),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: (_clearingWarehouseMovements || _dangerScopeStoreId != null)
+                            ? null
+                            : () => _confirmAndRunDangerAction(
+                                  title: 'Vider l\'historique magasin ?',
+                                  body:
+                                      'Tous les mouvements du dépôt central seront supprimés définitivement. Les mouvements boutiques ne sont pas concernés.',
+                                  actionLabel: 'Vider mouvements magasin',
+                                  run: () async {
+                                    setState(
+                                      () => _clearingWarehouseMovements = true,
+                                    );
+                                    try {
+                                      final deleted = await _repo
+                                          .clearWarehouseMovementsHistory(
+                                        companyId,
+                                      );
+                                      await ref
+                                          .read(appDatabaseProvider)
+                                          .clearLocalWarehouseMovementsHistory(
+                                            companyId,
+                                          );
+                                      await _refreshAfterDangerAction();
+                                      if (!mounted) return;
+                                      AppToast.success(
+                                        context,
+                                        'Historique magasin vidé ($deleted mouvement(s) supprimé(s)).',
+                                      );
+                                    } finally {
+                                      if (mounted) {
+                                        setState(
+                                          () => _clearingWarehouseMovements = false,
+                                        );
+                                      }
+                                    }
+                                  },
+                                ),
+                        icon: _clearingWarehouseMovements
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.history_toggle_off_rounded, size: 18),
+                        label: const Text('Vider mouvements magasin'),
+                        style: OutlinedButton.styleFrom(foregroundColor: danger),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 14),
             Wrap(
@@ -1227,8 +1369,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               companyId: company.currentCompanyId,
               storeId: company.currentStoreId,
             );
-      } catch (_) {
-        // No blocking error for UI refresh.
+      } catch (e, st) {
+        // No blocking error for UI refresh, but keep technical trace.
+        AppErrorHandler.log('Settings.refreshAfterDangerAction.sync: $e', st);
       }
     }
     ref.invalidate(salesStreamProvider);
@@ -1239,6 +1382,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     ref.invalidate(stockMovementsStreamProvider);
     ref.invalidate(warehouseInventoryStreamProvider);
     ref.invalidate(warehouseMovementsStreamProvider);
+    ref.invalidate(warehouseDispatchInvoicesStreamProvider);
   }
 
   Widget _buildSignOutCard(BuildContext context, AuthProvider auth) {
@@ -1247,7 +1391,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(20),

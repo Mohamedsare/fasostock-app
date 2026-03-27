@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
 import 'core/config/env.dart';
 import 'core/config/supabase_config_storage.dart';
 import 'services/auth/auth_service.dart';
@@ -18,21 +20,36 @@ import 'app.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Windows / desktop : resynchronise l’état des touches avec le moteur tôt pour limiter
+  // les AssertionError dans HardwareKeyboard._assertEventIsRegular (événements clavier
+  // parfois reçus hors séquence avant que l’état interne soit aligné).
+  unawaited(HardwareKeyboard.instance.syncKeyboardState());
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(HardwareKeyboard.instance.syncKeyboardState());
+  });
   await CrashReporting.init();
   final rootZone = Zone.current;
 
   // Erreurs asynchrones non rattrapées (Future sans catch) : log, évite le crash.
   runZonedGuarded(() async {
     await initializeDateFormatting('fr_FR', null);
+    tz_data.initializeTimeZones();
     // runApp dans la même zone que ensureInitialized pour éviter "Zone mismatch".
     rootZone.run(() => runApp(const _AppLoader()));
   }, (Object error, StackTrace stackTrace) {
     AppErrorHandler.log(error, stackTrace);
+    if (kDebugMode && _isKnownFlutterKeyboardAssertionFromPlatform(error, stackTrace)) {
+      return;
+    }
     CrashReporting.captureException(error, stackTrace);
   });
 
   // Erreurs du framework Flutter (build, layout, etc.) : log ; en debug, afficher l’écran rouge.
   FlutterError.onError = (FlutterErrorDetails details) {
+    if (kDebugMode && _isKnownFlutterKeyboardAssertion(details)) {
+      AppErrorHandler.log(details.exception, details.stack);
+      return;
+    }
     AppErrorHandler.log(details.exception, details.stack);
     CrashReporting.captureException(details.exception, details.stack);
     if (kDebugMode) {
@@ -41,10 +58,30 @@ Future<void> main() async {
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    if (kDebugMode && _isKnownFlutterKeyboardAssertionFromPlatform(error, stack)) {
+      AppErrorHandler.log(error, stack);
+      return true;
+    }
     AppErrorHandler.log(error, stack);
     CrashReporting.captureException(error, stack);
     return true;
   };
+}
+
+/// Assertion connue côté moteur Flutter (clavier matériel) — souvent Windows / hot reload.
+bool _isKnownFlutterKeyboardAssertion(FlutterErrorDetails details) {
+  final ex = details.exception;
+  if (ex is! AssertionError) return false;
+  final st = details.stack?.toString() ?? '';
+  return st.contains('hardware_keyboard.dart') &&
+      st.contains('_assertEventIsRegular');
+}
+
+bool _isKnownFlutterKeyboardAssertionFromPlatform(Object error, StackTrace stack) {
+  if (error is! AssertionError) return false;
+  final st = stack.toString();
+  return st.contains('hardware_keyboard.dart') &&
+      st.contains('_assertEventIsRegular');
 }
 
 /// Charge Supabase puis affiche l'app (ou écran config / erreur) — évite l'écran blanc.

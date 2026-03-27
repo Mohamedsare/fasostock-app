@@ -41,10 +41,21 @@ class ErrorMessages {
     // Gestion des droits (RPC owner)
     'Seul le propriétaire peut consulter les droits': "Seul le propriétaire peut consulter les droits d'un utilisateur.",
     'Seul le propriétaire peut modifier les droits': "Seul le propriétaire peut modifier les droits d'un utilisateur.",
+    'Seul le propriétaire peut enregistrer une entrée magasin.': "Seul le propriétaire peut enregistrer une entrée au dépôt.",
+    'Seul le propriétaire peut définir les seuils magasin.': "Seul le propriétaire peut définir les seuils du dépôt.",
     'Vous ne pouvez pas modifier vos propres droits': "Vous ne pouvez pas modifier vos propres droits ici.",
     "Permission inconnue": "Droit inconnu. Veuillez réessayer.",
     "n'est pas membre de cette entreprise": "Cet utilisateur n'est pas membre de cette entreprise.",
     'Membre introuvable': 'Membre introuvable.',
+    // Magasin / dépôt
+    'Non authentifié': 'Session expirée. Reconnectez-vous.',
+    'Quantité invalide': 'Quantité invalide.',
+    "Prix d'achat unitaire invalide": "Prix d'achat unitaire invalide.",
+    'Produit introuvable pour cette entreprise': 'Produit introuvable pour cette entreprise.',
+    "Produit réservé aux boutiques : pas d'entrée au dépôt magasin.": "Ce produit est réservé aux boutiques (pas d'entrée au dépôt).",
+    'Seuil invalide': 'Seuil invalide.',
+    "Produit réservé aux boutiques : pas de seuil dépôt.": "Ce produit est réservé aux boutiques (pas de seuil dépôt).",
+    'produit réservé au dépôt magasin': "Ce produit est réservé au dépôt (vente en boutique impossible).",
   };
 
   /// Message générique — aucun détail technique ne doit être affiché à l'utilisateur.

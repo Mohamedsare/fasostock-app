@@ -17,7 +17,7 @@ class TransfersOfflineRepository {
         companyId: t.companyId,
         fromStoreId: t.fromStoreId,
         toStoreId: t.toStoreId,
-        fromWarehouse: const Value(false),
+        fromWarehouse: Value(t.fromWarehouse),
         status: t.status.value,
         requestedBy: t.requestedBy,
         approvedBy: Value(t.approvedBy),
@@ -114,7 +114,9 @@ class TransfersOfflineRepository {
       companyId: t.companyId,
       fromStoreId: t.fromStoreId,
       toStoreId: t.toStoreId,
-      fromWarehouse: false,
+      // Backward-safe: anciens rows locaux peuvent avoir fromWarehouse=false
+      // alors que fromStoreId est vide (transfert magasin -> boutique).
+      fromWarehouse: t.fromWarehouse || t.fromStoreId.trim().isEmpty,
       status: TransferStatusExt.fromString(t.status),
       requestedBy: t.requestedBy,
       approvedBy: t.approvedBy,

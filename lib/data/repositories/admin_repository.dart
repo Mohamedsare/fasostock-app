@@ -231,17 +231,20 @@ class AdminRepository {
     String? userId,
     String? source,
     String? level,
+    /// `web` | `flutter` — filtre sur la colonne `client_kind` (migration 00074).
+    String? clientKind,
     String? fromDate,
     String? toDate,
     int limit = 200,
   }) async {
     var q = _client.from('app_error_logs').select(
-      'id, created_at, user_id, company_id, store_id, source, level, message, stack_trace, error_type, platform, context',
+      'id, created_at, user_id, company_id, store_id, source, level, message, stack_trace, error_type, platform, client_kind, context',
     );
     if (companyId != null && companyId.isNotEmpty) q = q.eq('company_id', companyId);
     if (userId != null && userId.isNotEmpty) q = q.eq('user_id', userId);
     if (source != null && source.isNotEmpty) q = q.eq('source', source);
     if (level != null && level.isNotEmpty) q = q.eq('level', level);
+    if (clientKind != null && clientKind.isNotEmpty) q = q.eq('client_kind', clientKind);
     if (fromDate != null && fromDate.isNotEmpty) q = q.gte('created_at', fromDate);
     if (toDate != null && toDate.isNotEmpty) {
       q = q.lte('created_at', '${toDate}T23:59:59.999Z');

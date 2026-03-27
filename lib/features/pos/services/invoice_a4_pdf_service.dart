@@ -171,6 +171,8 @@ class InvoiceA4PdfService {
         footer: (context) => _buildFooter(store),
         pageFormat: PdfPageFormat.a4,
         build: (context) => [
+          // Air entre le trait d’en-tête (couleur boutique) et le logo / bloc société.
+          pw.SizedBox(height: 16),
           _isElofTemplate(store)
               ? _buildStoreBlockElof(store, primary, logoBytes: data.logoBytes)
               : _buildStoreBlock(store, primary, logoBytes: data.logoBytes),
@@ -198,7 +200,7 @@ class InvoiceA4PdfService {
 
   static pw.Widget _buildHeader(Store store, PdfColor primary, DateFormat dateFormat, DateFormat timeFormat, InvoiceA4Data data) {
     return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 8),
+      padding: const pw.EdgeInsets.only(bottom: 12),
       decoration: pw.BoxDecoration(
         border: pw.Border(bottom: pw.BorderSide(color: primary, width: 1)),
       ),
@@ -518,12 +520,12 @@ class InvoiceA4PdfService {
         pw.TableRow(
           decoration: pw.BoxDecoration(color: headerBg),
           children: [
-            _cellHeader('N°', headerBg),
+            _cellHeader('N°', headerBg, center: true),
             _cellHeader('Désignation', headerBg),
-            _cellHeader('Quantité', headerBg),
-            _cellHeader('Unité', headerBg),
-            _cellHeader('Prix unit.', headerBg),
-            _cellHeader('Total', headerBg),
+            _cellHeader('Quantité', headerBg, center: true),
+            _cellHeader('Unité', headerBg, center: true),
+            _cellHeader('Prix unit.', headerBg, alignRight: true),
+            _cellHeader('Total', headerBg, alignRight: true),
           ],
         ),
         ...data.items.asMap().entries.map((entry) {
@@ -531,12 +533,12 @@ class InvoiceA4PdfService {
           final line = entry.value;
           return pw.TableRow(
             children: [
-              _cell('$i'),
+              _cell('$i', center: true),
               _cell(_sanitizeForPdf(line.description).toUpperCase()),
-              _cell(_formatQuantity(line.quantity)),
-              _cell(line.unit),
-              _cell(formatCurrency(line.unitPrice)),
-              _cell(formatCurrency(line.total)),
+              _cell(_formatQuantity(line.quantity), center: true),
+              _cell(line.unit, center: true),
+              _cell(formatCurrency(line.unitPrice), alignRight: true),
+              _cell(formatCurrency(line.total), alignRight: true),
             ],
           );
         }),
@@ -545,12 +547,20 @@ class InvoiceA4PdfService {
   }
 
   /// Cellule en-tête : fond couleur boutique, texte blanc, bien lisible.
-  static pw.Widget _cellHeader(String text, PdfColor headerBg) {
+  static pw.Widget _cellHeader(String text, PdfColor headerBg, {bool center = false, bool alignRight = false}) {
+    final alignment = alignRight
+        ? pw.Alignment.centerRight
+        : (center ? pw.Alignment.center : pw.Alignment.centerLeft);
+    final textAlign = alignRight
+        ? pw.TextAlign.right
+        : (center ? pw.TextAlign.center : pw.TextAlign.left);
     return pw.Container(
+      width: double.infinity,
       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      alignment: pw.Alignment.centerLeft,
+      alignment: alignment,
       child: pw.Text(
         _sanitizeForPdf(text),
+        textAlign: textAlign,
         style: pw.TextStyle(
           fontSize: 12,
           fontWeight: pw.FontWeight.bold,
@@ -560,15 +570,28 @@ class InvoiceA4PdfService {
     );
   }
 
-  static pw.Widget _cell(String text, {bool bold = false}) {
+  static pw.Widget _cell(String text, {bool bold = false, bool center = false, bool alignRight = false}) {
+    final alignment = alignRight
+        ? pw.Alignment.centerRight
+        : (center ? pw.Alignment.center : pw.Alignment.centerLeft);
+    final textAlign = alignRight
+        ? pw.TextAlign.right
+        : (center ? pw.TextAlign.center : pw.TextAlign.left);
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      child: pw.Text(
-        _sanitizeForPdf(text),
-        style: pw.TextStyle(
-          fontSize: 11,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-          color: PdfColors.black,
+      child: pw.SizedBox(
+        width: double.infinity,
+        child: pw.Align(
+          alignment: alignment,
+          child: pw.Text(
+            _sanitizeForPdf(text),
+            textAlign: textAlign,
+            style: pw.TextStyle(
+              fontSize: 11,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+              color: PdfColors.black,
+            ),
+          ),
         ),
       ),
     );
@@ -687,6 +710,20 @@ class InvoiceA4PdfService {
       final doc = await buildDocument(data);
       return doc.save();
     });
+  }
+
+  /// Prévisualise un PDF déjà généré (une seule construction du document).
+  static Future<void> previewPdfBytes(Uint8List bytes) async {
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
+  }
+
+  /// Impression directe à partir d’octets PDF — peut être lancée avec [unawaited]
+  /// après [generatePdf] pour que l’UI ne reste pas figée pendant le spooler.
+  static Future<void> printPdfBytesDirect(Uint8List bytes, String saleNumber) async {
+    await printPdfToPhysicalPrinter(
+      jobName: _pdfFileName(saleNumber),
+      onLayout: (_) async => bytes,
+    );
   }
 
   /// Partage la facture PDF (menu partager : envoi, autre app, etc.).

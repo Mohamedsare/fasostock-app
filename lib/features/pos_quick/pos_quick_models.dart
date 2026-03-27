@@ -44,7 +44,7 @@ class PosQuickCartLogic {
       (subtotal(cart) - discount).clamp(0.0, double.infinity);
 
   static bool canPay(List<PosCartItem> cart, double total) =>
-      cart.isNotEmpty && total >= 0;
+      cart.isNotEmpty && total > 0;
 }
 
 

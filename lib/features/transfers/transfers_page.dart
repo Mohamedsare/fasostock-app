@@ -177,7 +177,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                 companyId: t.companyId,
                 fromStoreId: t.fromStoreId,
                 toStoreId: t.toStoreId,
-                fromWarehouse: false,
+                fromWarehouse: t.fromWarehouse,
                 status: TransferStatus.cancelled,
                 requestedBy: t.requestedBy,
                 approvedBy: t.approvedBy,
@@ -283,7 +283,11 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
 
     final stores = ref.watch(storesStreamProvider(companyId)).value ?? [];
     final transfersAsync = ref.watch(transfersStreamProvider(companyId));
-    final allTransfers = transfersAsync.value ?? [];
+    final allTransfers = (transfersAsync.value ?? [])
+        // Défense supplémentaire: un transfert boutique->boutique doit avoir
+        // une boutique d'origine renseignée.
+        .where((t) => !t.fromWarehouse && t.fromStoreId.trim().isNotEmpty)
+        .toList();
     var transfers = allTransfers.where((t) {
       if (_filterStatus != null && t.status != _filterStatus) return false;
       if (_filterFromStoreId != null && t.fromStoreId != _filterFromStoreId)
@@ -742,6 +746,22 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                                 transferId: transfer.id,
                                 stores: storeList,
                                 storeName: (id) => _storeName(id, storeList),
+                                onTransferSettled: (t) {
+                                  if (t.fromStoreId.isNotEmpty) {
+                                    ref.invalidate(
+                                      inventoryQuantitiesStreamProvider(
+                                        t.fromStoreId,
+                                      ),
+                                    );
+                                  }
+                                  if (t.toStoreId.isNotEmpty) {
+                                    ref.invalidate(
+                                      inventoryQuantitiesStreamProvider(
+                                        t.toStoreId,
+                                      ),
+                                    );
+                                  }
+                                },
                               onActionDone: () {
                                 ref.invalidate(
                                   transfersStreamProvider(companyId),

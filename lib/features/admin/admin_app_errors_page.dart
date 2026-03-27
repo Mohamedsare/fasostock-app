@@ -27,6 +27,8 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
   String? _selectedUserId;
   String? _selectedLevel;
   String? _selectedSource;
+  /// Filtre `web` / `flutter` (colonne `client_kind`).
+  String? _selectedClientKind;
   DateTime? _fromDate;
   DateTime? _toDate;
   DateTime? _resolvedUntil;
@@ -122,6 +124,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
         userId: _selectedUserId,
         source: _selectedSource,
         level: _selectedLevel,
+        clientKind: _selectedClientKind,
         fromDate: _fromDate == null
             ? null
             : DateFormat('yyyy-MM-dd').format(_fromDate!),
@@ -335,6 +338,20 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                       onChanged: (v) => setState(() => _selectedSource = v),
                     ),
                   );
+                  final clientKindDd = SizedBox(
+                    width: useRow ? 220 : double.infinity,
+                    child: DropdownButtonFormField<String?>(
+                      value: _selectedClientKind,
+                      isExpanded: true,
+                      decoration: adminInputDecoration(labelText: 'App'),
+                      items: const [
+                        DropdownMenuItem(value: null, child: Text('Toutes')),
+                        DropdownMenuItem(value: 'web', child: Text('Web (navigateur)')),
+                        DropdownMenuItem(value: 'flutter', child: Text('Flutter')),
+                      ],
+                      onChanged: (v) => setState(() => _selectedClientKind = v),
+                    ),
+                  );
                   final dateRange = Row(
                     children: [
                       Expanded(
@@ -392,6 +409,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                                   _selectedUserId = null;
                                   _selectedLevel = null;
                                   _selectedSource = null;
+                                  _selectedClientKind = null;
                                   _fromDate = null;
                                   _toDate = null;
                                 });
@@ -424,7 +442,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                         Wrap(
                           spacing: 10,
                           runSpacing: 10,
-                          children: [companyDd, userDd, levelDd, sourceDd],
+                          children: [companyDd, userDd, levelDd, sourceDd, clientKindDd],
                         )
                       else ...[
                         companyDd,
@@ -434,6 +452,8 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                         levelDd,
                         const SizedBox(height: 10),
                         sourceDd,
+                        const SizedBox(height: 10),
+                        clientKindDd,
                       ],
                       const SizedBox(height: 10),
                       dateRange,
@@ -513,6 +533,23 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                                 ),
                               ),
                               const SizedBox(width: 8),
+                              if (e.clientKind != null && e.clientKind!.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: Chip(
+                                    label: Text(
+                                      e.clientKind == 'web' ? 'WEB' : 'FLUTTER',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    backgroundColor: e.clientKind == 'web'
+                                        ? Colors.green.shade100
+                                        : Colors.lightBlue.shade100,
+                                  ),
+                                ),
                               Chip(
                                 label: Text(
                                   isNewSinceCutoff ? 'NOUVEAU' : 'ANCIEN',
@@ -538,7 +575,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'source: ${e.source} • niveau: ${e.level} • user: ${e.userId ?? '—'} • platform: ${e.platform ?? '—'}',
+                            'source: ${e.source} • niveau: ${e.level} • app: ${e.clientKind ?? '—'} • user: ${e.userId ?? '—'} • platform: ${e.platform ?? '—'}',
                             style: const TextStyle(color: AdminPalette.subtitle, fontSize: 12),
                           ),
                           const SizedBox(height: 4),

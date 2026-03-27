@@ -166,6 +166,7 @@ class AdminAppErrorLog {
     this.stackTrace,
     this.errorType,
     this.platform,
+    this.clientKind,
     this.context,
   });
 
@@ -180,9 +181,25 @@ class AdminAppErrorLog {
   final String? stackTrace;
   final String? errorType;
   final String? platform;
+  /// `web` (FasoStock web) ou `flutter` (app Flutter) — colonne DB ou contexte.
+  final String? clientKind;
   final Map<String, dynamic>? context;
 
   factory AdminAppErrorLog.fromJson(Map<String, dynamic> json) {
+    final ctx = json['context'] is Map
+        ? Map<String, dynamic>.from(json['context'] as Map)
+        : null;
+    final fromCol = json['client_kind'] as String?;
+    final fromCtx = ctx?['client_kind'] as String?;
+    final plat = (json['platform'] as String?)?.toLowerCase().trim();
+    String? kind = (fromCol != null && fromCol.isNotEmpty) ? fromCol : fromCtx;
+    if (kind == null || kind.isEmpty) {
+      if (plat == 'web') {
+        kind = 'web';
+      } else if (plat != null && plat.isNotEmpty) {
+        kind = 'flutter';
+      }
+    }
     return AdminAppErrorLog(
       id: json['id'] as String,
       createdAt: json['created_at'] as String,
@@ -195,9 +212,8 @@ class AdminAppErrorLog {
       stackTrace: json['stack_trace'] as String?,
       errorType: json['error_type'] as String?,
       platform: json['platform'] as String?,
-      context: json['context'] is Map
-          ? Map<String, dynamic>.from(json['context'] as Map)
-          : null,
+      clientKind: kind,
+      context: ctx,
     );
   }
 }

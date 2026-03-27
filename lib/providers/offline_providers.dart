@@ -24,6 +24,7 @@ import '../data/repositories/offline/purchases_offline_repository.dart';
 import '../data/repositories/offline/suppliers_offline_repository.dart';
 import '../data/repositories/offline/transfers_offline_repository.dart';
 import '../data/repositories/offline/warehouse_offline_repository.dart';
+import '../data/repositories/warehouse_dispatch_input.dart';
 import '../data/repositories/offline/dashboard_offline_repository.dart';
 import '../data/repositories/offline/company_members_offline_repository.dart';
 import '../data/repositories/offline/reports_offline_repository.dart';
@@ -196,6 +197,13 @@ final warehouseMovementsStreamProvider =
     StreamProvider.autoDispose.family<List<WarehouseMovement>, String>((ref, companyId) {
   if (companyId.isEmpty) return Stream.value([]);
   return ref.watch(warehouseOfflineRepositoryProvider).watchMovements(companyId);
+});
+
+/// Bons de sortie dépôt (« Historiques des bons ») depuis Drift — mis à jour au pull sync.
+final warehouseDispatchInvoicesStreamProvider =
+    StreamProvider.autoDispose.family<List<WarehouseDispatchInvoiceSummary>, String>((ref, companyId) {
+  if (companyId.isEmpty) return Stream.value([]);
+  return ref.watch(warehouseOfflineRepositoryProvider).watchDispatchInvoices(companyId);
 });
 
 /// Stream des membres entreprise (écran Utilisateurs) depuis Drift.

@@ -9710,6 +9710,495 @@ class LocalWarehouseMovementsCompanion
   }
 }
 
+class $LocalWarehouseDispatchInvoicesTable
+    extends LocalWarehouseDispatchInvoices
+    with
+        TableInfo<
+          $LocalWarehouseDispatchInvoicesTable,
+          LocalWarehouseDispatchInvoice
+        > {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalWarehouseDispatchInvoicesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _companyIdMeta = const VerificationMeta(
+    'companyId',
+  );
+  @override
+  late final GeneratedColumn<String> companyId = GeneratedColumn<String>(
+    'company_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _customerIdMeta = const VerificationMeta(
+    'customerId',
+  );
+  @override
+  late final GeneratedColumn<String> customerId = GeneratedColumn<String>(
+    'customer_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _customerNameMeta = const VerificationMeta(
+    'customerName',
+  );
+  @override
+  late final GeneratedColumn<String> customerName = GeneratedColumn<String>(
+    'customer_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _documentNumberMeta = const VerificationMeta(
+    'documentNumber',
+  );
+  @override
+  late final GeneratedColumn<String> documentNumber = GeneratedColumn<String>(
+    'document_number',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<String> createdAt = GeneratedColumn<String>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    companyId,
+    customerId,
+    customerName,
+    documentNumber,
+    notes,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_warehouse_dispatch_invoices';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalWarehouseDispatchInvoice> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('company_id')) {
+      context.handle(
+        _companyIdMeta,
+        companyId.isAcceptableOrUnknown(data['company_id']!, _companyIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_companyIdMeta);
+    }
+    if (data.containsKey('customer_id')) {
+      context.handle(
+        _customerIdMeta,
+        customerId.isAcceptableOrUnknown(data['customer_id']!, _customerIdMeta),
+      );
+    }
+    if (data.containsKey('customer_name')) {
+      context.handle(
+        _customerNameMeta,
+        customerName.isAcceptableOrUnknown(
+          data['customer_name']!,
+          _customerNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('document_number')) {
+      context.handle(
+        _documentNumberMeta,
+        documentNumber.isAcceptableOrUnknown(
+          data['document_number']!,
+          _documentNumberMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_documentNumberMeta);
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LocalWarehouseDispatchInvoice map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalWarehouseDispatchInvoice(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      companyId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}company_id'],
+      )!,
+      customerId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}customer_id'],
+      ),
+      customerName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}customer_name'],
+      ),
+      documentNumber: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}document_number'],
+      )!,
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $LocalWarehouseDispatchInvoicesTable createAlias(String alias) {
+    return $LocalWarehouseDispatchInvoicesTable(attachedDatabase, alias);
+  }
+}
+
+class LocalWarehouseDispatchInvoice extends DataClass
+    implements Insertable<LocalWarehouseDispatchInvoice> {
+  final String id;
+  final String companyId;
+  final String? customerId;
+  final String? customerName;
+  final String documentNumber;
+  final String? notes;
+  final String createdAt;
+  const LocalWarehouseDispatchInvoice({
+    required this.id,
+    required this.companyId,
+    this.customerId,
+    this.customerName,
+    required this.documentNumber,
+    this.notes,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['company_id'] = Variable<String>(companyId);
+    if (!nullToAbsent || customerId != null) {
+      map['customer_id'] = Variable<String>(customerId);
+    }
+    if (!nullToAbsent || customerName != null) {
+      map['customer_name'] = Variable<String>(customerName);
+    }
+    map['document_number'] = Variable<String>(documentNumber);
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    map['created_at'] = Variable<String>(createdAt);
+    return map;
+  }
+
+  LocalWarehouseDispatchInvoicesCompanion toCompanion(bool nullToAbsent) {
+    return LocalWarehouseDispatchInvoicesCompanion(
+      id: Value(id),
+      companyId: Value(companyId),
+      customerId: customerId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customerId),
+      customerName: customerName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customerName),
+      documentNumber: Value(documentNumber),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory LocalWarehouseDispatchInvoice.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalWarehouseDispatchInvoice(
+      id: serializer.fromJson<String>(json['id']),
+      companyId: serializer.fromJson<String>(json['companyId']),
+      customerId: serializer.fromJson<String?>(json['customerId']),
+      customerName: serializer.fromJson<String?>(json['customerName']),
+      documentNumber: serializer.fromJson<String>(json['documentNumber']),
+      notes: serializer.fromJson<String?>(json['notes']),
+      createdAt: serializer.fromJson<String>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'companyId': serializer.toJson<String>(companyId),
+      'customerId': serializer.toJson<String?>(customerId),
+      'customerName': serializer.toJson<String?>(customerName),
+      'documentNumber': serializer.toJson<String>(documentNumber),
+      'notes': serializer.toJson<String?>(notes),
+      'createdAt': serializer.toJson<String>(createdAt),
+    };
+  }
+
+  LocalWarehouseDispatchInvoice copyWith({
+    String? id,
+    String? companyId,
+    Value<String?> customerId = const Value.absent(),
+    Value<String?> customerName = const Value.absent(),
+    String? documentNumber,
+    Value<String?> notes = const Value.absent(),
+    String? createdAt,
+  }) => LocalWarehouseDispatchInvoice(
+    id: id ?? this.id,
+    companyId: companyId ?? this.companyId,
+    customerId: customerId.present ? customerId.value : this.customerId,
+    customerName: customerName.present ? customerName.value : this.customerName,
+    documentNumber: documentNumber ?? this.documentNumber,
+    notes: notes.present ? notes.value : this.notes,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  LocalWarehouseDispatchInvoice copyWithCompanion(
+    LocalWarehouseDispatchInvoicesCompanion data,
+  ) {
+    return LocalWarehouseDispatchInvoice(
+      id: data.id.present ? data.id.value : this.id,
+      companyId: data.companyId.present ? data.companyId.value : this.companyId,
+      customerId: data.customerId.present
+          ? data.customerId.value
+          : this.customerId,
+      customerName: data.customerName.present
+          ? data.customerName.value
+          : this.customerName,
+      documentNumber: data.documentNumber.present
+          ? data.documentNumber.value
+          : this.documentNumber,
+      notes: data.notes.present ? data.notes.value : this.notes,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalWarehouseDispatchInvoice(')
+          ..write('id: $id, ')
+          ..write('companyId: $companyId, ')
+          ..write('customerId: $customerId, ')
+          ..write('customerName: $customerName, ')
+          ..write('documentNumber: $documentNumber, ')
+          ..write('notes: $notes, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    companyId,
+    customerId,
+    customerName,
+    documentNumber,
+    notes,
+    createdAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalWarehouseDispatchInvoice &&
+          other.id == this.id &&
+          other.companyId == this.companyId &&
+          other.customerId == this.customerId &&
+          other.customerName == this.customerName &&
+          other.documentNumber == this.documentNumber &&
+          other.notes == this.notes &&
+          other.createdAt == this.createdAt);
+}
+
+class LocalWarehouseDispatchInvoicesCompanion
+    extends UpdateCompanion<LocalWarehouseDispatchInvoice> {
+  final Value<String> id;
+  final Value<String> companyId;
+  final Value<String?> customerId;
+  final Value<String?> customerName;
+  final Value<String> documentNumber;
+  final Value<String?> notes;
+  final Value<String> createdAt;
+  final Value<int> rowid;
+  const LocalWarehouseDispatchInvoicesCompanion({
+    this.id = const Value.absent(),
+    this.companyId = const Value.absent(),
+    this.customerId = const Value.absent(),
+    this.customerName = const Value.absent(),
+    this.documentNumber = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalWarehouseDispatchInvoicesCompanion.insert({
+    required String id,
+    required String companyId,
+    this.customerId = const Value.absent(),
+    this.customerName = const Value.absent(),
+    required String documentNumber,
+    this.notes = const Value.absent(),
+    required String createdAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       companyId = Value(companyId),
+       documentNumber = Value(documentNumber),
+       createdAt = Value(createdAt);
+  static Insertable<LocalWarehouseDispatchInvoice> custom({
+    Expression<String>? id,
+    Expression<String>? companyId,
+    Expression<String>? customerId,
+    Expression<String>? customerName,
+    Expression<String>? documentNumber,
+    Expression<String>? notes,
+    Expression<String>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (companyId != null) 'company_id': companyId,
+      if (customerId != null) 'customer_id': customerId,
+      if (customerName != null) 'customer_name': customerName,
+      if (documentNumber != null) 'document_number': documentNumber,
+      if (notes != null) 'notes': notes,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalWarehouseDispatchInvoicesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? companyId,
+    Value<String?>? customerId,
+    Value<String?>? customerName,
+    Value<String>? documentNumber,
+    Value<String?>? notes,
+    Value<String>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return LocalWarehouseDispatchInvoicesCompanion(
+      id: id ?? this.id,
+      companyId: companyId ?? this.companyId,
+      customerId: customerId ?? this.customerId,
+      customerName: customerName ?? this.customerName,
+      documentNumber: documentNumber ?? this.documentNumber,
+      notes: notes ?? this.notes,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (companyId.present) {
+      map['company_id'] = Variable<String>(companyId.value);
+    }
+    if (customerId.present) {
+      map['customer_id'] = Variable<String>(customerId.value);
+    }
+    if (customerName.present) {
+      map['customer_name'] = Variable<String>(customerName.value);
+    }
+    if (documentNumber.present) {
+      map['document_number'] = Variable<String>(documentNumber.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<String>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalWarehouseDispatchInvoicesCompanion(')
+          ..write('id: $id, ')
+          ..write('companyId: $companyId, ')
+          ..write('customerId: $customerId, ')
+          ..write('customerName: $customerName, ')
+          ..write('documentNumber: $documentNumber, ')
+          ..write('notes: $notes, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $LocalStockMovementsTable extends LocalStockMovements
     with TableInfo<$LocalStockMovementsTable, LocalStockMovement> {
   @override
@@ -11915,6 +12404,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
       $LocalWarehouseInventoryTable(this);
   late final $LocalWarehouseMovementsTable localWarehouseMovements =
       $LocalWarehouseMovementsTable(this);
+  late final $LocalWarehouseDispatchInvoicesTable
+  localWarehouseDispatchInvoices = $LocalWarehouseDispatchInvoicesTable(this);
   late final $LocalStockMovementsTable localStockMovements =
       $LocalStockMovementsTable(this);
   late final $LocalCompanySettingsTable localCompanySettings =
@@ -11960,6 +12451,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_local_wh_mov_company',
     'CREATE INDEX idx_local_wh_mov_company ON local_warehouse_movements (company_id)',
   );
+  late final Index idxLocalWhDispatchCompany = Index(
+    'idx_local_wh_dispatch_company',
+    'CREATE INDEX idx_local_wh_dispatch_company ON local_warehouse_dispatch_invoices (company_id)',
+  );
   late final Index idxLocalStockMovementsStoreId = Index(
     'idx_local_stock_movements_store_id',
     'CREATE INDEX idx_local_stock_movements_store_id ON local_stock_movements (store_id)',
@@ -11992,6 +12487,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     localTransferItems,
     localWarehouseInventory,
     localWarehouseMovements,
+    localWarehouseDispatchInvoices,
     localStockMovements,
     localCompanySettings,
     localStockMinOverrides,
@@ -12006,6 +12502,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxLocalTransfersCompanyId,
     idxLocalWhInvCompany,
     idxLocalWhMovCompany,
+    idxLocalWhDispatchCompany,
     idxLocalStockMovementsStoreId,
     idxLocalCompanyMembersCompanyId,
     idxPendingActionsSynced,
@@ -17497,6 +17994,269 @@ typedef $$LocalWarehouseMovementsTableProcessedTableManager =
       LocalWarehouseMovement,
       PrefetchHooks Function()
     >;
+typedef $$LocalWarehouseDispatchInvoicesTableCreateCompanionBuilder =
+    LocalWarehouseDispatchInvoicesCompanion Function({
+      required String id,
+      required String companyId,
+      Value<String?> customerId,
+      Value<String?> customerName,
+      required String documentNumber,
+      Value<String?> notes,
+      required String createdAt,
+      Value<int> rowid,
+    });
+typedef $$LocalWarehouseDispatchInvoicesTableUpdateCompanionBuilder =
+    LocalWarehouseDispatchInvoicesCompanion Function({
+      Value<String> id,
+      Value<String> companyId,
+      Value<String?> customerId,
+      Value<String?> customerName,
+      Value<String> documentNumber,
+      Value<String?> notes,
+      Value<String> createdAt,
+      Value<int> rowid,
+    });
+
+class $$LocalWarehouseDispatchInvoicesTableFilterComposer
+    extends Composer<_$AppDatabase, $LocalWarehouseDispatchInvoicesTable> {
+  $$LocalWarehouseDispatchInvoicesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customerId => $composableBuilder(
+    column: $table.customerId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customerName => $composableBuilder(
+    column: $table.customerName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get documentNumber => $composableBuilder(
+    column: $table.documentNumber,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$LocalWarehouseDispatchInvoicesTableOrderingComposer
+    extends Composer<_$AppDatabase, $LocalWarehouseDispatchInvoicesTable> {
+  $$LocalWarehouseDispatchInvoicesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get companyId => $composableBuilder(
+    column: $table.companyId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customerId => $composableBuilder(
+    column: $table.customerId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get customerName => $composableBuilder(
+    column: $table.customerName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get documentNumber => $composableBuilder(
+    column: $table.documentNumber,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$LocalWarehouseDispatchInvoicesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $LocalWarehouseDispatchInvoicesTable> {
+  $$LocalWarehouseDispatchInvoicesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get companyId =>
+      $composableBuilder(column: $table.companyId, builder: (column) => column);
+
+  GeneratedColumn<String> get customerId => $composableBuilder(
+    column: $table.customerId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get customerName => $composableBuilder(
+    column: $table.customerName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get documentNumber => $composableBuilder(
+    column: $table.documentNumber,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+
+  GeneratedColumn<String> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$LocalWarehouseDispatchInvoicesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $LocalWarehouseDispatchInvoicesTable,
+          LocalWarehouseDispatchInvoice,
+          $$LocalWarehouseDispatchInvoicesTableFilterComposer,
+          $$LocalWarehouseDispatchInvoicesTableOrderingComposer,
+          $$LocalWarehouseDispatchInvoicesTableAnnotationComposer,
+          $$LocalWarehouseDispatchInvoicesTableCreateCompanionBuilder,
+          $$LocalWarehouseDispatchInvoicesTableUpdateCompanionBuilder,
+          (
+            LocalWarehouseDispatchInvoice,
+            BaseReferences<
+              _$AppDatabase,
+              $LocalWarehouseDispatchInvoicesTable,
+              LocalWarehouseDispatchInvoice
+            >,
+          ),
+          LocalWarehouseDispatchInvoice,
+          PrefetchHooks Function()
+        > {
+  $$LocalWarehouseDispatchInvoicesTableTableManager(
+    _$AppDatabase db,
+    $LocalWarehouseDispatchInvoicesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalWarehouseDispatchInvoicesTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$LocalWarehouseDispatchInvoicesTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$LocalWarehouseDispatchInvoicesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> companyId = const Value.absent(),
+                Value<String?> customerId = const Value.absent(),
+                Value<String?> customerName = const Value.absent(),
+                Value<String> documentNumber = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<String> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalWarehouseDispatchInvoicesCompanion(
+                id: id,
+                companyId: companyId,
+                customerId: customerId,
+                customerName: customerName,
+                documentNumber: documentNumber,
+                notes: notes,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String companyId,
+                Value<String?> customerId = const Value.absent(),
+                Value<String?> customerName = const Value.absent(),
+                required String documentNumber,
+                Value<String?> notes = const Value.absent(),
+                required String createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => LocalWarehouseDispatchInvoicesCompanion.insert(
+                id: id,
+                companyId: companyId,
+                customerId: customerId,
+                customerName: customerName,
+                documentNumber: documentNumber,
+                notes: notes,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$LocalWarehouseDispatchInvoicesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $LocalWarehouseDispatchInvoicesTable,
+      LocalWarehouseDispatchInvoice,
+      $$LocalWarehouseDispatchInvoicesTableFilterComposer,
+      $$LocalWarehouseDispatchInvoicesTableOrderingComposer,
+      $$LocalWarehouseDispatchInvoicesTableAnnotationComposer,
+      $$LocalWarehouseDispatchInvoicesTableCreateCompanionBuilder,
+      $$LocalWarehouseDispatchInvoicesTableUpdateCompanionBuilder,
+      (
+        LocalWarehouseDispatchInvoice,
+        BaseReferences<
+          _$AppDatabase,
+          $LocalWarehouseDispatchInvoicesTable,
+          LocalWarehouseDispatchInvoice
+        >,
+      ),
+      LocalWarehouseDispatchInvoice,
+      PrefetchHooks Function()
+    >;
 typedef $$LocalStockMovementsTableCreateCompanionBuilder =
     LocalStockMovementsCompanion Function({
       required String id,
@@ -18740,6 +19500,12 @@ class $AppDatabaseManager {
       $$LocalWarehouseMovementsTableTableManager(
         _db,
         _db.localWarehouseMovements,
+      );
+  $$LocalWarehouseDispatchInvoicesTableTableManager
+  get localWarehouseDispatchInvoices =>
+      $$LocalWarehouseDispatchInvoicesTableTableManager(
+        _db,
+        _db.localWarehouseDispatchInvoices,
       );
   $$LocalStockMovementsTableTableManager get localStockMovements =>
       $$LocalStockMovementsTableTableManager(_db, _db.localStockMovements);

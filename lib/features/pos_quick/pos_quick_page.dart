@@ -13,6 +13,7 @@ import '../../../core/constants/permissions.dart';
 import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
+import '../../../core/utils/stock_cache_recovery.dart';
 import '../../../core/utils/client_request_id.dart';
 import '../../../data/local/drift/app_database.dart';
 import '../../../data/models/product.dart';
@@ -27,6 +28,7 @@ import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../pos/services/receipt_thermal_print_service.dart';
+import '../pos/pos_till_product_filter.dart';
 import '../pos/widgets/receipt_ticket_dialog.dart';
 import 'pos_quick_constants.dart';
 import 'pos_quick_models.dart';
@@ -345,11 +347,15 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
 
       if (!mounted) return;
       ref.invalidate(inventoryQuantitiesStreamProvider(widget.storeId));
+      final cashierName =
+          context.read<AuthProvider>().profile?.fullName ?? context.read<AuthProvider>().user?.email ?? '—';
       final receipt = ReceiptTicketData(
         storeName: store.name,
         storeAddress: store.address,
         storePhone: store.phone,
         saleNumber: '— (hors ligne)',
+        saleId: pendingSaleId,
+        cashierName: cashierName,
         items: _cart
             .map(
               (c) => ReceiptItemData(
@@ -404,15 +410,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           );
           return;
         } catch (e, st) {
-          AppErrorHandler.log(e, st);
           if (!mounted) return;
           setState(() => _creating = false);
-          AppToast.error(
+          AppErrorHandler.show(
             context,
-            ErrorMapper.toMessage(
-              e,
-              fallback: 'Impossible d\'enregistrer la vente. Réessayez.',
-            ),
+            e,
+            fallback: 'Impossible d\'enregistrer la vente. Réessayez.',
+            stackTrace: st,
           );
           return;
         }
@@ -450,11 +454,15 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       ref.invalidate(
         salesStreamProvider((companyId: companyId, storeId: widget.storeId)),
       );
+      final cashierName =
+          context.read<AuthProvider>().profile?.fullName ?? context.read<AuthProvider>().user?.email ?? '—';
       final receipt = ReceiptTicketData(
         storeName: store.name,
         storeAddress: store.address,
         storePhone: store.phone,
         saleNumber: sale.saleNumber,
+        saleId: sale.id,
+        cashierName: cashierName,
         items: _cart
             .map(
               (c) => ReceiptItemData(
@@ -500,7 +508,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         context,
         'Vente #${sale.saleNumber} enregistrée. Total: ${formatCurrency(sale.total)}',
       );
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
       if (ErrorMapper.isNetworkError(e)) {
         try {
@@ -511,22 +519,27 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           );
           return;
         } catch (e2, st2) {
-          AppErrorHandler.log(e2, st2);
           if (!mounted) return;
           setState(() => _creating = false);
-          AppToast.error(
+          AppErrorHandler.show(
             context,
-            ErrorMapper.toMessage(
-              e2,
-              fallback:
-                  'Impossible d\'enregistrer la vente en local. Réessayez.',
-            ),
+            e2,
+            fallback:
+                'Impossible d\'enregistrer la vente en local. Réessayez.',
+            stackTrace: st2,
           );
           return;
         }
       } else {
+        if (shouldRecoverInventoryCachesFromRpcError(e)) {
+          recoverStoreInventoryCacheAfterRpcError(
+            ref,
+            widget.storeId,
+            _refreshSync,
+          );
+        }
         setState(() => _creating = false);
-        AppErrorHandler.show(context, e);
+        AppErrorHandler.show(context, e, stackTrace: st);
       }
     }
   }
@@ -545,13 +558,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                 AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
               }
             })
-            .catchError((Object e) {
+            .catchError((Object e, StackTrace st) {
               if (mounted) {
                 AppErrorHandler.show(
                   context,
                   e,
                   fallback:
                       'Impossible d\'imprimer le ticket. Vérifiez l\'imprimante.',
+                  stackTrace: st,
                 );
               }
             }),
@@ -577,12 +591,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
                   }
                 })
-                .catchError((Object e) {
+                .catchError((Object e, StackTrace st) {
                   if (mounted) {
                     AppErrorHandler.show(
                       context,
                       e,
                       fallback: 'Impossible d\'imprimer le ticket.',
+                      stackTrace: st,
                     );
                   }
                 }),
@@ -1383,6 +1398,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       AppToast.error(context, 'Aucun produit avec ce code-barres.');
       return;
     }
+    if (!isProductShownOnStoreTill(product, stockByProductId)) {
+      AppToast.error(context, 'Produit indisponible (stock épuisé).');
+      return;
+    }
     _addToCart(product, stockByProductId);
     _searchController.clear();
     setState(() {});
@@ -1409,136 +1428,89 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   }
 
   void _openCartSheet(Store? store, Map<String, int> stockByProductId) {
-    showModalBottomSheet(
+    if (store == null) return;
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.sizeOf(context).height * 0.85,
-        decoration: const BoxDecoration(
-          color: PosQuickColors.fondSecondaire,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
         ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.shopping_cart_rounded,
-                        color: PosQuickColors.orangePrincipal,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: PosQuickColors.textePrincipal,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ],
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            Expanded(
-              child: SingleChildScrollView(
+        child: Container(
+          height: MediaQuery.sizeOf(sheetContext).height * 0.9,
+          decoration: const BoxDecoration(
+            color: PosQuickColors.fondSecondaire,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    if (_cart.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 32),
-                        child: Center(
-                          child: Text(
-                            'Panier vide',
-                            style: TextStyle(
-                              color: PosQuickColors.textePrincipal,
-                            ),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.shopping_cart_rounded,
+                          color: PosQuickColors.orangePrincipal,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: PosQuickColors.textePrincipal,
+                            fontSize: 16,
                           ),
                         ),
-                      )
-                    else ...[
-                      ..._buildQuickCartTiles(stockByProductId).map(
-                        (w) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: w,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'TOTAL',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: PosQuickColors.textePrincipal,
-                            ),
-                          ),
-                          Text(
-                            formatCurrency(_total),
-                            style: const TextStyle(
-                              color: PosQuickColors.orangePrincipal,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 18,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 52,
-                        child: FilledButton.icon(
-                          onPressed:
-                              (_canPay &&
-                                  _stockWarnings(stockByProductId).isEmpty &&
-                                  !_creating)
-                              ? () async {
-                                  await _handlePayment(store, stockByProductId);
-                                  if (context.mounted)
-                                    Navigator.of(context).pop();
-                                }
-                              : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: PosQuickColors.orangePrincipal,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                          ),
-                          icon: _creating
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.print_rounded),
-                          label: Text(
-                            _creating
-                                ? 'Enregistrement...'
-                                : 'VALIDER ET IMPRIMER',
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ],
                 ),
               ),
-            ),
-          ],
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_cart.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 32),
+                          child: Center(
+                            child: Text(
+                              'Panier vide',
+                              style: TextStyle(
+                                color: PosQuickColors.textePrincipal,
+                              ),
+                            ),
+                          ),
+                        )
+                      else ...[
+                        ..._buildQuickCartTiles(stockByProductId).map(
+                          (w) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: w,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      // Même bandeau que le bureau : moyens de paiement, remise, espèces, valider.
+                      _buildRightZoneFooter(store, stockByProductId),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

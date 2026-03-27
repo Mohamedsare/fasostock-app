@@ -74,7 +74,8 @@ GoRouter createAppRouter(AuthProvider authProvider) {
 
       // Connecté mais profil pas encore chargé (ex: juste après signedIn) : ne pas
       // rediriger vers dashboard/admin pour laisser la page login faire refreshProfile()
-      // puis naviguer. Sinon on enverrait un super admin vers le dashboard.
+      // puis naviguer. Les échecs durables (JWT / réseau) déconnectent via AuthProvider
+      // pour éviter un splash infini.
       if (isLoggedIn && auth.profile == null) {
         if (publicPaths.contains(path)) return null;
         return path == _splashPath ? null : _splashPath;

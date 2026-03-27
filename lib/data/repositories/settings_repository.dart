@@ -109,4 +109,14 @@ class SettingsRepository {
     );
     return (res as num?)?.toInt() ?? 0;
   }
+
+  /// Version explicite "magasin/dépôt" (entreprise entière, sans boutique).
+  Future<int> clearWarehouseStock(String companyId) async {
+    return clearStock(companyId, storeId: null);
+  }
+
+  /// Version explicite "magasin/dépôt" pour l'historique des mouvements.
+  Future<int> clearWarehouseMovementsHistory(String companyId) async {
+    return clearStockMovementsHistory(companyId, storeId: null);
+  }
 }

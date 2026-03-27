@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../pos_quick/pos_quick_constants.dart';
 import '../pos_models.dart';
 
 /// Ligne du panier POS : miniature, nom, qté (+/- ou champ), unité, total, supprimer.
@@ -38,10 +39,11 @@ class PosCartTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: lowStock
-            ? theme.colorScheme.errorContainer.withOpacity(0.3)
-            : theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(12),
+        color: PosQuickColors.fondPrincipal,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: lowStock ? Colors.red.shade300 : PosQuickColors.bordure,
+        ),
       ),
       child: Row(
         children: [
@@ -53,7 +55,11 @@ class PosCartTile extends StatelessWidget {
               children: [
                 Text(
                   item.name,
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    color: PosQuickColors.textePrincipal,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -71,7 +77,11 @@ class PosCartTile extends StatelessWidget {
                           controller: qtyController,
                           keyboardType: TextInputType.number,
                           textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            color: PosQuickColors.textePrincipal,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
                           decoration: InputDecoration(
                             isDense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -102,16 +112,25 @@ class PosCartTile extends StatelessWidget {
                         child: Text(
                           '${item.quantity}',
                           textAlign: TextAlign.center,
-                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                          style: const TextStyle(
+                            color: PosQuickColors.textePrincipal,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
                         ),
                       ),
                     if (showButtons) _qtyButton(theme, 1),
                     if (lowStock)
-                      Text('Stock: $stock', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.error)),
+                      Text(
+                        'Stock: $stock',
+                        style: const TextStyle(color: Colors.red, fontSize: 12),
+                      ),
                     SizedBox(
                       width: 82,
                       child: DropdownButtonFormField<String>(
-                        value: kInvoiceUnits.contains(item.unit) ? item.unit : 'pce',
+                        value: kInvoiceUnits.contains(item.unit)
+                            ? item.unit
+                            : 'pce',
                         isDense: true,
                         isExpanded: true,
                         decoration: InputDecoration(
@@ -119,7 +138,7 @@ class PosCartTile extends StatelessWidget {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           filled: true,
-                          fillColor: theme.colorScheme.surface,
+                          fillColor: PosQuickColors.fondPrincipal,
                         ),
                         items: kInvoiceUnits.map((u) => DropdownMenuItem(value: u, child: Text(u, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))).toList(),
                         onChanged: (v) {
@@ -139,13 +158,21 @@ class PosCartTile extends StatelessWidget {
               children: [
                 Text(
                   formatCurrency(item.total),
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    color: PosQuickColors.orangePrincipal,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
                 IconButton(
                   onPressed: onRemove,
-                  icon: Icon(Icons.delete_outline_rounded, size: 20, color: theme.colorScheme.error),
+                  icon: const Icon(
+                    Icons.delete_outline_rounded,
+                    size: 20,
+                    color: Colors.red,
+                  ),
                   tooltip: 'Supprimer',
                   padding: const EdgeInsets.all(4),
                   constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -171,34 +198,33 @@ class PosCartTile extends StatelessWidget {
                 fit: BoxFit.cover,
                 width: 44,
                 height: 44,
-                errorBuilder: (_, __, ___) => _placeholder(theme, 44),
+                errorBuilder: (_, _, _) => _placeholder(44),
               ),
             )
-          : _placeholder(theme, 44),
+          : _placeholder(44),
     );
   }
 
-  static Widget _placeholder(ThemeData theme, [double size = 48]) {
-    return Container(
-      height: size,
-      width: size,
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Icon(Icons.inventory_2_rounded, size: size * 0.5, color: theme.colorScheme.onSurfaceVariant),
+  static Widget _placeholder([double size = 48]) {
+    return Icon(
+      Icons.inventory_2_outlined,
+      color: PosQuickColors.orangePrincipal.withValues(alpha: 0.7),
+      size: size * 0.55,
     );
   }
 
   Widget _qtyButton(ThemeData theme, int delta) {
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: () => onQtyDelta(delta),
-        borderRadius: BorderRadius.circular(10),
-        child: SizedBox(
-          width: 36,
-          height: 36,
-          child: Icon(delta > 0 ? Icons.add_rounded : Icons.remove_rounded, size: 20, color: theme.colorScheme.onSurface),
-        ),
+    final plus = delta > 0;
+    return IconButton.filled(
+      onPressed: () => onQtyDelta(delta),
+      icon: Icon(plus ? Icons.add_rounded : Icons.remove_rounded, size: 20),
+      style: IconButton.styleFrom(
+        padding: const EdgeInsets.all(6),
+        minimumSize: const Size(36, 36),
+        backgroundColor: plus
+            ? PosQuickColors.orangePrincipal
+            : PosQuickColors.fondSecondaire,
+        foregroundColor: plus ? Colors.white : PosQuickColors.textePrincipal,
       ),
     );
   }

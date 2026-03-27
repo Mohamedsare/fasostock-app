@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart' hide Consumer;
 import '../../core/breakpoints.dart';
+import '../../core/utils/user_country_time.dart';
 import '../../core/config/routes.dart';
 import '../../core/constants/permissions.dart';
 import '../../core/theme/app_theme.dart';
@@ -391,9 +392,12 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Heure locale dans la topbar desktop — mise à jour chaque seconde.
+/// Heure dans la topbar desktop : fuseau du pays de la boutique courante (champ pays), sinon heure appareil.
 class _DesktopClock extends StatefulWidget {
-  const _DesktopClock();
+  const _DesktopClock({this.countryHint});
+
+  /// Pays saisi sur la boutique (ex. « Burkina Faso », `BF`) — voir [nowInUserCountry].
+  final String? countryHint;
 
   @override
   State<_DesktopClock> createState() => _DesktopClockState();
@@ -401,14 +405,23 @@ class _DesktopClock extends StatefulWidget {
 
 class _DesktopClockState extends State<_DesktopClock> {
   Timer? _timer;
-  DateTime _now = DateTime.now();
+  late DateTime _now;
 
   @override
   void initState() {
     super.initState();
+    _now = nowInUserCountry(widget.countryHint);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _now = DateTime.now());
+      if (mounted) setState(() => _now = nowInUserCountry(widget.countryHint));
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant _DesktopClock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.countryHint != widget.countryHint) {
+      _now = nowInUserCountry(widget.countryHint);
+    }
   }
 
   @override
@@ -541,7 +554,7 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
             : Row(
                 children: [
                   const Expanded(child: SizedBox()),
-                  const _DesktopClock(),
+                  _DesktopClock(countryHint: company.currentStore?.country),
                   const Expanded(child: SizedBox()),
                 ],
               ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/product.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../pos_quick/pos_quick_constants.dart';
 
 /// Carte produit dans la grille POS — image, nom, prix, stock. Appel à [onTap] si [disabled] est false.
 class PosProductCard extends StatelessWidget {
@@ -20,8 +21,6 @@ class PosProductCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -29,16 +28,18 @@ class PosProductCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: Container(
           decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
+            color: PosQuickColors.fondPrincipal,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: disabled ? theme.dividerColor : theme.colorScheme.primary.withOpacity(0.3),
+              color: disabled
+                  ? PosQuickColors.bordure
+                  : PosQuickColors.orangePrincipal.withValues(alpha: 0.35),
               width: disabled ? 1 : 1.5,
             ),
             boxShadow: [
               if (!disabled)
                 BoxShadow(
-                  color: theme.colorScheme.primary.withOpacity(0.06),
+                  color: PosQuickColors.orangePrincipal.withValues(alpha: 0.1),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -57,9 +58,9 @@ class PosProductCard extends StatelessWidget {
                         height: 98,
                         width: 98,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _placeholder(theme, 98),
+                        errorBuilder: (_, _, _) => _placeholder(98),
                       )
-                    : _placeholder(theme, 98),
+                    : _placeholder(98),
               ),
               const SizedBox(height: 4),
               Expanded(
@@ -70,9 +71,10 @@ class PosProductCard extends StatelessWidget {
                     Flexible(
                       child: Text(
                         product.name,
-                        style: theme.textTheme.bodySmall?.copyWith(
+                        style: const TextStyle(
+                          color: PosQuickColors.textePrincipal,
                           fontWeight: FontWeight.w600,
-                          color: theme.colorScheme.onSurface,
+                          fontSize: 13,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -82,9 +84,12 @@ class PosProductCard extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       '${formatCurrency(product.salePrice)}${stock >= 0 ? ' · $stock' : ''}',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      style: TextStyle(
+                        color: disabled
+                            ? PosQuickColors.textePrincipal.withValues(alpha: 0.6)
+                            : PosQuickColors.orangePrincipal,
                         fontSize: 11,
+                        fontWeight: FontWeight.w700,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -100,12 +105,11 @@ class PosProductCard extends StatelessWidget {
     );
   }
 
-  static Widget _placeholder(ThemeData theme, [double size = 48]) {
-    return Container(
-      height: size,
-      width: size,
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Icon(Icons.inventory_2_rounded, size: size * 0.5, color: theme.colorScheme.onSurfaceVariant),
+  static Widget _placeholder([double size = 48]) {
+    return Icon(
+      Icons.inventory_2_outlined,
+      size: size * 0.5,
+      color: PosQuickColors.orangePrincipal.withValues(alpha: 0.7),
     );
   }
 }

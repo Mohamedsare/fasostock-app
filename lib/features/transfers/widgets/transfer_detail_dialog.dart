@@ -18,6 +18,7 @@ class TransferDetailDialog extends StatefulWidget {
     required this.onActionDone,
     this.initialTransfer,
     this.onRemovePendingLocal,
+    this.onTransferSettled,
   });
 
   final String transferId;
@@ -30,6 +31,9 @@ class TransferDetailDialog extends StatefulWidget {
 
   /// Brouillon non synchronisé (`pending:…`) : suppression locale + retrait de la file de sync.
   final Future<void> Function(String pendingTransferId)? onRemovePendingLocal;
+
+  /// Après une action réussie (expédition, réception, annulation…) — pour invalider le stock local.
+  final void Function(StockTransfer transfer)? onTransferSettled;
 
   @override
   State<TransferDetailDialog> createState() => _TransferDetailDialogState();
@@ -89,6 +93,21 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
     }
   }
 
+  Future<void> _closeWithSuccess(
+    StockTransfer t,
+    String toastMessage, {
+    bool refetch = true,
+  }) async {
+    final payload = refetch ? (await _repo.get(t.id)) ?? t : t;
+    if (!mounted) return;
+    AppToast.success(context, toastMessage);
+    Navigator.of(context).pop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      widget.onTransferSettled?.call(payload);
+      widget.onActionDone();
+    });
+  }
+
   Future<void> _ship() async {
     final t = _transfer;
     if (t == null) return;
@@ -97,12 +116,19 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
       AppToast.info(context, 'Session expirée. Reconnectez-vous.');
       return;
     }
+    final fromWarehouse = t.fromWarehouse;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Expédier ce transfert ?'),
-        content: const Text(
-          'Le stock de la boutique d\'origine sera décrémenté. Cette action est définitive.',
+        title: Text(
+          fromWarehouse
+              ? 'Expédier et créditer la boutique ?'
+              : 'Expédier ce transfert ?',
+        ),
+        content: Text(
+          fromWarehouse
+              ? 'Le dépôt sera débité, puis le stock de la boutique de destination sera crédité (expédition et réception en une fois). Cette action est définitive.'
+              : 'Le stock de la boutique d\'origine sera décrémenté. Cette action est définitive.',
         ),
         actions: [
           TextButton(
@@ -111,21 +137,27 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Expédier'),
+            child: Text(
+              fromWarehouse ? 'Expédier et réceptionner' : 'Expédier',
+            ),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
     try {
-      await _repo.ship(t.id, userId);
-      if (mounted) {
-        Navigator.of(context).pop();
-        AppToast.success(context, 'Transfert expédié');
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => widget.onActionDone(),
-        );
+      if (fromWarehouse) {
+        await _repo.shipThenReceive(t.id, userId);
+      } else {
+        await _repo.ship(t.id, userId);
       }
+      if (!mounted) return;
+      await _closeWithSuccess(
+        t,
+        fromWarehouse
+            ? 'Dépôt débité et stock boutique crédité'
+            : 'Transfert expédié',
+      );
     } catch (e) {
       if (mounted) AppErrorHandler.show(context, e);
     }
@@ -161,13 +193,8 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
     if (confirm != true || !mounted) return;
     try {
       await _repo.receive(t.id, userId);
-      if (mounted) {
-        Navigator.of(context).pop();
-        AppToast.success(context, 'Transfert réceptionné');
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => widget.onActionDone(),
-        );
-      }
+      if (!mounted) return;
+      await _closeWithSuccess(t, 'Transfert réceptionné');
     } catch (e) {
       if (mounted) AppErrorHandler.show(context, e);
     }
@@ -209,28 +236,19 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
     try {
       if (isPendingLocal) {
         if (widget.onRemovePendingLocal == null) {
-          if (mounted)
+          if (mounted) {
             AppToast.error(context, 'Suppression impossible depuis cet écran.');
+          }
           return;
         }
         await widget.onRemovePendingLocal!(t.id);
-        if (mounted) {
-          Navigator.of(context).pop();
-          AppToast.success(context, 'Brouillon supprimé');
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => widget.onActionDone(),
-          );
-        }
+        if (!mounted) return;
+        await _closeWithSuccess(t, 'Brouillon supprimé', refetch: false);
         return;
       }
       await _repo.cancel(t.id);
-      if (mounted) {
-        Navigator.of(context).pop();
-        AppToast.success(context, 'Transfert annulé');
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => widget.onActionDone(),
-        );
-      }
+      if (!mounted) return;
+      await _closeWithSuccess(t, 'Transfert annulé');
     } catch (e) {
       if (mounted) AppErrorHandler.show(context, e);
     }
@@ -296,7 +314,9 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
                     backgroundColor: theme.colorScheme.primaryContainer,
                   ),
                   Text(
-                    '${widget.storeName(t.fromStoreId)} → ${widget.storeName(t.toStoreId)}',
+                    t.fromWarehouse
+                        ? 'Dépôt magasin → ${widget.storeName(t.toStoreId.isEmpty ? null : t.toStoreId)}'
+                        : '${widget.storeName(t.fromStoreId.isEmpty ? null : t.fromStoreId)} → ${widget.storeName(t.toStoreId)}',
                     style: theme.textTheme.bodyMedium,
                   ),
                 ],
@@ -366,7 +386,11 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
                     FilledButton.icon(
                       onPressed: _ship,
                       icon: const Icon(Icons.local_shipping_rounded, size: 18),
-                      label: const Text('Expédier'),
+                      label: Text(
+                        t.fromWarehouse
+                            ? 'Expédier et réceptionner'
+                            : 'Expédier',
+                      ),
                     ),
                   if (t.status == TransferStatus.shipped)
                     FilledButton.icon(

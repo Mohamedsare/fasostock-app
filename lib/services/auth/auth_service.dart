@@ -2,6 +2,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../data/models/profile.dart';
 import '../../core/errors/error_messages.dart';
 
+/// Erreur PostgREST typique quand le JWT d’accès est expiré / invalide (évite splash infini si on swallow tout).
+bool isJwtPostgrestError(PostgrestException e) {
+  final c = e.code?.toString().toUpperCase() ?? '';
+  if (c == 'PGRST303') return true;
+  final m = e.message.toLowerCase();
+  return m.contains('jwt expired') || m.contains('invalid jwt');
+}
+
 /// Service d'authentification — même logique que AuthContext + authService (signIn, profile, signOut).
 class AuthService {
   AuthService(this._supabase);
@@ -14,6 +22,7 @@ class AuthService {
   Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
 
   /// Récupère le profil depuis la table profiles (même select que le web).
+  /// Propage [PostgrestException] si JWT expiré — pour tenter `refreshSession` puis retry côté [AuthProvider].
   Future<Profile?> getProfile(String userId) async {
     try {
       final res = await _supabase
@@ -23,9 +32,16 @@ class AuthService {
           .maybeSingle();
       if (res == null) return null;
       return Profile.fromJson(Map<String, dynamic>.from(res as Map));
+    } on PostgrestException catch (e) {
+      if (isJwtPostgrestError(e)) rethrow;
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> refreshSession() async {
+    await _supabase.auth.refreshSession();
   }
 
   /// Connexion — même appel que signInWithPassword côté web.

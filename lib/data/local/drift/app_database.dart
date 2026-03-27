@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:sqlite3/common.dart' show SqliteException;
 
 part 'app_database.g.dart';
 // drift codegen
@@ -280,6 +282,21 @@ class LocalWarehouseMovements extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Bons / factures de sortie dépôt — miroir offline (liste « Historiques des bons »).
+@TableIndex(name: 'idx_local_wh_dispatch_company', columns: {#companyId})
+class LocalWarehouseDispatchInvoices extends Table {
+  TextColumn get id => text()();
+  TextColumn get companyId => text()();
+  TextColumn get customerId => text().nullable()();
+  TextColumn get customerName => text().nullable()();
+  TextColumn get documentNumber => text()();
+  TextColumn get notes => text().nullable()();
+  TextColumn get createdAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @TableIndex(name: 'idx_local_stock_movements_store_id', columns: {#storeId})
 class LocalStockMovements extends Table {
   TextColumn get id => text()();
@@ -362,6 +379,7 @@ class PendingActions extends Table {
   LocalTransferItems,
   LocalWarehouseInventory,
   LocalWarehouseMovements,
+  LocalWarehouseDispatchInvoices,
   LocalStockMovements,
   LocalCompanySettings,
   LocalStockMinOverrides,
@@ -370,9 +388,10 @@ class PendingActions extends Table {
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
+  AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
 
   /// Évite les erreurs « duplicate column name » si le fichier SQLite a été partiellement migré
   /// ou si `user_version` ne reflète pas le schéma réel.
@@ -515,6 +534,14 @@ class AppDatabase extends _$AppDatabase {
           await customStatement("ALTER TABLE local_products ADD COLUMN product_scope TEXT NOT NULL DEFAULT 'both'");
         }
       }
+      if (from < 21) {
+        if (!await _sqliteTableExists('local_warehouse_dispatch_invoices')) {
+          await migrator.createTable(localWarehouseDispatchInvoices);
+        }
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_local_wh_dispatch_company ON local_warehouse_dispatch_invoices(company_id)',
+        );
+      }
     },
   );
 
@@ -535,12 +562,40 @@ class AppDatabase extends _$AppDatabase {
     return q.get();
   }
 
+  /// Taille des sous-lots pour éviter SQLITE_BUSY / « cannot commit … » sur Windows
+  /// (drift en isolate + gros batch) et les transactions trop longues.
+  static const int _upsertProductsChunkSize = 300;
+
   Future<void> upsertLocalProducts(Iterable<LocalProductsCompanion> items) async {
-    await batch((batch) {
-      for (final item in items) {
-        batch.insert(localProducts, item, mode: InsertMode.insertOrReplace);
+    final chunk = <LocalProductsCompanion>[];
+    for (final item in items) {
+      chunk.add(item);
+      if (chunk.length >= _upsertProductsChunkSize) {
+        await _upsertLocalProductsChunkWithRetry(chunk);
+        chunk.clear();
       }
-    });
+    }
+    if (chunk.isNotEmpty) {
+      await _upsertLocalProductsChunkWithRetry(chunk);
+    }
+  }
+
+  Future<void> _upsertLocalProductsChunkWithRetry(List<LocalProductsCompanion> chunk) async {
+    const maxAttempts = 4;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        await batch((batch) {
+          for (final item in chunk) {
+            batch.insert(localProducts, item, mode: InsertMode.insertOrReplace);
+          }
+        });
+        return;
+      } on SqliteException catch (e) {
+        final busy = e.resultCode == 5; // SQLITE_BUSY
+        if (!busy || attempt == maxAttempts - 1) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: 40 * math.pow(2, attempt).toInt()));
+      }
+    }
   }
 
   /// Supprime de Drift les produits de la société qui ne sont plus dans [keepIds] (reflète les suppressions côté serveur).
@@ -594,6 +649,18 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// Supprime les lignes de stock boutique absentes côté serveur (évite stock fantôme après pull).
+  /// Même logique que [deleteLocalWarehouseInventoryNotIn].
+  Future<void> deleteStoreInventoryNotIn(String storeId, Set<String> keepProductIds) async {
+    if (keepProductIds.isEmpty) {
+      await (delete(storeInventory)..where((t) => t.storeId.equals(storeId))).go();
+      return;
+    }
+    await (delete(storeInventory)
+          ..where((t) => t.storeId.equals(storeId) & t.productId.isNotIn(keepProductIds)))
+        .go();
+  }
+
   Future<int> clearLocalStock(String companyId, {String? storeId}) async {
     final targetStoreIds = <String>{};
     if (storeId != null && storeId.isNotEmpty) {
@@ -634,7 +701,17 @@ class AppDatabase extends _$AppDatabase {
           ..where((t) => t.synced.equals(false))
           ..orderBy([(t) => OrderingTerm.asc(t.id)]))
         .get();
-    return rows.map((r) => {'id': r.id, 'kind': r.kind, 'payload': r.payload, 'createdAt': r.createdAt}).toList();
+    return rows
+        .map(
+          (r) => {
+            'id': r.id,
+            'kind': r.kind,
+            'payload': r.payload,
+            'createdAt': r.createdAt,
+            'updatedAt': r.updatedAt,
+          },
+        )
+        .toList();
   }
 
   /// Stream du nombre d'actions en attente (pour afficher "X action(s) en attente" dans la bannière offline).
@@ -644,6 +721,12 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> markPendingActionSynced(int id) async {
     await (update(pendingActions)..where((t) => t.id.equals(id))).write(const PendingActionsCompanion(synced: Value(true)));
+  }
+
+  /// Marque une tentative échouée pour appliquer un backoff basé sur [updatedAt].
+  Future<void> markPendingActionFailed(int id) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    await (update(pendingActions)..where((t) => t.id.equals(id))).write(PendingActionsCompanion(updatedAt: Value(now)));
   }
 
   /// Supprime l'action « transfer » non synchronisée liée à un brouillon local (local_id = id pending:…).
@@ -1132,6 +1215,26 @@ class AppDatabase extends _$AppDatabase {
     return deleted;
   }
 
+  /// Nettoie uniquement le stock dépôt local (sans toucher les boutiques).
+  Future<int> clearLocalWarehouseStock(String companyId) async {
+    final rows = await (select(localWarehouseInventory)
+          ..where((t) => t.companyId.equals(companyId)))
+        .get();
+    if (rows.isEmpty) return 0;
+    await (delete(localWarehouseInventory)..where((t) => t.companyId.equals(companyId))).go();
+    return rows.length;
+  }
+
+  /// Nettoie uniquement les mouvements dépôt locaux (sans toucher les boutiques).
+  Future<int> clearLocalWarehouseMovementsHistory(String companyId) async {
+    final rows = await (select(localWarehouseMovements)
+          ..where((t) => t.companyId.equals(companyId)))
+        .get();
+    if (rows.isEmpty) return 0;
+    await (delete(localWarehouseMovements)..where((t) => t.companyId.equals(companyId))).go();
+    return rows.length;
+  }
+
   /// Date d’entrée en boutique par produit : plus ancien mouvement de stock pour chaque produit dans [storeId].
   /// Utilisé pour « produits non vendus depuis 1 mois » (on ne compte que les produits présents depuis au moins 1 mois).
   Future<Map<String, String>> getEarliestStockMovementDateByProduct(String storeId) async {
@@ -1303,6 +1406,48 @@ class AppDatabase extends _$AppDatabase {
           ..where((t) => t.companyId.equals(companyId) & t.id.isNotIn(keepIds)))
         .go();
   }
+
+  Stream<List<LocalWarehouseDispatchInvoice>> watchLocalWarehouseDispatchInvoices(String companyId) {
+    return (select(localWarehouseDispatchInvoices)
+          ..where((t) => t.companyId.equals(companyId))
+          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+        .watch();
+  }
+
+  Future<void> upsertLocalWarehouseDispatchInvoices(
+    Iterable<LocalWarehouseDispatchInvoicesCompanion> items,
+  ) async {
+    await batch((batch) {
+      for (final item in items) {
+        batch.insert(localWarehouseDispatchInvoices, item, mode: InsertMode.insertOrReplace);
+      }
+    });
+  }
+
+  Future<void> deleteLocalWarehouseDispatchInvoicesNotIn(String companyId, Set<String> keepIds) async {
+    if (keepIds.isEmpty) {
+      await (delete(localWarehouseDispatchInvoices)..where((t) => t.companyId.equals(companyId))).go();
+      return;
+    }
+    await (delete(localWarehouseDispatchInvoices)
+          ..where((t) => t.companyId.equals(companyId) & t.id.isNotIn(keepIds)))
+        .go();
+  }
+
+  /// Retire un bon du cache local (ex. après annulation côté serveur).
+  Future<void> deleteLocalWarehouseDispatchInvoice(String invoiceId) async {
+    await (delete(localWarehouseDispatchInvoices)..where((t) => t.id.equals(invoiceId))).go();
+  }
+
+  /// Vide le cache local des bons dépôt (sans toucher le serveur).
+  Future<int> clearLocalWarehouseDispatchInvoices(String companyId) async {
+    final rows = await (select(localWarehouseDispatchInvoices)
+          ..where((t) => t.companyId.equals(companyId)))
+        .get();
+    if (rows.isEmpty) return 0;
+    await (delete(localWarehouseDispatchInvoices)..where((t) => t.companyId.equals(companyId))).go();
+    return rows.length;
+  }
 }
 
 LazyDatabase _openConnection() {
@@ -1312,6 +1457,15 @@ LazyDatabase _openConnection() {
     final dir = Directory(dbDir.path);
     if (!dir.existsSync()) dir.createSync(recursive: true);
     final file = File(p.join(dbDir.path, 'fasostock_drift.db'));
-    return NativeDatabase.createInBackground(file);
+    return NativeDatabase.createInBackground(
+    file,
+    setup: (db) {
+      // Windows: SQLite peut renvoyer SQLITE_BUSY si le commit arrive trop tôt
+      // ou en concurrence avec d’autres lecteurs ; WAL + busy_timeout réduit fortement les échecs.
+      db.execute('PRAGMA busy_timeout = 5000');
+      db.execute('PRAGMA journal_mode = WAL');
+      db.execute('PRAGMA synchronous = NORMAL');
+    },
+  );
   });
 }

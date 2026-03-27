@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../../core/breakpoints.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
+import '../../../core/utils/stock_cache_recovery.dart';
 import '../../../data/models/stock_transfer.dart';
 import '../../../data/models/store.dart';
 import '../../../data/models/product.dart';
@@ -30,6 +32,8 @@ class CreateTransferDialog extends ConsumerStatefulWidget {
     this.initialFromStoreId,
     this.initialToStoreId,
     this.onOfflineSave,
+    this.fromWarehouseSource = false,
+    this.warehouseQuantities,
   });
 
   final String companyId;
@@ -39,8 +43,10 @@ class CreateTransferDialog extends ConsumerStatefulWidget {
   final String? initialToStoreId;
 
   /// Appelé quand la création API échoue : transfert local + payload pour enqueue (sync plus tard).
-  final void Function(StockTransfer transfer, Map<String, dynamic> payload)?
+  final Future<void> Function(StockTransfer transfer, Map<String, dynamic> payload)?
   onOfflineSave;
+  final bool fromWarehouseSource;
+  final Map<String, int>? warehouseQuantities;
 
   @override
   ConsumerState<CreateTransferDialog> createState() =>
@@ -114,7 +120,10 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
 
   bool get _canSubmit {
     if (_toStoreId == null) return false;
-    if (_fromStoreId == null || _fromStoreId == _toStoreId) return false;
+    if (!widget.fromWarehouseSource &&
+        (_fromStoreId == null || _fromStoreId == _toStoreId)) {
+      return false;
+    }
     return _lines.any((l) => l.productId.isNotEmpty && l.quantityRequested > 0);
   }
 
@@ -152,9 +161,9 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
         setState(() => _saving = false);
         return;
       }
-      final stockByProduct = await ref
-          .read(appDatabaseProvider)
-          .getInventoryQuantities(_fromStoreId!);
+      final stockByProduct = widget.fromWarehouseSource
+          ? (widget.warehouseQuantities ?? <String, int>{})
+          : await ref.read(appDatabaseProvider).getInventoryQuantities(_fromStoreId!);
       final stockProblems = <String>[];
       for (final l in itemRows) {
         final available = stockByProduct[l.productId] ?? 0;
@@ -198,9 +207,9 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
       }
       final input = CreateTransferInput(
         companyId: widget.companyId,
-        fromStoreId: _fromStoreId!,
+        fromStoreId: widget.fromWarehouseSource ? null : _fromStoreId!,
         toStoreId: _toStoreId!,
-        fromWarehouse: false,
+        fromWarehouse: widget.fromWarehouseSource,
         items: items,
       );
       final transfer = await _repo.create(input, userId);
@@ -211,7 +220,7 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
       WidgetsBinding.instance.addPostFrameCallback(
         (_) => widget.onSuccess(transfer),
       );
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
       final canOffline =
           widget.onOfflineSave != null && ErrorMapper.isNetworkError(e);
@@ -227,7 +236,7 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
             .entries
             .map(
               (e) => StockTransferItem(
-                id: '${pendingId}:${e.key}',
+                id: '$pendingId:${e.key}',
                 transferId: pendingId,
                 productId: e.value.productId,
                 quantityRequested: e.value.quantityRequested,
@@ -240,9 +249,9 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
         final pendingTransfer = StockTransfer(
           id: pendingId,
           companyId: widget.companyId,
-          fromStoreId: _fromStoreId!,
+          fromStoreId: widget.fromWarehouseSource ? '' : _fromStoreId!,
           toStoreId: _toStoreId!,
-          fromWarehouse: false,
+          fromWarehouse: widget.fromWarehouseSource,
           status: TransferStatus.draft,
           requestedBy: userId,
           approvedBy: null,
@@ -256,7 +265,8 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
         final payload = {
           'local_id': pendingId,
           'company_id': widget.companyId,
-          'from_store_id': _fromStoreId,
+          'from_store_id': widget.fromWarehouseSource ? null : _fromStoreId,
+          'from_warehouse': widget.fromWarehouseSource,
           'to_store_id': _toStoreId,
           'requested_by': userId,
           'items': itemInputs
@@ -268,15 +278,34 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
               )
               .toList(),
         };
-        widget.onOfflineSave!(pendingTransfer, payload);
+        await widget.onOfflineSave!(pendingTransfer, payload);
+        if (!mounted) return;
         setState(() => _saving = false);
         Navigator.of(context).pop();
         AppToast.success(
           context,
           'Transfert enregistré localement. Synchronisation à la reconnexion.',
         );
+        AppErrorHandler.log(e, st);
       } else {
-        AppErrorHandler.show(context, e);
+        if (shouldRecoverInventoryCachesFromRpcError(e)) {
+          final fromId =
+              widget.fromWarehouseSource ? null : _fromStoreId;
+          recoverStoresAndWarehouseInventoryCachesAfterRpcError(
+            ref,
+            companyId: widget.companyId,
+            storeId: fromId,
+            secondStoreId: _toStoreId,
+            runSync: () async {
+              await ref.read(syncServiceV2Provider).sync(
+                    userId: userId,
+                    companyId: widget.companyId,
+                    storeId: null,
+                  );
+            },
+          );
+        }
+        AppErrorHandler.show(context, e, stackTrace: st);
       }
     }
   }
@@ -287,7 +316,12 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
     final narrow = Breakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final asyncProducts = ref.watch(productsStreamProvider(widget.companyId));
     final products = (asyncProducts.valueOrNull ?? [])
-        .where((p) => p.isActive)
+        .where(
+          (p) => p.isActive &&
+              (widget.fromWarehouseSource
+                  ? p.canTransferFromDepotToStore
+                  : true),
+        )
         .toList();
     final productsLoading = asyncProducts.isLoading;
 
@@ -306,19 +340,31 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.fromWarehouseSource)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'Origine: dépôt magasin. Sélectionnez la boutique de destination.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               if (narrow) ...[
-                _dropdownStore(theme, true),
-                const SizedBox(height: 12),
+                if (!widget.fromWarehouseSource) _dropdownStore(theme, true),
+                if (!widget.fromWarehouseSource) const SizedBox(height: 12),
                 _dropdownStore(theme, false),
               ] else
                 Row(
                   children: [
-                    Expanded(child: _dropdownStore(theme, true)),
-                    const SizedBox(width: 12),
+                    if (!widget.fromWarehouseSource)
+                      Expanded(child: _dropdownStore(theme, true)),
+                    if (!widget.fromWarehouseSource) const SizedBox(width: 12),
                     Expanded(child: _dropdownStore(theme, false)),
                   ],
                 ),
-              if (_fromStoreId != null &&
+              if (!widget.fromWarehouseSource &&
+                  _fromStoreId != null &&
                   _toStoreId != null &&
                   _fromStoreId == _toStoreId)
                 Padding(
@@ -423,10 +469,11 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
           )
           .toList(),
       onChanged: (v) => setState(() {
-        if (isFrom)
+        if (isFrom) {
           _fromStoreId = v;
-        else
+        } else {
           _toStoreId = v;
+        }
       }),
     );
   }

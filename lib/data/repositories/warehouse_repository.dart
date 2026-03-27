@@ -15,7 +15,7 @@ class WarehouseRepository {
   final SupabaseClient _client;
 
   static const _invSelect =
-      'company_id, product_id, quantity, avg_unit_cost, stock_min_warehouse, updated_at, product:products(id, name, sku, unit, purchase_price, sale_price, stock_min)';
+      'company_id, product_id, quantity, avg_unit_cost, stock_min_warehouse, updated_at, product:products(id, name, sku, unit, purchase_price, sale_price, stock_min, product_images(id, url, position))';
 
   static const _movSelect =
       'id, company_id, product_id, movement_kind, quantity, unit_cost, packaging_type, packs_quantity, reference_type, reference_id, notes, created_at, product:products(id, name, sku)';
@@ -204,12 +204,15 @@ class WarehouseRepository {
   /// Bon / facture de sortie depuis le **dépôt** uniquement (pas le stock boutique).
   Future<WarehouseDispatchInvoiceResult> createDispatchInvoice({
     required String companyId,
-    String? customerId,
+    required String customerId,
     String? notes,
     required List<WarehouseDispatchLineInput> lines,
   }) async {
     if (lines.isEmpty) {
       throw UserFriendlyError('Ajoutez au moins une ligne produit.');
+    }
+    if (customerId.trim().isEmpty) {
+      throw const UserFriendlyError('Choisissez une personne ou un client pour ce bon de sortie.');
     }
     try {
       final raw = await _client.rpc(
@@ -257,6 +260,109 @@ class WarehouseRepository {
           'p_delta': delta,
           'p_unit_cost': unitCost,
           'p_reason': reason,
+        },
+      );
+    } catch (e) {
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
+  Future<List<WarehouseDispatchInvoiceSummary>> listDispatchInvoices(
+    String companyId, {
+    int limit = 100,
+  }) async {
+    try {
+      final data = await _client
+          .from('warehouse_dispatch_invoices')
+          .select(
+            'id, company_id, customer_id, document_number, notes, created_at, customer:customers(name)',
+          )
+          .eq('company_id', companyId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      final rows = data as List;
+      return rows.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final customer = m['customer'] is Map
+            ? Map<String, dynamic>.from(m['customer'] as Map)
+            : null;
+        return WarehouseDispatchInvoiceSummary(
+          id: m['id'] as String,
+          companyId: m['company_id'] as String,
+          customerId: m['customer_id'] as String?,
+          customerName: customer?['name'] as String?,
+          documentNumber: m['document_number'] as String? ?? '—',
+          notes: m['notes'] as String?,
+          createdAt: m['created_at'] as String? ?? '',
+        );
+      }).toList();
+    } catch (e) {
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
+  Future<WarehouseDispatchInvoiceDetails> getDispatchInvoiceDetails(
+    String invoiceId,
+  ) async {
+    try {
+      final invRaw = await _client
+          .from('warehouse_dispatch_invoices')
+          .select(
+            'id, company_id, customer_id, document_number, notes, created_at, customer:customers(name, phone)',
+          )
+          .eq('id', invoiceId)
+          .single();
+      final inv = Map<String, dynamic>.from(invRaw as Map);
+      final customer = inv['customer'] is Map
+          ? Map<String, dynamic>.from(inv['customer'] as Map)
+          : null;
+      final linesRaw = await _client
+          .from('warehouse_dispatch_items')
+          .select(
+            'product_id, quantity, unit_price, product:products(name, sku, unit)',
+          )
+          .eq('invoice_id', invoiceId);
+      final lines = (linesRaw as List).map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final product = m['product'] is Map
+            ? Map<String, dynamic>.from(m['product'] as Map)
+            : <String, dynamic>{};
+        return WarehouseDispatchInvoiceLine(
+          productId: m['product_id'] as String? ?? '',
+          productName: product['name'] as String? ?? '—',
+          productSku: product['sku'] as String?,
+          productUnit: product['unit'] as String? ?? 'pce',
+          quantity: (m['quantity'] as num?)?.toInt() ?? 0,
+          unitPrice: (m['unit_price'] as num?)?.toDouble() ?? 0,
+        );
+      }).toList();
+      return WarehouseDispatchInvoiceDetails(
+        id: inv['id'] as String,
+        companyId: inv['company_id'] as String,
+        customerId: inv['customer_id'] as String?,
+        customerName: customer?['name'] as String?,
+        customerPhone: customer?['phone'] as String?,
+        documentNumber: inv['document_number'] as String? ?? '—',
+        notes: inv['notes'] as String?,
+        createdAt: inv['created_at'] as String? ?? '',
+        lines: lines,
+      );
+    } catch (e) {
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
+  /// Annule un bon de sortie : réintègre le stock dépôt et supprime le document (RPC serveur).
+  Future<void> voidDispatchInvoice({
+    required String companyId,
+    required String invoiceId,
+  }) async {
+    try {
+      await _client.rpc(
+        'warehouse_void_dispatch_invoice',
+        params: {
+          'p_company_id': companyId,
+          'p_invoice_id': invoiceId,
         },
       );
     } catch (e) {

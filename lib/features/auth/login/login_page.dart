@@ -9,6 +9,7 @@ import '../../../core/config/env.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../data/models/profile.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/permissions_provider.dart';
@@ -100,8 +101,9 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
+      Profile? profileLoaded;
       try {
-        await auth.refreshProfile();
+        profileLoaded = await auth.refreshProfile(fromLoginAttempt: true);
       } catch (e) {
         if (mounted) {
           setState(() {
@@ -112,9 +114,16 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
       if (!mounted) return;
-      if (!auth.isAuthenticated) {
+      if (profileLoaded != null && profileLoaded.isActive == false) {
         setState(() {
           _error = 'Compte désactivé. Contactez l\'administrateur.';
+          _loading = false;
+        });
+        return;
+      }
+      if (auth.profile == null || !auth.isAuthenticated) {
+        setState(() {
+          _error = 'Impossible de charger votre profil. Vérifiez la connexion et réessayez.';
           _loading = false;
         });
         return;

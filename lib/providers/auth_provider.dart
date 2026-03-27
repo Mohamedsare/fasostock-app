@@ -6,6 +6,11 @@ import '../services/auth/auth_service.dart';
 import 'company_provider.dart';
 import 'permissions_provider.dart';
 
+/// Reprises après [Profile] null (réseau, timeout) — évite splash infini puis déconnexion si échec durable.
+const int _kProfileNullRetriesCold = 6;
+const int _kProfileNullRetriesLogin = 12;
+const Duration _kProfileNullRetryDelay = Duration(milliseconds: 500);
+
 /// État auth global — équivalent AuthContext (user, session, profile, loading, isSuperAdmin, signOut, refreshProfile).
 class AppAuthState {
   const AppAuthState({
@@ -62,14 +67,77 @@ class AuthProvider extends ChangeNotifier {
       loading: false,
     );
     if (user != null) {
-      Profile? p = await _auth.getProfile(user.id);
+      Profile? p = await _loadProfileUntilResolved(
+        user.id,
+        maxNullRetries: _kProfileNullRetriesCold,
+        nullRetryDelay: _kProfileNullRetryDelay,
+        signOutIfStillNull: true,
+      );
+      if (_auth.currentUser == null) {
+        notifyListeners();
+        return;
+      }
       for (var i = 0; i < 2 && p != null && p.isActive == false; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 500));
-        p = await _auth.getProfile(user.id);
+        p = await _loadProfileUntilResolved(
+          user.id,
+          maxNullRetries: _kProfileNullRetriesCold,
+          nullRetryDelay: _kProfileNullRetryDelay,
+          signOutIfStillNull: true,
+        );
+        if (_auth.currentUser == null) {
+          notifyListeners();
+          return;
+        }
       }
       _applyProfile(p);
     }
     notifyListeners();
+  }
+
+  /// JWT expiré → [AuthService.refreshSession] puis une requête ; sinon retentatives sur `null` (réseau).
+  /// Si [signOutIfStillNull] et profil toujours absent → [signOut] (plus de splash bloqué).
+  Future<Profile?> _loadProfileUntilResolved(
+    String userId, {
+    required int maxNullRetries,
+    required Duration nullRetryDelay,
+    required bool signOutIfStillNull,
+  }) async {
+    for (var attempt = 0; attempt <= maxNullRetries; attempt++) {
+      final p = await _loadProfileWithJwtRecovery(userId);
+      if (_auth.currentUser == null) return null;
+      if (p != null) return p;
+      if (attempt < maxNullRetries) {
+        await Future<void>.delayed(nullRetryDelay);
+      }
+    }
+    if (signOutIfStillNull && _auth.currentUser != null) {
+      await signOut();
+    }
+    return null;
+  }
+
+  /// Une tentative : JWT → refresh + retry ; erreurs non-JWT → `null` (voir [_loadProfileUntilResolved]).
+  Future<Profile?> _loadProfileWithJwtRecovery(String userId) async {
+    try {
+      return await _auth.getProfile(userId);
+    } on PostgrestException catch (e) {
+      if (!isJwtPostgrestError(e)) return null;
+      try {
+        await _auth.refreshSession();
+      } catch (_) {
+        await signOut();
+        return null;
+      }
+      try {
+        return await _auth.getProfile(userId);
+      } on PostgrestException catch (e2) {
+        if (isJwtPostgrestError(e2)) {
+          await signOut();
+        }
+        return null;
+      }
+    }
   }
 
   void _applyProfile(Profile? p) {
@@ -104,11 +172,23 @@ class AuthProvider extends ChangeNotifier {
       // initialSession, tokenRefreshed, etc. : charger le profil avec délai et retentatives.
       Future<void>.delayed(const Duration(milliseconds: 400), () async {
         if (_auth.currentUser?.id != user.id) return;
-        Profile? p = await _auth.getProfile(user.id);
+        Profile? p = await _loadProfileUntilResolved(
+          user.id,
+          maxNullRetries: _kProfileNullRetriesCold,
+          nullRetryDelay: _kProfileNullRetryDelay,
+          signOutIfStillNull: true,
+        );
+        if (_auth.currentUser == null) return;
         for (var i = 0; i < 2 && p != null && p.isActive == false; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 500));
           if (_auth.currentUser?.id != user.id) return;
-          p = await _auth.getProfile(user.id);
+          p = await _loadProfileUntilResolved(
+            user.id,
+            maxNullRetries: _kProfileNullRetriesCold,
+            nullRetryDelay: _kProfileNullRetryDelay,
+            signOutIfStillNull: true,
+          );
+          if (_auth.currentUser == null) return;
         }
         if (_auth.currentUser?.id == user.id) _applyProfile(p);
       });
@@ -121,18 +201,42 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<Profile?> refreshProfile() async {
+  /// [fromLoginAttempt] : plus de reprises (connexion lente). [signOutIfProfileStillMissing] : si `false`,
+  /// en cas d'échec durable on ne déconnecte pas et on conserve le profil déjà en mémoire (ex. Paramètres).
+  Future<Profile?> refreshProfile({
+    bool fromLoginAttempt = false,
+    bool signOutIfProfileStillMissing = true,
+  }) async {
     final u = _auth.currentUser ?? _auth.currentSession?.user;
     if (u == null) {
       _state = AppAuthState(user: _state.user, session: _state.session, profile: null, loading: false);
       notifyListeners();
       return null;
     }
-    Profile? p = await _auth.getProfile(u.id);
+    final maxNull = fromLoginAttempt ? _kProfileNullRetriesLogin : _kProfileNullRetriesCold;
+    Profile? p = await _loadProfileUntilResolved(
+      u.id,
+      maxNullRetries: maxNull,
+      nullRetryDelay: _kProfileNullRetryDelay,
+      signOutIfStillNull: signOutIfProfileStillMissing,
+    );
+    if (_auth.currentUser == null) return null;
+    if (p == null) {
+      return null;
+    }
     // Jusqu'à 3 retentatives si is_active == false (évite faux positif juste après login)
     for (var i = 0; i < 3 && p != null && p.isActive == false; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 600));
-      p = await _auth.getProfile(u.id);
+      p = await _loadProfileUntilResolved(
+        u.id,
+        maxNullRetries: maxNull,
+        nullRetryDelay: _kProfileNullRetryDelay,
+        signOutIfStillNull: signOutIfProfileStillMissing,
+      );
+      if (_auth.currentUser == null) return null;
+      if (p == null) {
+        return null;
+      }
     }
     _applyProfile(p);
     return p;

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,7 +28,21 @@ class ErrorMapper {
     if (error == null) return fallback ?? _unexpected;
     // Message déjà rédigé pour l'utilisateur (ex. repository, validation).
     if (error is UserFriendlyError) return error.message;
-    final str = error.toString().trim();
+
+    // PostgREST : le message PostgreSQL est dans [PostgrestException.message], pas dans toString().
+    String str;
+    if (error is PostgrestException) {
+      final pe = error;
+      str = pe.message.trim();
+      if (str.isEmpty && pe.details != null) {
+        str = pe.details.toString().trim();
+      }
+      if (str.isEmpty) {
+        str = error.toString().trim();
+      }
+    } else {
+      str = error.toString().trim();
+    }
     final lower = str.toLowerCase();
 
     // Réseau
@@ -45,12 +58,11 @@ class ErrorMapper {
       return _auth;
     }
 
-    // Permission / RLS / Forbidden
+    // Permission / RLS / Forbidden (ne pas utiliser « accès refusé » seul : les RPC français l’emploient avec un détail utile)
     if (lower.contains('row-level security') ||
         lower.contains('permission denied') ||
         lower.contains('forbidden') ||
-        lower.contains('policy') && lower.contains('violates') ||
-        lower.contains('accès refusé')) {
+        lower.contains('policy') && lower.contains('violates')) {
       return _permission;
     }
 
@@ -111,22 +123,29 @@ class AppErrorHandler {
   AppErrorHandler._();
 
   /// Affiche l'erreur en Snackbar (message utilisateur) et log le détail technique.
-  static void show(BuildContext context, Object? error, {String? fallback}) {
+  /// Passez [stackTrace] depuis `catch (e, st)` pour une remontée complète (debug + `log_app_error`).
+  static void show(BuildContext context, Object? error, {String? fallback, StackTrace? stackTrace}) {
     final message = ErrorMapper.toMessage(error, fallback: fallback);
-    _log(error);
+    _log(error, stackTrace);
     if (context.mounted) AppToast.error(context, message);
   }
 
   /// Affiche un message d'erreur en Snackbar (déjà rédigé pour l'utilisateur).
   static void showMessage(BuildContext context, String userMessage) {
-    _log(userMessage);
+    _log(userMessage, null);
     if (context.mounted) AppToast.error(context, userMessage);
   }
 
   /// Affiche une boîte de dialogue pour les erreurs critiques (ex. échec de chargement initial).
-  static void showErrorDialog(BuildContext context, Object? error, {String? fallback, VoidCallback? onClose}) {
+  static void showErrorDialog(
+    BuildContext context,
+    Object? error, {
+    String? fallback,
+    StackTrace? stackTrace,
+    VoidCallback? onClose,
+  }) {
     final message = ErrorMapper.toMessage(error, fallback: fallback);
-    _log(error);
+    _log(error, stackTrace);
     if (!context.mounted) return;
     showDialog<void>(
       context: context,
@@ -151,25 +170,69 @@ class AppErrorHandler {
     return ErrorMapper.toMessage(error, fallback: fallback);
   }
 
-  /// Log technique uniquement (développeur) — jamais affiché dans l'UI.
-  static void _log(Object? error) {
+  /// Log technique (debug + éventuelle remontée serveur) — jamais affiché tel quel à l'utilisateur.
+  static void _log(Object? error, [StackTrace? stackTrace]) {
     if (kDebugMode && error != null) {
-      debugPrint('[AppError] $error');
-    }
-    RemoteErrorLogger.capture(error, source: 'app_error_handler');
-  }
-
-  /// Log avec stack trace (ex. dans un catch avec StackTrace).
-  static void log(Object? error, [StackTrace? stackTrace]) {
-    if (kDebugMode) {
-      if (error != null) debugPrint('[AppError] $error');
+      if (error is PostgrestException) {
+        debugPrint(
+          '[AppError] Postgrest code=${error.code} message=${error.message} details=${error.details} hint=${error.hint}',
+        );
+      } else {
+        debugPrint('[AppError] $error');
+      }
       if (stackTrace != null) debugPrint(stackTrace.toString());
     }
+    if (error == null) return;
+    if (!_shouldCaptureRemotely(error, stackTrace)) return;
     RemoteErrorLogger.capture(
       error,
       stackTrace: stackTrace,
       source: 'app_error_handler',
     );
+  }
+
+  /// Log avec stack trace (ex. dans un `catch (e, st)` sans afficher de toast).
+  static void log(Object? error, [StackTrace? stackTrace]) {
+    _log(error, stackTrace);
+  }
+
+  /// JWT expiré / 401 PostgREST — état d’auth attendu après veille longue ou refresh raté ;
+  /// pas un « bug » à suivre comme incident applicatif (l’utilisateur doit se reconnecter).
+  static bool _isSessionOrJwtExpired(Object? error) {
+    if (error is PostgrestException) {
+      final c = error.code?.toString().toUpperCase() ?? '';
+      if (c == 'PGRST303') return true;
+      final m = '${error.message} ${error.details ?? ''}'.toLowerCase();
+      if (m.contains('jwt expired') || m.contains('invalid jwt')) return true;
+    }
+    final text = error.toString().toLowerCase();
+    if (text.contains('jwt expired') || text.contains('invalid jwt')) return true;
+    if (text.contains('pgrst303')) return true;
+    return false;
+  }
+
+  /// Évite de remonter comme "incident critique" les erreurs métier attendues
+  /// (validation utilisateur, stock insuffisant, réseau intermittent, etc.).
+  static bool _shouldCaptureRemotely(Object? error, [StackTrace? stackTrace]) {
+    if (error == null) return false;
+    if (error is UserFriendlyError) return false;
+    if (ErrorMapper.isNetworkError(error)) return false;
+    if (_isFrameworkKeyboardAssertion(error, stackTrace)) return false;
+    if (_isSessionOrJwtExpired(error)) return false;
+    final text = error.toString().toLowerCase();
+    if (text.contains('stock insuffisant')) return false;
+    if (text.contains("choisissez la boutique d'origine")) return false;
+    if (text.contains('authretryablefetchexception')) return false;
+    if (text.contains('code: 502')) return false;
+    return true;
+  }
+
+  /// Erreur connue du moteur Flutter (clavier) — ne pas envoyer à la base « erreurs app ».
+  static bool _isFrameworkKeyboardAssertion(Object? error, [StackTrace? stackTrace]) {
+    if (error is! AssertionError) return false;
+    final st = stackTrace?.toString() ?? '';
+    return st.contains('hardware_keyboard.dart') &&
+        st.contains('_assertEventIsRegular');
   }
 
   /// À appeler au démarrage (ex. main() ou initState du widget racine) pour capturer
@@ -190,6 +253,7 @@ class AppErrorHandler {
       } else {
         debugPrint('[AppError] $error');
       }
+      log(error, stack);
       return true; // empêche le crash
     };
   }
