@@ -33,7 +33,7 @@ class PosQuickProductGrid extends StatelessWidget {
             child: Center(
               child: Text(
                 'Aucun produit',
-                style: TextStyle(color: PosQuickColors.textePrincipal.withOpacity(0.6), fontSize: 15),
+                style: TextStyle(color: PosQuickColors.textePrincipal.withValues(alpha: 0.6), fontSize: 15),
               ),
             ),
           ),
@@ -44,7 +44,10 @@ class PosQuickProductGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
-        final crossCount = w > 900 ? 5 : (w > 600 ? 4 : 3);
+        // Comme Facture A4 : 2 colonnes sur téléphone (carte 98px + marges), 4 au-delà de 600px.
+        final crossCount = w > 600 ? 4 : 2;
+        // Même hauteur de cellule relative que la grille Facture A4 (image 98 + texte).
+        final aspectRatio = w < 400 ? 0.76 : (w < 600 ? 0.84 : 0.90);
         return RefreshIndicator(
           onRefresh: onRefresh,
           child: GridView.builder(
@@ -52,9 +55,9 @@ class PosQuickProductGrid extends StatelessWidget {
             physics: const AlwaysScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: crossCount,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 0.9,
+              mainAxisSpacing: 12,
+              crossAxisSpacing: 12,
+              childAspectRatio: aspectRatio,
             ),
             itemCount: visible.length,
             itemBuilder: (context, index) {

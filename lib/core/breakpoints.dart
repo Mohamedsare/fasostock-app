@@ -9,6 +9,12 @@ class Breakpoints {
   /// Largeur à partir de laquelle on affiche la sidebar desktop au lieu du drawer + bottom nav.
   static const double desktop = 900;
 
+  /// Aligné `appweb` `useDesktopNav()` — sidebar + header bureau à partir de 1024px.
+  static const double shellDesktop = 1024;
+
+  /// Shell principal (drawer + bottom nav vs sidebar) : même seuil que le web.
+  static bool isShellDesktop(double width) => width >= shellDesktop;
+
   /// Largeur max du contenu sur desktop (évite que le contenu s'étire sur ultra-wide).
   static const double maxContentWidth = 1280;
 

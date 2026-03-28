@@ -349,7 +349,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        toolbarHeight: 44,
+        toolbarHeight: 58,
         iconTheme: IconThemeData(color: colorScheme.onSurface, size: 20),
         titleTextStyle: TextStyle(
           fontSize: 14,
@@ -502,7 +502,7 @@ class AppTheme {
         scrolledUnderElevation: 0,
         backgroundColor: Colors.transparent,
         surfaceTintColor: Colors.transparent,
-        toolbarHeight: 44,
+        toolbarHeight: 58,
         iconTheme: IconThemeData(color: colorScheme.onSurface, size: 20),
         titleTextStyle: TextStyle(
           fontSize: 14,

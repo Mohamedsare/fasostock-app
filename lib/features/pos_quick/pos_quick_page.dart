@@ -55,6 +55,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       TextEditingController();
 
   List<PosCartItem> _cart = [];
+  final Map<String, TextEditingController> _qtyControllers = {};
   double _discount = 0;
   double _amountReceived = 0;
   bool _amountReceivedTouched = false;
@@ -65,8 +66,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   DateTime? _lastStockLimitToastAt;
   PaymentMethod _paymentMethod = PaymentMethod.cash;
   String? _selectedCategoryId;
-  String _currentTime = '';
   Timer? _clockTimer;
+  late final ValueNotifier<String> _clockLabel;
   StreamSubscription<bool>? _connectivitySubscription;
 
   /// Sync toutes les 15 s tant que la caisse est ouverte ? nouveaux produits visibles tr?s vite (magasinier sur un autre poste).
@@ -75,11 +76,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   @override
   void initState() {
     super.initState();
-    _updateTime();
-    _clockTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _updateTime(),
+    _clockLabel = ValueNotifier<String>(
+      DateFormat('HH:mm').format(DateTime.now()),
     );
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final t = DateFormat('HH:mm').format(DateTime.now());
+      if (t != _clockLabel.value) _clockLabel.value = t;
+    });
     _periodicSyncTimer = Timer.periodic(_periodicSyncInterval, (_) {
       if (!mounted) return;
       Future.microtask(() => _refreshSync());
@@ -92,21 +96,24 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         });
   }
 
-  void _updateTime() {
-    if (!mounted) return;
-    final t = DateFormat('HH:mm').format(DateTime.now());
-    if (t != _currentTime) setState(() => _currentTime = t);
-  }
-
   @override
   void dispose() {
+    _clockLabel.dispose();
     _clockTimer?.cancel();
     _periodicSyncTimer?.cancel();
     _connectivitySubscription?.cancel();
     _searchController.dispose();
     _discountController.dispose();
     _amountReceivedController.dispose();
+    _clearQtyControllers();
     super.dispose();
+  }
+
+  void _clearQtyControllers() {
+    for (final c in _qtyControllers.values) {
+      c.dispose();
+    }
+    _qtyControllers.clear();
   }
 
   Future<void> _refreshSync() async {
@@ -123,7 +130,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               storeId: widget.storeId,
             );
       } catch (e, st) {
-        AppErrorHandler.log(e, st);
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'pos_quick',
+          logContext: const {'op': 'sync'},
+        );
       }
     }
   }
@@ -174,6 +186,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         }
         existing.quantity = newQty;
         existing.total = newQty * existing.unitPrice;
+        final pid = existing.productId;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _qtyControllers[pid]?.text = newQty == 0 ? '' : newQty.toString();
+        });
       } else {
         if (stock <= 0) return;
         _cart.add(
@@ -200,7 +217,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     Map<String, int> stockByProductId,
   ) {
     final stock = stockByProductId[productId] ?? 0;
+    int? newQty;
     setState(() {
+      final beforeLen = _cart.length;
       _cart = _cart
           .map((c) {
             if (c.productId != productId) return c;
@@ -209,12 +228,59 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               _showStockLimitToast();
               return c;
             }
+            newQty = q;
             c.quantity = q;
             c.total = q * c.unitPrice;
             return c;
           })
           .where((c) => c.quantity > 0)
           .toList();
+      if (_cart.length < beforeLen && _qtyControllers.containsKey(productId)) {
+        _qtyControllers[productId]?.dispose();
+        _qtyControllers.remove(productId);
+      }
+    });
+    if (newQty != null && _qtyControllers.containsKey(productId)) {
+      _qtyControllers[productId]!.text = newQty == 0 ? '' : newQty.toString();
+    }
+  }
+
+  void _setQty(String productId, int value, Map<String, int> stockByProductId) {
+    final stock = stockByProductId[productId] ?? 0;
+    PosCartItem? current;
+    try {
+      current = _cart.firstWhere((c) => c.productId == productId);
+    } catch (_) {
+      current = null;
+    }
+    if (current == null) return;
+
+    final requested = value.clamp(0, 999);
+    if (stock >= 0 && requested > stock) {
+      _showStockLimitToast();
+      _qtyControllers[productId]?.text = current.quantity == 0
+          ? ''
+          : current.quantity.toString();
+      return;
+    }
+
+    final clamped = requested;
+    setState(() {
+      _cart = _cart.map((c) {
+        if (c.productId != productId) return c;
+        c.quantity = clamped;
+        c.total = clamped * c.unitPrice;
+        return c;
+      }).toList();
+    });
+    _qtyControllers[productId]?.text = clamped == 0 ? '' : clamped.toString();
+  }
+
+  void _removeCartLine(String productId) {
+    setState(() {
+      _cart = _cart.where((c) => c.productId != productId).toList();
+      _qtyControllers[productId]?.dispose();
+      _qtyControllers.remove(productId);
     });
   }
 
@@ -250,10 +316,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       AppToast.error(context, 'Montant reçu insuffisant.');
       return;
     }
-    if (_cart.any((c) => c.quantity < 1)) {
+    if (_cart.any((c) => c.quantity <= 0)) {
       AppToast.error(
         context,
-        'Quantité invalide pour un ou plusieurs articles.',
+        'Indiquez une quantité supérieure à 0 pour chaque ligne du panier.',
       );
       return;
     }
@@ -348,9 +414,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       if (!mounted) return;
       ref.invalidate(inventoryQuantitiesStreamProvider(widget.storeId));
       final cashierName =
-          context.read<AuthProvider>().profile?.fullName ?? context.read<AuthProvider>().user?.email ?? '—';
+          context.read<AuthProvider>().profile?.fullName ??
+          context.read<AuthProvider>().user?.email ??
+          '—';
       final receipt = ReceiptTicketData(
         storeName: store.name,
+        storeLogoUrl: store.logoUrl,
         storeAddress: store.address,
         storePhone: store.phone,
         saleNumber: '— (hors ligne)',
@@ -391,10 +460,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         _creating = false;
         _receiptData = receipt;
       });
+      _clearQtyControllers();
       _discountController.clear();
       _amountReceivedController.clear();
       if (MediaQuery.sizeOf(context).width < 900) Navigator.of(context).pop();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showReceiptIfNeeded());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showReceiptIfNeeded(),
+      );
       Future.microtask(() => _refreshSync());
       AppToast.success(context, successMessage);
     }
@@ -417,6 +489,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             e,
             fallback: 'Impossible d\'enregistrer la vente. Réessayez.',
             stackTrace: st,
+            logSource: 'pos_quick',
+            logContext: const {'op': 'offline_sale'},
           );
           return;
         }
@@ -447,7 +521,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       try {
         await ref.read(salesOfflineRepositoryProvider).upsertSale(sale);
       } catch (e2, st2) {
-        AppErrorHandler.log(e2, st2);
+        AppErrorHandler.logWithContext(
+          e2,
+          stackTrace: st2,
+          logSource: 'pos_quick',
+          logContext: const {'op': 'cache_sale_after_create'},
+        );
         // Vente d?j? cr??e c?t? serveur ; on continue pour afficher le ticket
       }
       if (!mounted) return;
@@ -455,9 +534,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         salesStreamProvider((companyId: companyId, storeId: widget.storeId)),
       );
       final cashierName =
-          context.read<AuthProvider>().profile?.fullName ?? context.read<AuthProvider>().user?.email ?? '—';
+          context.read<AuthProvider>().profile?.fullName ??
+          context.read<AuthProvider>().user?.email ??
+          '—';
       final receipt = ReceiptTicketData(
         storeName: store.name,
+        storeLogoUrl: store.logoUrl,
         storeAddress: store.address,
         storePhone: store.phone,
         saleNumber: sale.saleNumber,
@@ -498,6 +580,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         _creating = false;
         _receiptData = receipt;
       });
+      _clearQtyControllers();
       _discountController.clear();
       _amountReceivedController.clear();
       if (MediaQuery.sizeOf(context).width < 900) Navigator.of(context).pop();
@@ -524,9 +607,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           AppErrorHandler.show(
             context,
             e2,
-            fallback:
-                'Impossible d\'enregistrer la vente en local. Réessayez.',
+            fallback: 'Impossible d\'enregistrer la vente en local. Réessayez.',
             stackTrace: st2,
+            logSource: 'pos_quick',
+            logContext: const {'op': 'offline_sale_after_network_error'},
           );
           return;
         }
@@ -539,7 +623,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           );
         }
         setState(() => _creating = false);
-        AppErrorHandler.show(context, e, stackTrace: st);
+        AppErrorHandler.show(
+          context,
+          e,
+          stackTrace: st,
+          logSource: 'pos_quick',
+          logContext: const {'op': 'create_sale'},
+        );
       }
     }
   }
@@ -566,6 +656,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                   fallback:
                       'Impossible d\'imprimer le ticket. Vérifiez l\'imprimante.',
                   stackTrace: st,
+                  logSource: 'pos_quick',
+                  logContext: const {'op': 'thermal_print_auto'},
                 );
               }
             }),
@@ -598,6 +690,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                       e,
                       fallback: 'Impossible d\'imprimer le ticket.',
                       stackTrace: st,
+                      logSource: 'pos_quick',
+                      logContext: const {'op': 'thermal_print_dialog'},
                     );
                   }
                 }),
@@ -669,8 +763,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     } catch (_) {}
 
     final loading =
-        productsAsync.isLoading ||
-        stockAsync.isLoading ||
+        (productsAsync.isLoading && !productsAsync.hasValue) ||
+        (stockAsync.isLoading && !stockAsync.hasValue) ||
         (store == null &&
             (storesAsync.isLoading ||
                 (storesAsync.hasValue && stores.isNotEmpty)));
@@ -752,6 +846,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final auth = context.read<AuthProvider>();
     final caissierName =
         auth.profile?.fullName ?? auth.user?.email ?? 'Caissier';
+    final posCart = context.watch<PosCartSettingsProvider>();
 
     final isOnline = ConnectivityService.instance.isOnline;
     return Scaffold(
@@ -788,7 +883,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     flex: 35,
                     child: PosQuickRightZone(
                       cartItemCount: _cartItemCount,
-                      cartTiles: _buildQuickCartTiles(stockByProductId),
+                      cartTiles: _buildQuickCartTiles(
+                        stockByProductId,
+                        showQuantityInput: posCart.quickShowQuantityInput,
+                        showQuantityButtons: posCart.quickShowQuantityButtons,
+                      ),
                       footer: _buildRightZoneFooter(store, stockByProductId),
                     ),
                   ),
@@ -814,7 +913,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               ],
             ),
           ),
-          if (isNarrow) _buildMobileBottomBar(theme, store, stockByProductId),
+          if (isNarrow)
+            _buildMobileBottomBar(
+              theme,
+              store,
+              stockByProductId,
+              showQuantityInput: posCart.quickShowQuantityInput,
+              showQuantityButtons: posCart.quickShowQuantityButtons,
+            ),
         ],
       ),
     );
@@ -850,15 +956,22 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   }
 
   /// Header ~60px, fond orange #F97316, texte blanc. Sur mobile: layout compact pour ?viter overflow.
+  /// [SafeArea] haut : texte/icônes sous encoche / barre de statut.
   Widget _buildPosHeader(Store store, String caissierName) {
     final isNarrow = MediaQuery.sizeOf(context).width < 600;
     return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(color: PosQuickColors.orangePrincipal),
-      child: isNarrow
-          ? _buildPosHeaderMobile(store, caissierName)
-          : _buildPosHeaderDesktop(store, caissierName),
+      color: PosQuickColors.orangePrincipal,
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          child: isNarrow
+              ? _buildPosHeaderMobile(store, caissierName)
+              : _buildPosHeaderDesktop(store, caissierName),
+        ),
+      ),
     );
   }
 
@@ -886,12 +999,15 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13),
         ),
         const SizedBox(width: 16),
-        Text(
-          'Heure : $_currentTime',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
+        ValueListenableBuilder<String>(
+          valueListenable: _clockLabel,
+          builder: (context, time, _) => Text(
+            'Heure : $time',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         const Spacer(),
@@ -915,8 +1031,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         ),
         IconButton(
           icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 24),
-          onPressed: () => context.go(AppRoutes.stores),
-          tooltip: 'Quitter POS',
+          onPressed: _openSalesHistory,
+          tooltip: 'Retour à l\'écran Ventes',
         ),
       ],
     );
@@ -943,14 +1059,17 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              Text(
-                '${store.name} • $_currentTime',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
-                  fontSize: 11,
+              ValueListenableBuilder<String>(
+                valueListenable: _clockLabel,
+                builder: (context, time, _) => Text(
+                  '${store.name} • $time',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 11,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -978,8 +1097,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         ),
         IconButton(
           icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 24),
-          onPressed: () => context.go(AppRoutes.stores),
-          tooltip: 'Quitter',
+          onPressed: _openSalesHistory,
+          tooltip: 'Retour à l\'écran Ventes',
           style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
         ),
       ],
@@ -1125,19 +1244,28 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     );
   }
 
-  List<Widget> _buildQuickCartTiles(Map<String, int> stockByProductId) {
-    return _cart
-        .map(
-          (c) => PosQuickCartTile(
-            item: c,
-            stock: stockByProductId[c.productId] ?? 0,
-            onQtyDelta: (delta) =>
-                _updateQty(c.productId, delta, stockByProductId),
-            onRemove: () =>
-                _updateQty(c.productId, -c.quantity, stockByProductId),
-          ),
-        )
-        .toList();
+  List<Widget> _buildQuickCartTiles(
+    Map<String, int> stockByProductId, {
+    required bool showQuantityInput,
+    required bool showQuantityButtons,
+  }) {
+    return _cart.map((c) {
+      final controller = _qtyControllers.putIfAbsent(
+        c.productId,
+        () =>
+            TextEditingController(text: c.quantity == 0 ? '' : '${c.quantity}'),
+      );
+      return PosQuickCartTile(
+        item: c,
+        stock: stockByProductId[c.productId] ?? 0,
+        qtyController: controller,
+        onQtyDelta: (delta) => _updateQty(c.productId, delta, stockByProductId),
+        onSetQty: (v) => _setQty(c.productId, v, stockByProductId),
+        onRemove: () => _removeCartLine(c.productId),
+        showQuantityInput: showQuantityInput,
+        showQuantityButtons: showQuantityButtons,
+      );
+    }).toList();
   }
 
   Widget _buildRightZoneFooter(
@@ -1326,14 +1454,17 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => setState(() {
-                    _cart = [];
-                    _discount = 0;
-                    _amountReceived = 0;
-                    _amountReceivedTouched = false;
-                    _discountController.clear();
-                    _amountReceivedController.clear();
-                  }),
+                  onPressed: () {
+                    setState(() {
+                      _cart = [];
+                      _discount = 0;
+                      _amountReceived = 0;
+                      _amountReceivedTouched = false;
+                      _discountController.clear();
+                      _amountReceivedController.clear();
+                    });
+                    _clearQtyControllers();
+                  },
                   style: OutlinedButton.styleFrom(
                     backgroundColor: PosQuickColors.fondSecondaire,
                     foregroundColor: PosQuickColors.textePrincipal,
@@ -1427,7 +1558,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     );
   }
 
-  void _openCartSheet(Store? store, Map<String, int> stockByProductId) {
+  void _openCartSheet(
+    Store? store,
+    Map<String, int> stockByProductId, {
+    required bool showQuantityInput,
+    required bool showQuantityButtons,
+  }) {
     if (store == null) return;
     showModalBottomSheet<void>(
       context: context,
@@ -1495,7 +1631,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                           ),
                         )
                       else ...[
-                        ..._buildQuickCartTiles(stockByProductId).map(
+                        ..._buildQuickCartTiles(
+                          stockByProductId,
+                          showQuantityInput: showQuantityInput,
+                          showQuantityButtons: showQuantityButtons,
+                        ).map(
                           (w) => Padding(
                             padding: const EdgeInsets.only(bottom: 8),
                             child: w,
@@ -1519,8 +1659,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   Widget _buildMobileBottomBar(
     ThemeData theme,
     Store? store,
-    Map<String, int> stockByProductId,
-  ) {
+    Map<String, int> stockByProductId, {
+    required bool showQuantityInput,
+    required bool showQuantityButtons,
+  }) {
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -1538,7 +1680,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () => _openCartSheet(store, stockByProductId),
+                onTap: () => _openCartSheet(
+                  store,
+                  stockByProductId,
+                  showQuantityInput: showQuantityInput,
+                  showQuantityButtons: showQuantityButtons,
+                ),
                 borderRadius: BorderRadius.circular(12),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
@@ -1585,7 +1732,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           SizedBox(
             height: 48,
             child: FilledButton(
-              onPressed: () => _openCartSheet(store, stockByProductId),
+              onPressed: () => _openCartSheet(
+                store,
+                stockByProductId,
+                showQuantityInput: showQuantityInput,
+                showQuantityButtons: showQuantityButtons,
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: PosQuickColors.orangePrincipal,
                 foregroundColor: Colors.white,

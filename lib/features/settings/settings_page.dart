@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
@@ -6,7 +7,9 @@ import '../../../core/breakpoints.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
+import '../../../data/models/company.dart';
 import '../../../data/models/store.dart';
+import '../../../data/repositories/company_repository.dart';
 import '../../../data/repositories/settings_repository.dart';
 import '../../../data/repositories/subscription_repository.dart';
 import '../../../providers/offline_providers.dart';
@@ -17,6 +20,8 @@ import '../../../providers/permissions_provider.dart';
 import '../../../providers/theme_mode_provider.dart';
 import '../../../providers/pos_cart_settings_provider.dart';
 import 'package:go_router/go_router.dart';
+
+enum _PosCartQuantitySection { quick, invoiceA4 }
 
 /// Page Paramètres — profil, compte, entreprise/boutique, déconnexion (aligné web SettingsPage).
 class SettingsPage extends ConsumerStatefulWidget {
@@ -45,6 +50,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   String? _dangerScopeStoreId;
   String? _profileError;
   String? _passwordError;
+  bool _uploadingCompanyLogo = false;
 
   @override
   void initState() {
@@ -175,14 +181,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 24),
             _buildAppearanceCard(context),
             const SizedBox(height: 20),
-            _buildPosCartCard(context),
+            _buildPosCartCard(context, _PosCartQuantitySection.quick),
+            const SizedBox(height: 20),
+            _buildPosCartCard(context, _PosCartQuantitySection.invoiceA4),
             const SizedBox(height: 20),
             _buildProfileCard(context, auth),
             const SizedBox(height: 20),
             _buildAccountCard(context, auth),
             const SizedBox(height: 20),
             if (company.currentCompany != null) ...[
-              _buildCompanyCard(context, company),
+              _buildCompanyCard(context, company, permissions),
               const SizedBox(height: 20),
             ],
             if (company.currentCompanyId != null) ...[
@@ -308,9 +316,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
-  Widget _buildPosCartCard(BuildContext context) {
+  Widget _buildPosCartCard(BuildContext context, _PosCartQuantitySection section) {
     final theme = Theme.of(context);
     final posCart = context.watch<PosCartSettingsProvider>();
+    final (title, line1, showInput, showButtons, setInput, setButtons) = switch (section) {
+      _PosCartQuantitySection.quick => (
+          'Caisse POS rapide',
+          'Un seul mode à la fois pour la caisse rapide. Le panier se met à jour automatiquement à la saisie.',
+          posCart.quickShowQuantityInput,
+          posCart.quickShowQuantityButtons,
+          posCart.setQuickShowQuantityInput,
+          posCart.setQuickShowQuantityButtons,
+        ),
+      _PosCartQuantitySection.invoiceA4 => (
+          'Caisse Facture A4',
+          'Un seul mode à la fois pour la facture A4. Le panier se met à jour automatiquement à la saisie.',
+          posCart.invoiceShowQuantityInput,
+          posCart.invoiceShowQuantityButtons,
+          posCart.setInvoiceShowQuantityInput,
+          posCart.setInvoiceShowQuantityButtons,
+        ),
+    };
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
@@ -327,14 +353,14 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 Icon(Icons.shopping_cart_rounded, size: 22, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
                 Text(
-                  'Caisse (POS)',
+                  title,
                   style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Un seul mode à la fois (indépendant de l\'entreprise ou de la boutique). Le panier se met à jour automatiquement à la saisie.',
+              line1,
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 6),
@@ -346,15 +372,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             SwitchListTile(
               title: const Text('Champ de saisie pour la quantité'),
               subtitle: const Text('Saisir le nombre : le total se met à jour automatiquement'),
-              value: posCart.showQuantityInput,
-              onChanged: (v) => posCart.setShowQuantityInput(v),
+              value: showInput,
+              onChanged: (v) => setInput(v),
               contentPadding: EdgeInsets.zero,
             ),
             SwitchListTile(
               title: const Text('Boutons (-) et (+)'),
               subtitle: const Text('Incrémenter ou décrémenter la quantité'),
-              value: posCart.showQuantityButtons,
-              onChanged: (v) => posCart.setShowQuantityButtons(v),
+              value: showButtons,
+              onChanged: (v) => setButtons(v),
               contentPadding: EdgeInsets.zero,
             ),
           ],
@@ -610,7 +636,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
-  Widget _buildCompanyCard(BuildContext context, CompanyProvider company) {
+  Widget _buildCompanyCard(
+    BuildContext context,
+    CompanyProvider company,
+    PermissionsProvider permissions,
+  ) {
     final theme = Theme.of(context);
     final companies = company.companies;
     final stores = company.stores;
@@ -638,6 +668,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               ],
             ),
             const SizedBox(height: 20),
+            if (permissions.isOwner && currentCompany != null) ...[
+              _buildCompanyLogoSection(context, company, currentCompany),
+              const SizedBox(height: 16),
+            ],
             if (companies.length > 1) ...[
               DropdownButtonFormField<String>(
                 initialValue: company.currentCompanyId,
@@ -704,6 +738,162 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildCompanyLogoSection(
+    BuildContext context,
+    CompanyProvider companyProvider,
+    Company company,
+  ) {
+    final theme = Theme.of(context);
+    final url = company.logoUrl?.trim();
+    final hasUrl = url != null && url.isNotEmpty;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Material(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: _uploadingCompanyLogo ? null : () => _pickAndUploadCompanyLogo(companyProvider),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: theme.colorScheme.outline.withValues(alpha: 0.35),
+                ),
+              ),
+              child: _uploadingCompanyLogo
+                  ? const Center(
+                      child: SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : hasUrl
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(11),
+                          child: Image.network(
+                            url,
+                            width: 80,
+                            height: 80,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => Icon(
+                              Icons.add_photo_alternate_rounded,
+                              size: 36,
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
+                        )
+                      : Icon(Icons.add_photo_alternate_rounded, size: 36, color: theme.colorScheme.outline),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Logo entreprise',
+                style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Affiché en haut du menu. Cliquez pour choisir une image (PNG, JPG…).',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (hasUrl)
+                TextButton.icon(
+                  onPressed: _uploadingCompanyLogo
+                      ? null
+                      : () => _removeCompanyLogo(companyProvider),
+                  icon: Icon(Icons.delete_outline_rounded, size: 18, color: theme.colorScheme.error),
+                  label: Text(
+                    'Retirer le logo',
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickAndUploadCompanyLogo(CompanyProvider companyProvider) async {
+    final companyId = companyProvider.currentCompanyId;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (companyId == null || userId == null) return;
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      if (file.bytes == null) return;
+      setState(() => _uploadingCompanyLogo = true);
+      final repo = CompanyRepository();
+      final name = file.name.isEmpty ? 'logo.jpg' : file.name;
+      final contentType = file.extension != null && file.extension!.isNotEmpty
+          ? 'image/${file.extension!.toLowerCase()}'
+          : 'image/jpeg';
+      final publicUrl = await repo.uploadCompanyLogo(
+        companyId,
+        file.bytes!,
+        name,
+        contentType,
+      );
+      await repo.updateCompany(companyId, {'logo_url': publicUrl});
+      await companyProvider.refreshCompanies(userId);
+      if (!mounted) return;
+      AppToast.success(context, 'Logo entreprise enregistré');
+    } catch (e, st) {
+      AppErrorHandler.log(e, st);
+      if (mounted) {
+        AppErrorHandler.show(
+          context,
+          e,
+          fallback: 'Impossible d\'enregistrer le logo. Réessayez.',
+          stackTrace: st,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingCompanyLogo = false);
+    }
+  }
+
+  Future<void> _removeCompanyLogo(CompanyProvider companyProvider) async {
+    final companyId = companyProvider.currentCompanyId;
+    final userId = context.read<AuthProvider>().user?.id;
+    if (companyId == null || userId == null) return;
+    setState(() => _uploadingCompanyLogo = true);
+    try {
+      await CompanyRepository().updateCompany(companyId, {'logo_url': null});
+      await companyProvider.refreshCompanies(userId);
+      if (!mounted) return;
+      AppToast.success(context, 'Logo retiré');
+    } catch (e, st) {
+      AppErrorHandler.log(e, st);
+      if (mounted) {
+        AppErrorHandler.show(
+          context,
+          e,
+          fallback: 'Impossible de retirer le logo.',
+          stackTrace: st,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingCompanyLogo = false);
+    }
   }
 
   static String _formatDate(DateTime d) {

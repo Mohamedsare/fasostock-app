@@ -5,6 +5,7 @@ import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../pos_quick/pos_quick_constants.dart';
 import '../pos_models.dart';
+import 'pos_cart_qty_field.dart';
 
 /// Ligne du panier POS : miniature, nom, qté (+/- ou champ), unité, total, supprimer.
 class PosCartTile extends StatelessWidget {
@@ -31,8 +32,8 @@ class PosCartTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final posCart = context.watch<PosCartSettingsProvider>();
-    final showInput = posCart.showQuantityInput;
-    final showButtons = posCart.showQuantityButtons;
+    final showInput = posCart.invoiceShowQuantityInput;
+    final showButtons = posCart.invoiceShowQuantityButtons;
     final lowStock = stock >= 0 && item.quantity > stock;
 
     return Container(
@@ -73,37 +74,11 @@ class PosCartTile extends StatelessWidget {
                     if (showInput)
                       SizedBox(
                         width: 72,
-                        child: TextField(
+                        child: PosCartQtyField(
                           controller: qtyController,
-                          keyboardType: TextInputType.number,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: PosQuickColors.textePrincipal,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                          ),
-                          decoration: InputDecoration(
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            filled: true,
-                            fillColor: theme.colorScheme.surface,
-                          ),
-                          onChanged: (v) {
-                            final t = v.trim();
-                            if (t.isEmpty) return;
-                            final n = int.tryParse(t);
-                            if (n != null && n >= 0 && n != item.quantity) onSetQty(n);
-                          },
-                          onSubmitted: (v) {
-                            final n = int.tryParse(v.trim());
-                            if (n != null && n >= 0) {
-                              onSetQty(n);
-                            } else {
-                              qtyController.text = '${item.quantity}';
-                            }
-                          },
-                          onTap: () => qtyController.selection = TextSelection(baseOffset: 0, extentOffset: qtyController.text.length),
+                          currentQuantity: item.quantity,
+                          surfaceColor: theme.colorScheme.surface,
+                          onCommit: onSetQty,
                         ),
                       )
                     else

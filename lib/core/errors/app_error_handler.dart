@@ -124,15 +124,33 @@ class AppErrorHandler {
 
   /// Affiche l'erreur en Snackbar (message utilisateur) et log le détail technique.
   /// Passez [stackTrace] depuis `catch (e, st)` pour une remontée complète (debug + `log_app_error`).
-  static void show(BuildContext context, Object? error, {String? fallback, StackTrace? stackTrace}) {
+  /// [logSource] / [logContext] : filtrage côté super admin (ex. `pos_quick`, `{ "op": "sale" }`).
+  static void show(
+    BuildContext context,
+    Object? error, {
+    String? fallback,
+    StackTrace? stackTrace,
+    String logSource = 'app_error_handler',
+    Map<String, dynamic>? logContext,
+  }) {
     final message = ErrorMapper.toMessage(error, fallback: fallback);
-    _log(error, stackTrace);
+    _log(
+      error,
+      stackTrace: stackTrace,
+      logSource: logSource,
+      logContext: logContext,
+    );
     if (context.mounted) AppToast.error(context, message);
   }
 
   /// Affiche un message d'erreur en Snackbar (déjà rédigé pour l'utilisateur).
-  static void showMessage(BuildContext context, String userMessage) {
-    _log(userMessage, null);
+  static void showMessage(
+    BuildContext context,
+    String userMessage, {
+    String logSource = 'app_error_handler',
+    Map<String, dynamic>? logContext,
+  }) {
+    _log(userMessage, logSource: logSource, logContext: logContext);
     if (context.mounted) AppToast.error(context, userMessage);
   }
 
@@ -143,9 +161,16 @@ class AppErrorHandler {
     String? fallback,
     StackTrace? stackTrace,
     VoidCallback? onClose,
+    String logSource = 'app_error_handler',
+    Map<String, dynamic>? logContext,
   }) {
     final message = ErrorMapper.toMessage(error, fallback: fallback);
-    _log(error, stackTrace);
+    _log(
+      error,
+      stackTrace: stackTrace,
+      logSource: logSource,
+      logContext: logContext,
+    );
     if (!context.mounted) return;
     showDialog<void>(
       context: context,
@@ -171,7 +196,12 @@ class AppErrorHandler {
   }
 
   /// Log technique (debug + éventuelle remontée serveur) — jamais affiché tel quel à l'utilisateur.
-  static void _log(Object? error, [StackTrace? stackTrace]) {
+  static void _log(
+    Object? error, {
+    StackTrace? stackTrace,
+    String logSource = 'app_error_handler',
+    Map<String, dynamic>? logContext,
+  }) {
     if (kDebugMode && error != null) {
       if (error is PostgrestException) {
         debugPrint(
@@ -187,13 +217,29 @@ class AppErrorHandler {
     RemoteErrorLogger.capture(
       error,
       stackTrace: stackTrace,
-      source: 'app_error_handler',
+      source: logSource,
+      context: logContext,
     );
   }
 
-  /// Log avec stack trace (ex. dans un `catch (e, st)` sans afficher de toast).
+  /// Log avec stack trace (ex. `catch (e, st)` → `log(e, st)`).
   static void log(Object? error, [StackTrace? stackTrace]) {
-    _log(error, stackTrace);
+    _log(error, stackTrace: stackTrace);
+  }
+
+  /// Comme [log], avec source / contexte pour la table `log_app_error` (filtres super admin).
+  static void logWithContext(
+    Object? error, {
+    StackTrace? stackTrace,
+    String logSource = 'app_error_handler',
+    Map<String, dynamic>? logContext,
+  }) {
+    _log(
+      error,
+      stackTrace: stackTrace,
+      logSource: logSource,
+      logContext: logContext,
+    );
   }
 
   /// JWT expiré / 401 PostgREST — état d’auth attendu après veille longue ou refresh raté ;

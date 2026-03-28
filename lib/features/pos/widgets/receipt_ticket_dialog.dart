@@ -7,6 +7,7 @@ import 'receipt_ticket_layout.dart';
 class ReceiptTicketData {
   ReceiptTicketData({
     required this.storeName,
+    this.storeLogoUrl,
     this.storeAddress,
     this.storePhone,
     required this.saleNumber,
@@ -25,6 +26,8 @@ class ReceiptTicketData {
   }) : date = date ?? DateTime.now();
 
   final String storeName;
+  /// URL publique du logo boutique (Supabase `logo_url`) — affiché en haut du ticket, centré.
+  final String? storeLogoUrl;
   final String? storeAddress;
   final String? storePhone;
   final String saleNumber;
@@ -225,6 +228,22 @@ class ReceiptTicketWidget extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (data.storeLogoUrl != null && data.storeLogoUrl!.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 248, maxHeight: 80),
+                    child: Image.network(
+                      data.storeLogoUrl!.trim(),
+                      fit: BoxFit.contain,
+                      alignment: Alignment.center,
+                      filterQuality: FilterQuality.medium,
+                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ),
             Text(
               data.storeName.toUpperCase(),
               textAlign: TextAlign.center,

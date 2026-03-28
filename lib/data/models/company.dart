@@ -4,6 +4,7 @@ class Company {
     required this.id,
     required this.name,
     this.slug,
+    this.logoUrl,
     this.isActive = true,
     this.storeQuota = 1,
     this.aiPredictionsEnabled = false,
@@ -12,6 +13,8 @@ class Company {
   final String id;
   final String name;
   final String? slug;
+  /// Logo entreprise (`companies.logo_url`) — affichage shell, etc.
+  final String? logoUrl;
   final bool isActive;
   final int storeQuota;
   final bool aiPredictionsEnabled;
@@ -21,6 +24,7 @@ class Company {
       id: json['id'] as String,
       name: json['name'] as String,
       slug: json['slug'] as String?,
+      logoUrl: json['logo_url'] as String?,
       isActive: json['is_active'] as bool? ?? true,
       storeQuota: (json['store_quota'] is int)
           ? json['store_quota'] as int

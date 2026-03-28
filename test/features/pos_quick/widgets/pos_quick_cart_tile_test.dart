@@ -4,6 +4,28 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fasostock/features/pos_quick/pos_quick_models.dart';
 import 'package:fasostock/features/pos_quick/widgets/pos_quick_cart_tile.dart';
 
+PosQuickCartTile _tile({
+  required PosCartItem item,
+  required int stock,
+  required TextEditingController qtyController,
+  void Function(int delta)? onQtyDelta,
+  void Function(int value)? onSetQty,
+  void Function()? onRemove,
+  bool showQuantityInput = false,
+  bool showQuantityButtons = true,
+}) {
+  return PosQuickCartTile(
+    item: item,
+    stock: stock,
+    qtyController: qtyController,
+    onQtyDelta: onQtyDelta ?? (_) {},
+    onSetQty: onSetQty ?? (_) {},
+    onRemove: onRemove ?? () {},
+    showQuantityInput: showQuantityInput,
+    showQuantityButtons: showQuantityButtons,
+  );
+}
+
 void main() {
   group('PosQuickCartTile', () {
     testWidgets('displays item name, quantity and total', (WidgetTester tester) async {
@@ -15,25 +37,18 @@ void main() {
         unitPrice: 1500,
         total: 3000,
       );
-      int? qtyDelta;
-      bool removeCalled = false;
+      final ctrl = TextEditingController(text: '2');
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PosQuickCartTile(
-              item: item,
-              stock: 10,
-              onQtyDelta: (delta) => qtyDelta = delta,
-              onRemove: () => removeCalled = true,
-            ),
+            body: _tile(item: item, stock: 10, qtyController: ctrl),
           ),
         ),
       );
 
       expect(find.text('Café 250g'), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
-      // formatCurrency may format as "3 000" or "3,000" depending on locale
       expect(find.byType(PosQuickCartTile), findsOneWidget);
     });
 
@@ -47,15 +62,16 @@ void main() {
         total: 1000,
       );
       int? lastDelta;
+      final ctrl = TextEditingController(text: '2');
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PosQuickCartTile(
+            body: _tile(
               item: item,
               stock: 10,
+              qtyController: ctrl,
               onQtyDelta: (delta) => lastDelta = delta,
-              onRemove: () {},
             ),
           ),
         ),
@@ -77,15 +93,16 @@ void main() {
         total: 500,
       );
       int? lastDelta;
+      final ctrl = TextEditingController(text: '1');
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PosQuickCartTile(
+            body: _tile(
               item: item,
               stock: 10,
+              qtyController: ctrl,
               onQtyDelta: (delta) => lastDelta = delta,
-              onRemove: () {},
             ),
           ),
         ),
@@ -107,14 +124,15 @@ void main() {
         total: 200,
       );
       bool removeCalled = false;
+      final ctrl = TextEditingController(text: '1');
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PosQuickCartTile(
+            body: _tile(
               item: item,
               stock: 10,
-              onQtyDelta: (_) {},
+              qtyController: ctrl,
               onRemove: () => removeCalled = true,
             ),
           ),
@@ -136,16 +154,12 @@ void main() {
         unitPrice: 100,
         total: 500,
       );
+      final ctrl = TextEditingController(text: '5');
 
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: PosQuickCartTile(
-              item: item,
-              stock: 2,
-              onQtyDelta: (_) {},
-              onRemove: () {},
-            ),
+            body: _tile(item: item, stock: 2, qtyController: ctrl),
           ),
         ),
       );

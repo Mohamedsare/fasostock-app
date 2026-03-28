@@ -31,6 +31,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import 'pos_models.dart';
 import 'services/invoice_a4_pdf_service.dart';
@@ -142,6 +143,14 @@ class _PosPageState extends ConsumerState<PosPage> {
         AppErrorHandler.log(e, st);
       }
     }
+  }
+
+  /// Quitter le POS : écran Ventes, filtré sur la boutique courante.
+  void _leavePosToSalesScreen() {
+    context.read<CompanyProvider>().setCurrentStoreId(widget.storeId);
+    context.read<SalesPageProvider>().setFilters(storeId: widget.storeId);
+    context.read<SalesPageProvider>().invalidate();
+    context.go(AppRoutes.sales);
   }
 
   void _warmInvoiceLogoCacheIfNeeded(Store? store) {
@@ -512,6 +521,12 @@ class _PosPageState extends ConsumerState<PosPage> {
         }
         existing.quantity = newQty;
         existing.total = newQty * existing.unitPrice;
+        final pid = existing.productId;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _qtyControllers[pid]?.text =
+              newQty == 0 ? '' : newQty.toString();
+        });
       } else {
         if (stock <= 0) return;
         _cart.add(
@@ -520,9 +535,9 @@ class _PosPageState extends ConsumerState<PosPage> {
             name: p.name,
             sku: p.sku,
             unit: _defaultUnitForProduct(p),
-            quantity: 1,
+            quantity: 0,
             unitPrice: p.salePrice,
-            total: p.salePrice,
+            total: 0,
             imageUrl: p.productImages?.isNotEmpty == true
                 ? p.productImages!.first.url
                 : null,
@@ -551,6 +566,7 @@ class _PosPageState extends ConsumerState<PosPage> {
     final stock = stockByProductId[productId] ?? 0;
     int? newQty;
     setState(() {
+      final beforeLen = _cart.length;
       _cart = _cart
           .map((c) {
             if (c.productId != productId) return c;
@@ -566,12 +582,15 @@ class _PosPageState extends ConsumerState<PosPage> {
           })
           .where((c) => c.quantity > 0)
           .toList();
-      if (newQty == null && _qtyControllers.containsKey(productId)) {
+      if (_cart.length < beforeLen && _qtyControllers.containsKey(productId)) {
         _qtyControllers[productId]?.dispose();
         _qtyControllers.remove(productId);
       }
     });
-    if (newQty != null) _qtyControllers[productId]?.text = newQty.toString();
+    if (newQty != null && _qtyControllers.containsKey(productId)) {
+      _qtyControllers[productId]!.text =
+          newQty == 0 ? '' : newQty.toString();
+    }
   }
 
   void _clearQtyControllers() {
@@ -594,13 +613,14 @@ class _PosPageState extends ConsumerState<PosPage> {
     final requested = value.clamp(0, 999);
     if (stock >= 0 && requested > stock) {
       _showStockLimitToast();
-      _qtyControllers[productId]?.text = current.quantity.toString();
+      _qtyControllers[productId]?.text = current.quantity == 0
+          ? ''
+          : current.quantity.toString();
       return;
     }
 
     final clamped = requested;
     setState(() {
-      final before = _cart.length;
       _cart = _cart
           .map((c) {
             if (c.productId != productId) return c;
@@ -608,14 +628,18 @@ class _PosPageState extends ConsumerState<PosPage> {
             c.total = clamped * c.unitPrice;
             return c;
           })
-          .where((c) => c.quantity > 0)
           .toList();
-      if (_cart.length < before && _qtyControllers.containsKey(productId)) {
-        _qtyControllers[productId]?.dispose();
-        _qtyControllers.remove(productId);
-      }
     });
-    _qtyControllers[productId]?.text = clamped.toString();
+    _qtyControllers[productId]?.text =
+        clamped == 0 ? '' : clamped.toString();
+  }
+
+  void _removeCartLine(String productId) {
+    setState(() {
+      _cart = _cart.where((c) => c.productId != productId).toList();
+      _qtyControllers[productId]?.dispose();
+      _qtyControllers.remove(productId);
+    });
   }
 
   void _showStockLimitToast() {
@@ -650,6 +674,13 @@ class _PosPageState extends ConsumerState<PosPage> {
     final userId = context.read<AuthProvider>().user?.id;
     if (companyId == null || userId == null || store == null || !_canPay)
       return;
+    if (_cart.any((c) => c.quantity <= 0)) {
+      AppToast.error(
+        context,
+        'Indiquez une quantité supérieure à 0 pour chaque ligne du panier.',
+      );
+      return;
+    }
     if (_stockWarnings(stockByProductId).isNotEmpty) {
       AppToast.error(context, 'Stock insuffisant pour certains articles.');
       return;
@@ -1035,10 +1066,12 @@ class _PosPageState extends ConsumerState<PosPage> {
     } catch (_) {}
     _warmInvoiceLogoCacheIfNeeded(store);
 
+    // Ne pas bloquer tout l'écran quand un stream repasse en chargement alors qu'on a déjà des données
+    // (sinon chaque setState pendant la saisie quantité → spinner → le panier semble « vidé »).
     final loading =
-        productsAsync.isLoading ||
-        customersAsync.isLoading ||
-        stockAsync.isLoading ||
+        (productsAsync.isLoading && !productsAsync.hasValue) ||
+        (customersAsync.isLoading && !customersAsync.hasValue) ||
+        (stockAsync.isLoading && !stockAsync.hasValue) ||
         (store == null &&
             (storesAsync.isLoading ||
                 (storesAsync.hasValue && stores.isNotEmpty)));
@@ -1186,7 +1219,9 @@ class _PosPageState extends ConsumerState<PosPage> {
     return _cart.map((c) {
       final controller = _qtyControllers.putIfAbsent(
         c.productId,
-        () => TextEditingController(text: '${c.quantity}'),
+        () => TextEditingController(
+          text: c.quantity == 0 ? '' : '${c.quantity}',
+        ),
       );
       return PosCartTile(
         item: c,
@@ -1195,7 +1230,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         onQtyDelta: (delta) => _updateQty(c.productId, delta, stockByProductId),
         onSetQty: (v) => _setQty(c.productId, v, stockByProductId),
         onUnitChange: (u) => _setUnit(c.productId, u),
-        onRemove: () => _updateQty(c.productId, -c.quantity, stockByProductId),
+        onRemove: () => _removeCartLine(c.productId),
       );
     }).toList();
   }
@@ -1686,11 +1721,15 @@ class _PosPageState extends ConsumerState<PosPage> {
   Widget _buildPosHeader(Store store) {
     final isNarrow = MediaQuery.sizeOf(context).width < 600;
     return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(color: PosQuickColors.orangePrincipal),
-      child: isNarrow
-          ? Row(
+      color: PosQuickColors.orangePrincipal,
+      child: SafeArea(
+        bottom: false,
+        child: Container(
+          height: 60,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          alignment: Alignment.center,
+          child: isNarrow
+              ? Row(
               children: [
                 const Icon(Icons.receipt_long_rounded, color: Colors.white),
                 const SizedBox(width: 8),
@@ -1763,11 +1802,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.logout_rounded, color: Colors.white),
-                  onPressed: () => context.go(AppRoutes.stores),
-                  tooltip: 'Quitter POS',
+                  onPressed: _leavePosToSalesScreen,
+                  tooltip: 'Retour à l\'écran Ventes',
                 ),
               ],
             ),
+        ),
+      ),
     );
   }
 

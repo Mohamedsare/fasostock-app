@@ -226,6 +226,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
     final date = DateTime.tryParse(sale.createdAt);
     final receipt = ReceiptTicketData(
       storeName: store?.name ?? sale.store?.name ?? '',
+      storeLogoUrl: store?.logoUrl,
       storeAddress: store?.address,
       storePhone: store?.phone,
       saleNumber: sale.saleNumber,

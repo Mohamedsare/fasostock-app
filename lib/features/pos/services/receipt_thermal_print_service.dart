@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -51,6 +52,19 @@ class ReceiptThermalPrintService {
     final saleNumber = _sanitizeForPdf(data.saleNumber);
     final storeName = _sanitizeForPdf(data.storeName);
 
+    pw.MemoryImage? logoPdf;
+    final logoUrl = data.storeLogoUrl?.trim();
+    if (logoUrl != null && logoUrl.isNotEmpty) {
+      try {
+        final res = await http.get(Uri.parse(logoUrl));
+        if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+          logoPdf = pw.MemoryImage(res.bodyBytes);
+        }
+      } catch (_) {
+        // Ticket sans logo si réseau / image invalide
+      }
+    }
+
     final w = _thermalPaperWidthMm * PdfPageFormat.mm;
     final margin = _thermalMarginMm * PdfPageFormat.mm;
 
@@ -71,6 +85,16 @@ class ReceiptThermalPrintService {
     pw.Widget hrTotal() => pw.Text(ReceiptTicketLayout.sepTotal, style: tiny, textAlign: pw.TextAlign.center);
 
     final children = <pw.Widget>[
+      if (logoPdf != null) ...[
+        pw.Center(
+          child: pw.Image(
+            logoPdf,
+            width: 52 * PdfPageFormat.mm,
+            fit: pw.BoxFit.contain,
+          ),
+        ),
+        pw.SizedBox(height: 4),
+      ],
       pw.Center(child: pw.Text(storeName.toUpperCase(), style: storeTitleStyle, textAlign: pw.TextAlign.center)),
       if (data.storeAddress != null && data.storeAddress!.trim().isNotEmpty)
         pw.Padding(
