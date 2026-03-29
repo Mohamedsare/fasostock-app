@@ -240,6 +240,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         _qtyControllers.remove(productId);
       }
     });
+    // Aligner le champ après +/- même si le focus est encore sur le TextField
+    // (PosCartQtyField n’écrase pas le texte tant que le champ a le focus).
     if (newQty != null && _qtyControllers.containsKey(productId)) {
       _qtyControllers[productId]!.text = newQty == 0 ? '' : newQty.toString();
     }
@@ -273,7 +275,6 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         return c;
       }).toList();
     });
-    _qtyControllers[productId]?.text = clamped == 0 ? '' : clamped.toString();
   }
 
   void _removeCartLine(String productId) {

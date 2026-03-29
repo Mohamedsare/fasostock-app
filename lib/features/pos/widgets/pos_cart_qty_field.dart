@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../pos_quick/pos_quick_constants.dart';
 
@@ -50,14 +51,33 @@ class _PosCartQtyFieldState extends State<PosCartQtyField> {
   @override
   void didUpdateWidget(PosCartQtyField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.currentQuantity != oldWidget.currentQuantity &&
-        !_focusNode.hasFocus) {
+    if (widget.currentQuantity == oldWidget.currentQuantity) return;
+
+    /// Après le frame : évite d’écraser le brouillon (ex. champ vidé) quand `hasFocus`
+    /// n’est pas encore fiable au même tick qu’un `setState` parent — aligné web
+    /// (`activeElement` + `useLayoutEffect`).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Tant que ce champ a le focus (ou est le focus primaire), ne pas réinjecter la quantité panier.
+      if (_fieldIsFocusedForSync()) return;
       final want =
           widget.currentQuantity == 0 ? '' : '${widget.currentQuantity}';
       if (widget.controller.text != want) {
         widget.controller.text = want;
       }
+    });
+  }
+
+  /// `hasFocus` seul peut être faux un court instant ; on aligne aussi sur le focus primaire.
+  bool _fieldIsFocusedForSync() {
+    if (_focusNode.hasFocus) return true;
+    final primary = FocusManager.instance.primaryFocus;
+    if (primary == null) return false;
+    if (identical(primary, _focusNode)) return true;
+    for (final n in primary.children) {
+      if (identical(n, _focusNode)) return true;
     }
+    return false;
   }
 
   void _flush() {
@@ -86,7 +106,8 @@ class _PosCartQtyFieldState extends State<PosCartQtyField> {
     return TextField(
       focusNode: _focusNode,
       controller: widget.controller,
-      keyboardType: TextInputType.number,
+      keyboardType: TextInputType.text,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       textAlign: TextAlign.center,
       style: const TextStyle(
         color: PosQuickColors.textePrincipal,

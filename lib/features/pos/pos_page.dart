@@ -630,8 +630,6 @@ class _PosPageState extends ConsumerState<PosPage> {
           })
           .toList();
     });
-    _qtyControllers[productId]?.text =
-        clamped == 0 ? '' : clamped.toString();
   }
 
   void _removeCartLine(String productId) {
