@@ -13,6 +13,7 @@ import '../../../data/models/profile.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/widgets/faso_stock_wordmark.dart';
 
 /// Page de connexion — même comportement que LoginPage (web).
 class LoginPage extends StatefulWidget {
@@ -32,9 +33,11 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   String? _error;
   bool _loading = false;
+
   /// Compte bloqué après 5 tentatives : on affiche l'écran avec contact WhatsApp.
   bool _isLocked = false;
   String _lockedEmail = '';
+
   /// Après un échec, nombre de tentatives restantes (affiché dans le message d'erreur).
   int? _remainingAttempts;
   String _loadingLabel = 'Connexion...';
@@ -49,9 +52,16 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _checkLockAndSubmit() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
-    setState(() { _error = null; _remainingAttempts = null; _loading = true; });
+    setState(() {
+      _error = null;
+      _remainingAttempts = null;
+      _loading = true;
+    });
     try {
-      final status = await Supabase.instance.client.rpc('get_login_lock_status', params: {'p_email': email});
+      final status = await Supabase.instance.client.rpc(
+        'get_login_lock_status',
+        params: {'p_email': email},
+      );
       final list = status as List;
       final locked = list.isNotEmpty && (list.first as Map)['locked'] == true;
       if (!mounted) return;
@@ -123,7 +133,8 @@ class _LoginPageState extends State<LoginPage> {
       }
       if (auth.profile == null || !auth.isAuthenticated) {
         setState(() {
-          _error = 'Impossible de charger votre profil. Vérifiez la connexion et réessayez.';
+          _error =
+              'Impossible de charger votre profil. Vérifiez la connexion et réessayez.';
           _loading = false;
         });
         return;
@@ -142,11 +153,20 @@ class _LoginPageState extends State<LoginPage> {
     } on AuthException catch (e) {
       if (mounted) {
         try {
-          await Supabase.instance.client.rpc('record_failed_login', params: {'p_email': email});
-          final status = await Supabase.instance.client.rpc('get_login_lock_status', params: {'p_email': email});
+          await Supabase.instance.client.rpc(
+            'record_failed_login',
+            params: {'p_email': email},
+          );
+          final status = await Supabase.instance.client.rpc(
+            'get_login_lock_status',
+            params: {'p_email': email},
+          );
           final list = status as List;
-          final locked = list.isNotEmpty && (list.first as Map)['locked'] == true;
-          final int failed = list.isNotEmpty ? ((list.first as Map)['failed_attempts'] as num?)?.toInt() ?? 0 : 0;
+          final locked =
+              list.isNotEmpty && (list.first as Map)['locked'] == true;
+          final int failed = list.isNotEmpty
+              ? ((list.first as Map)['failed_attempts'] as num?)?.toInt() ?? 0
+              : 0;
           final int remaining = (5 - failed).clamp(0, 5);
           setState(() {
             _error = locked
@@ -240,35 +260,55 @@ class _LoginPageState extends State<LoginPage> {
             color: colorScheme.surfaceContainerLowest,
             borderRadius: BorderRadius.circular(radius),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: isMobile ? 12 : 24, offset: const Offset(0, 8)),
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: isMobile ? 12 : 24,
+                offset: const Offset(0, 8),
+              ),
             ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.lock_rounded, size: iconSize, color: colorScheme.error),
+              Icon(
+                Icons.lock_rounded,
+                size: iconSize,
+                color: colorScheme.error,
+              ),
               SizedBox(height: spaceL),
               Text(
                 'Compte temporairement bloqué',
-                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: spaceS),
               if (_lockedEmail.isNotEmpty)
                 Padding(
                   padding: EdgeInsets.only(bottom: spaceS),
-                  child: Text('$_lockedEmail', style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.primary), textAlign: TextAlign.center),
+                  child: Text(
+                    '$_lockedEmail',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.primary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               Text(
                 'Après 5 tentatives de connexion incorrectes, votre accès a été verrouillé pour des raisons de sécurité. Le super administrateur peut débloquer votre compte.',
-                style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: spaceM),
               Text(
                 'Contactez le support pour être débloqué :',
-                style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: spaceL),
@@ -277,14 +317,25 @@ class _LoginPageState extends State<LoginPage> {
                   try {
                     final uri = Uri.parse('https://wa.me/$_supportPhoneE164');
                     if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
                     } else if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible d\'ouvrir WhatsApp')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Impossible d\'ouvrir WhatsApp'),
+                        ),
+                      );
                     }
                   } catch (e) {
                     if (mounted) {
                       AppErrorHandler.log(e);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppErrorHandler.toUserMessage(e))));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(AppErrorHandler.toUserMessage(e)),
+                        ),
+                      );
                     }
                   }
                 },
@@ -307,20 +358,39 @@ class _LoginPageState extends State<LoginPage> {
                   try {
                     final uri = Uri.parse('tel:$_supportPhone');
                     if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        uri,
+                        mode: LaunchMode.externalApplication,
+                      );
                     } else if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible d\'ouvrir l\'application téléphone')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Impossible d\'ouvrir l\'application téléphone',
+                          ),
+                        ),
+                      );
                     }
                   } catch (e) {
                     if (mounted) {
                       AppErrorHandler.log(e);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppErrorHandler.toUserMessage(e))));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(AppErrorHandler.toUserMessage(e)),
+                        ),
+                      );
                     }
                   }
                 },
-                icon: Icon(Icons.phone_rounded, color: colorScheme.primary, size: isMobile ? 18 : 22),
+                icon: Icon(
+                  Icons.phone_rounded,
+                  color: colorScheme.primary,
+                  size: isMobile ? 18 : 22,
+                ),
                 label: Text('Appeler $_supportPhone'),
-                style: OutlinedButton.styleFrom(padding: EdgeInsets.symmetric(vertical: isMobile ? 10 : 14)),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.symmetric(vertical: isMobile ? 10 : 14),
+                ),
               ),
               SizedBox(height: spaceL),
               TextButton(
@@ -357,175 +427,205 @@ class _LoginPageState extends State<LoginPage> {
           child: _isLocked
               ? _buildBlockedContent(context)
               : SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isMobile ? double.infinity : 420),
-              child: Container(
-                padding: EdgeInsets.all(padCard),
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(radius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: isMobile ? 12 : 24,
-                      offset: const Offset(0, 8),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: padH,
+                    vertical: padV,
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isMobile ? double.infinity : 420,
                     ),
-                  ],
-                ),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Center(
-                        child: Image.asset(
-                          'assets/fasostocklogo.png',
-                          height: logoSize,
-                          width: logoSize,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                        ),
-                      ),
-                      SizedBox(height: spaceL),
-                      Text(
-                        'FasoStock',
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.3,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      SizedBox(height: spaceS),
-                      Text(
-                        'Connexion à votre espace',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      SizedBox(height: spaceX),
-                      if (!Env.hasValidSupabase)
-                        Padding(
-                          padding: EdgeInsets.only(bottom: spaceL),
-                          child: Text(
-                            'Config Supabase manquante. Relancez l\'app : un écran vous permettra de saisir l\'URL et la clé Supabase (Dashboard → Settings → API).',
-                            style: TextStyle(
-                              color: colorScheme.error,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      if (_remainingAttempts != null && _remainingAttempts! < 5)
-                        Padding(
-                          padding: EdgeInsets.only(bottom: spaceS),
-                          child: Text(
-                            'Tentatives restantes : $_remainingAttempts',
-                            style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.primary),
-                          ),
-                        ),
-                      if (_error != null) ...[
-                        Container(
-                          padding: EdgeInsets.all(isMobile ? AppTheme.spaceMdM : AppTheme.spaceMd),
-                          decoration: BoxDecoration(
-                            color: colorScheme.errorContainer.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(isMobile ? AppTheme.radiusMdM : AppTheme.radiusMd),
-                            border: Border.all(
-                              color: colorScheme.error.withOpacity(0.2),
-                              width: 1,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.error_outline_rounded,
-                                color: colorScheme.error,
-                                size: isMobile ? 18 : 22,
-                              ),
-                              SizedBox(width: spaceM),
-                              Expanded(
-                                child: Text(
-                                  _error!,
-                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                    color: colorScheme.onErrorContainer,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        SizedBox(height: spaceL),
-                      ],
-                      TextFormField(
-                        controller: _emailController,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          hintText: 'vous@exemple.com',
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        autocorrect: false,
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Email requis';
-                          return null;
-                        },
-                      ),
-                      SizedBox(height: spaceL),
-                      TextFormField(
-                        controller: _passwordController,
-                        decoration: const InputDecoration(labelText: 'Mot de passe'),
-                        obscureText: true,
-                        validator: (v) {
-                          if (v == null || v.isEmpty) return 'Mot de passe requis';
-                          return null;
-                        },
-                      ),
-                      SizedBox(height: spaceX),
-                      FilledButton(
-                        onPressed: _loading
-                            ? null
-                            : () {
-                                if (_formKey.currentState?.validate() ?? false) _checkLockAndSubmit();
-                              },
-                        child: _loading
-                            ? SizedBox(
-                                height: isMobile ? 20 : 24,
-                                width: isMobile ? 20 : 24,
-                                child: const CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('Se connecter'),
-                      ),
-                      if (_loading) ...[
-                        SizedBox(height: spaceS),
-                        Text(
-                          _loadingLabel,
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                      SizedBox(height: spaceL),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          TextButton(
-                            onPressed: () => context.push(AppRoutes.forgotPassword),
-                            child: const Text('Mot de passe oublié ?'),
-                          ),
-                          SizedBox(width: spaceL),
-                          TextButton(
-                            onPressed: () => context.push(AppRoutes.register),
-                            child: const Text('Créer un compte'),
+                    child: Container(
+                      padding: EdgeInsets.all(padCard),
+                      decoration: BoxDecoration(
+                        color: colorScheme.surfaceContainerLowest,
+                        borderRadius: BorderRadius.circular(radius),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: isMobile ? 12 : 24,
+                            offset: const Offset(0, 8),
                           ),
                         ],
                       ),
-                    ],
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Center(
+                              child: Image.asset(
+                                'assets/fasostocklogo.png',
+                                height: logoSize,
+                                width: logoSize,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) =>
+                                    const SizedBox.shrink(),
+                              ),
+                            ),
+                            SizedBox(height: spaceL),
+                            FasoStockWordmark(
+                              style: (theme.textTheme.headlineSmall ?? const TextStyle()).copyWith(
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.3,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            SizedBox(height: spaceS),
+                            Text(
+                              'Connexion à votre espace',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            SizedBox(height: spaceX),
+                            if (!Env.hasValidSupabase)
+                              Padding(
+                                padding: EdgeInsets.only(bottom: spaceL),
+                                child: Text(
+                                  'Config Supabase manquante. Relancez l\'app : un écran vous permettra de saisir l\'URL et la clé Supabase (Dashboard → Settings → API).',
+                                  style: TextStyle(
+                                    color: colorScheme.error,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                            if (_remainingAttempts != null &&
+                                _remainingAttempts! < 5)
+                              Padding(
+                                padding: EdgeInsets.only(bottom: spaceS),
+                                child: Text(
+                                  'Tentatives restantes : $_remainingAttempts',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            if (_error != null) ...[
+                              Container(
+                                padding: EdgeInsets.all(
+                                  isMobile
+                                      ? AppTheme.spaceMdM
+                                      : AppTheme.spaceMd,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.errorContainer.withOpacity(
+                                    0.6,
+                                  ),
+                                  borderRadius: BorderRadius.circular(
+                                    isMobile
+                                        ? AppTheme.radiusMdM
+                                        : AppTheme.radiusMd,
+                                  ),
+                                  border: Border.all(
+                                    color: colorScheme.error.withOpacity(0.2),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.error_outline_rounded,
+                                      color: colorScheme.error,
+                                      size: isMobile ? 18 : 22,
+                                    ),
+                                    SizedBox(width: spaceM),
+                                    Expanded(
+                                      child: Text(
+                                        _error!,
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color:
+                                                  colorScheme.onErrorContainer,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              SizedBox(height: spaceL),
+                            ],
+                            TextFormField(
+                              controller: _emailController,
+                              decoration: const InputDecoration(
+                                labelText: 'Email',
+                                hintText: 'vous@exemple.com',
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                              autocorrect: false,
+                              validator: (v) {
+                                if (v == null || v.isEmpty)
+                                  return 'Email requis';
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: spaceL),
+                            TextFormField(
+                              controller: _passwordController,
+                              decoration: const InputDecoration(
+                                labelText: 'Mot de passe',
+                              ),
+                              obscureText: true,
+                              validator: (v) {
+                                if (v == null || v.isEmpty)
+                                  return 'Mot de passe requis';
+                                return null;
+                              },
+                            ),
+                            SizedBox(height: spaceX),
+                            FilledButton(
+                              onPressed: _loading
+                                  ? null
+                                  : () {
+                                      if (_formKey.currentState?.validate() ??
+                                          false)
+                                        _checkLockAndSubmit();
+                                    },
+                              child: _loading
+                                  ? SizedBox(
+                                      height: isMobile ? 20 : 24,
+                                      width: isMobile ? 20 : 24,
+                                      child: const CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text('Se connecter'),
+                            ),
+                            if (_loading) ...[
+                              SizedBox(height: spaceS),
+                              Text(
+                                _loadingLabel,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                            SizedBox(height: spaceL),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                TextButton(
+                                  onPressed: () =>
+                                      context.push(AppRoutes.forgotPassword),
+                                  child: const Text('Mot de passe oublié ?'),
+                                ),
+                                SizedBox(width: spaceL),
+                                TextButton(
+                                  onPressed: () =>
+                                      context.push(AppRoutes.register),
+                                  child: const Text('Créer un compte'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ),
         ),
       ),
     );

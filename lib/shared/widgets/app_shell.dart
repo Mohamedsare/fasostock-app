@@ -14,6 +14,7 @@ import '../../features/notifications/owner_notifications_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/company_provider.dart';
 import '../../providers/permissions_provider.dart';
+import 'faso_stock_wordmark.dart';
 
 /// Layout principal : sidebar réductible (desktop) + bottom nav (mobile).
 class AppShell extends StatefulWidget {
@@ -31,25 +32,73 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   bool _sidebarCollapsed = false;
   static const _navItems = [
-    (path: AppRoutes.dashboard, label: 'Tableau de bord', icon: Icons.dashboard_rounded),
-    (path: AppRoutes.products, label: 'Produits', icon: Icons.inventory_2_rounded),
+    (
+      path: AppRoutes.dashboard,
+      label: 'Tableau de bord',
+      icon: Icons.dashboard_rounded,
+    ),
+    (
+      path: AppRoutes.products,
+      label: 'Produits',
+      icon: Icons.inventory_2_rounded,
+    ),
     (path: AppRoutes.sales, label: 'Ventes', icon: Icons.shopping_cart_rounded),
     (path: AppRoutes.stores, label: 'Boutiques', icon: Icons.store_rounded),
     (path: AppRoutes.inventory, label: 'Stock', icon: Icons.warehouse_rounded),
-    (path: AppRoutes.stockCashier, label: 'Stock (alertes)', icon: Icons.warehouse_rounded),
-    (path: AppRoutes.purchases, label: 'Achats', icon: Icons.local_shipping_rounded),
-    (path: AppRoutes.warehouse, label: 'Magasin', icon: Icons.home_work_rounded),
-    (path: AppRoutes.transfers, label: 'Transferts', icon: Icons.swap_horiz_rounded),
+    (
+      path: AppRoutes.stockCashier,
+      label: 'Stock (alertes)',
+      icon: Icons.warehouse_rounded,
+    ),
+    (
+      path: AppRoutes.purchases,
+      label: 'Achats',
+      icon: Icons.local_shipping_rounded,
+    ),
+    (
+      path: AppRoutes.warehouse,
+      label: 'Magasin',
+      icon: Icons.home_work_rounded,
+    ),
+    (
+      path: AppRoutes.transfers,
+      label: 'Transferts',
+      icon: Icons.swap_horiz_rounded,
+    ),
     (path: AppRoutes.customers, label: 'Clients', icon: Icons.person_rounded),
-    (path: AppRoutes.suppliers, label: 'Fournisseurs', icon: Icons.business_center_rounded),
+    (
+      path: AppRoutes.suppliers,
+      label: 'Fournisseurs',
+      icon: Icons.business_center_rounded,
+    ),
     (path: AppRoutes.reports, label: 'Rapports', icon: Icons.bar_chart_rounded),
-    (path: AppRoutes.ai, label: 'Prédictions IA', icon: Icons.auto_awesome_rounded),
+    (
+      path: AppRoutes.ai,
+      label: 'Prédictions IA',
+      icon: Icons.auto_awesome_rounded,
+    ),
     (path: AppRoutes.users, label: 'Utilisateurs', icon: Icons.people_rounded),
-    (path: AppRoutes.audit, label: 'Journal d\'audit', icon: Icons.history_rounded),
-    (path: AppRoutes.integrations, label: 'Intégrations API', icon: Icons.key_rounded),
-    (path: AppRoutes.settings, label: 'Paramètres', icon: Icons.settings_rounded),
+    (
+      path: AppRoutes.audit,
+      label: 'Journal d\'audit',
+      icon: Icons.history_rounded,
+    ),
+    (
+      path: AppRoutes.integrations,
+      label: 'Intégrations API',
+      icon: Icons.key_rounded,
+    ),
+    (
+      path: AppRoutes.settings,
+      label: 'Paramètres',
+      icon: Icons.settings_rounded,
+    ),
     (path: AppRoutes.help, label: 'Aide', icon: Icons.help_outline_rounded),
-    (path: AppRoutes.notifications, label: 'Notifications', icon: Icons.notifications_rounded),
+    (
+      path: AppRoutes.notifications,
+      label: 'Notifications',
+      icon: Icons.notifications_rounded,
+    ),
   ];
 
   @override
@@ -57,7 +106,9 @@ class _AppShellState extends State<AppShell> {
     final auth = context.watch<AuthProvider>();
     final company = context.watch<CompanyProvider>();
     final permissions = context.watch<PermissionsProvider>();
-    final isAdminRoute = GoRouterState.of(context).uri.path.startsWith('/admin');
+    final isAdminRoute = GoRouterState.of(
+      context,
+    ).uri.path.startsWith('/admin');
     final isWide = Breakpoints.isShellDesktop(MediaQuery.sizeOf(context).width);
 
     // Super admin : redirigé vers l'espace admin. Délai pour éviter assertion semantics parentDataDirty.
@@ -95,48 +146,65 @@ class _AppShellState extends State<AppShell> {
     // on filtre toujours par permissions pour ne pas exposer de menu après un échec de chargement.
     final List<({String path, String label, IconData icon})> visibleNavItems;
     if (!permissions.hasLoaded) {
-      visibleNavItems = _navItems.where((e) => cashierPaths.contains(e.path)).toList();
+      visibleNavItems = _navItems
+          .where((e) => cashierPaths.contains(e.path))
+          .toList();
     } else {
-      final canReports = permissions.hasPermission(Permissions.reportsViewGlobal) ||
+      final canReports =
+          permissions.hasPermission(Permissions.reportsViewGlobal) ||
           permissions.hasPermission(Permissions.reportsViewStore);
       final canAi = permissions.hasPermission(Permissions.aiInsightsView);
-      final canUsers = permissions.hasPermission(Permissions.usersManage) || permissions.isOwner;
+      final canUsers =
+          permissions.hasPermission(Permissions.usersManage) ||
+          permissions.isOwner;
       final canSettings = permissions.hasPermission(Permissions.settingsManage);
-      final canTransfers = permissions.hasPermission(Permissions.stockTransfer) ||
+      final canTransfers =
+          permissions.hasPermission(Permissions.stockTransfer) ||
           permissions.hasPermission(Permissions.transfersCreate) ||
           permissions.hasPermission(Permissions.transfersApprove);
       final canDashboard = permissions.hasPermission(Permissions.dashboardView);
-      final canProducts = permissions.hasPermission(Permissions.productsView) ||
+      final canProducts =
+          permissions.hasPermission(Permissions.productsView) ||
           permissions.hasPermission(Permissions.productsCreate) ||
           permissions.hasPermission(Permissions.productsUpdate) ||
           permissions.hasPermission(Permissions.productsDelete);
-      final canSales = permissions.hasPermission(Permissions.salesView) ||
+      final canSales =
+          permissions.hasPermission(Permissions.salesView) ||
           permissions.hasPermission(Permissions.salesCreate) ||
           permissions.hasPermission(Permissions.salesInvoiceA4);
-      final canStores = permissions.hasPermission(Permissions.storesView) ||
+      final canStores =
+          permissions.hasPermission(Permissions.storesView) ||
           permissions.hasPermission(Permissions.storesCreate);
-      final canInventory = permissions.hasPermission(Permissions.stockView) ||
+      final canInventory =
+          permissions.hasPermission(Permissions.stockView) ||
           permissions.hasPermission(Permissions.stockAdjust) ||
           permissions.hasPermission(Permissions.stockTransfer);
-      final canPurchases = permissions.hasPermission(Permissions.purchasesView) ||
+      final canPurchases =
+          permissions.hasPermission(Permissions.purchasesView) ||
           permissions.hasPermission(Permissions.purchasesCreate) ||
           permissions.hasPermission(Permissions.purchasesCancel) ||
           permissions.hasPermission(Permissions.purchasesUpdate) ||
           permissions.hasPermission(Permissions.purchasesDelete);
-      final canCustomers = permissions.hasPermission(Permissions.customersView) ||
+      final canCustomers =
+          permissions.hasPermission(Permissions.customersView) ||
           permissions.hasPermission(Permissions.customersManage);
-      final canSuppliers = permissions.hasPermission(Permissions.suppliersView) ||
+      final canSuppliers =
+          permissions.hasPermission(Permissions.suppliersView) ||
           permissions.hasPermission(Permissions.suppliersManage);
-      final canAudit = permissions.hasPermission(Permissions.auditView) || permissions.isOwner;
+      final canAudit =
+          permissions.hasPermission(Permissions.auditView) ||
+          permissions.isOwner;
       visibleNavItems = _navItems.where((e) {
         // Stock (alertes) : réservé aux caissiers / magasiniers, pas affiché pour l'owner.
-        if (e.path == AppRoutes.stockCashier) return canInventory && !permissions.isOwner;
+        if (e.path == AppRoutes.stockCashier)
+          return canInventory && !permissions.isOwner;
         if (e.path == AppRoutes.dashboard) return canDashboard;
         if (e.path == AppRoutes.products) return canProducts;
         if (e.path == AppRoutes.sales) return canSales;
         if (e.path == AppRoutes.stores) return canStores;
         // Stock (inventaire complet) : masqué pour la caissière, qui ne voit que "Stock (alertes)".
-        if (e.path == AppRoutes.inventory) return canInventory && !permissions.isCashier;
+        if (e.path == AppRoutes.inventory)
+          return canInventory && !permissions.isCashier;
         if (e.path == AppRoutes.purchases) return canPurchases;
         // Magasin (dépôt central) : réservé au propriétaire.
         if (e.path == AppRoutes.warehouse) return permissions.isOwner;
@@ -170,7 +238,8 @@ class _AppShellState extends State<AppShell> {
               company: company,
               isAdmin: false,
               navItems: visibleNavItems,
-              onToggleCollapse: () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
+              onToggleCollapse: () =>
+                  setState(() => _sidebarCollapsed = !_sidebarCollapsed),
             ),
           Expanded(
             child: isWide || isAdminRoute
@@ -181,7 +250,12 @@ class _AppShellState extends State<AppShell> {
                           builder: (context, ref, _) {
                             final companyId = company.currentCompanyId ?? '';
                             final storeId = company.currentStoreId ?? '';
-                            final notificationCount = ref.watch(ownerNotificationsCountProvider((companyId: companyId, storeId: storeId)));
+                            final notificationCount = ref.watch(
+                              ownerNotificationsCountProvider((
+                                companyId: companyId,
+                                storeId: storeId,
+                              )),
+                            );
                             return _AppBar(
                               auth: auth,
                               company: company,
@@ -189,7 +263,9 @@ class _AppShellState extends State<AppShell> {
                               isOwner: permissions.isOwner,
                               notificationCount: notificationCount,
                               sidebarCollapsed: _sidebarCollapsed,
-                              onMenuTap: () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
+                              onMenuTap: () => setState(
+                                () => _sidebarCollapsed = !_sidebarCollapsed,
+                              ),
                             );
                           },
                         ),
@@ -197,7 +273,9 @@ class _AppShellState extends State<AppShell> {
                         child: Center(
                           child: ConstrainedBox(
                             constraints: BoxConstraints(
-                              maxWidth: Breakpoints.effectiveMaxContentWidth(MediaQuery.sizeOf(context).width),
+                              maxWidth: Breakpoints.effectiveMaxContentWidth(
+                                MediaQuery.sizeOf(context).width,
+                              ),
                             ),
                             child: Padding(
                               padding: EdgeInsets.fromLTRB(
@@ -216,7 +294,8 @@ class _AppShellState extends State<AppShell> {
                 : Scaffold(
                     appBar: _MobileAppBar(
                       preferredHeight: 58,
-                      onMenuPressed: () => _showMoreBottomSheet(context, visibleNavItems, auth),
+                      onMenuPressed: () =>
+                          _showMoreBottomSheet(context, visibleNavItems, auth),
                     ),
                     body: LayoutBuilder(
                       builder: (_, constraints) {
@@ -225,8 +304,12 @@ class _AppShellState extends State<AppShell> {
                         /* Aligné appweb `FsPage` : px-3 (12px) sur mobile */
                         final horizontal = isMobile
                             ? 12.0
-                            : (w < Breakpoints.tablet ? AppTheme.spaceLg : AppTheme.spaceXl);
-                        final vertical = isMobile ? AppTheme.spaceMdM : AppTheme.spaceMd;
+                            : (w < Breakpoints.tablet
+                                  ? AppTheme.spaceLg
+                                  : AppTheme.spaceXl);
+                        final vertical = isMobile
+                            ? AppTheme.spaceMdM
+                            : AppTheme.spaceMd;
                         return SafeArea(
                           left: true,
                           right: true,
@@ -246,8 +329,11 @@ class _AppShellState extends State<AppShell> {
                       auth: auth,
                       company: company,
                       navItems: visibleNavItems,
-                      onMoreTap: () => _showMoreBottomSheet(context, visibleNavItems, auth),
-                      isMobile: Breakpoints.isMobile(MediaQuery.sizeOf(context).width),
+                      onMoreTap: () =>
+                          _showMoreBottomSheet(context, visibleNavItems, auth),
+                      isMobile: Breakpoints.isMobile(
+                        MediaQuery.sizeOf(context).width,
+                      ),
                     ),
                   ),
           ),
@@ -262,8 +348,14 @@ class _AppShellState extends State<AppShell> {
     List<({String path, String label, IconData icon})> visibleNavItems,
     AuthProvider auth,
   ) {
-    const bottomPaths = [AppRoutes.dashboard, AppRoutes.products, AppRoutes.sales];
-    final moreItems = visibleNavItems.where((e) => !bottomPaths.contains(e.path)).toList();
+    const bottomPaths = [
+      AppRoutes.dashboard,
+      AppRoutes.products,
+      AppRoutes.sales,
+    ];
+    final moreItems = visibleNavItems
+        .where((e) => !bottomPaths.contains(e.path))
+        .toList();
     const sheetBg = Color(0xFF262626);
     const tileOn = Colors.white10;
     const borderSubtle = Color(0x1AFFFFFF);
@@ -281,7 +373,9 @@ class _AppShellState extends State<AppShell> {
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
               child: Container(
                 width: double.infinity,
                 constraints: BoxConstraints(maxHeight: h * 0.85),
@@ -306,7 +400,9 @@ class _AppShellState extends State<AppShell> {
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                         child: moreItems.isEmpty
                             ? Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 24),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 24,
+                                ),
                                 child: Center(
                                   child: Text(
                                     'Aucune autre section',
@@ -331,36 +427,47 @@ class _AppShellState extends State<AppShell> {
                                         width: cellW,
                                         child: Material(
                                           color: tileOn,
-                                          borderRadius: BorderRadius.circular(8),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                           child: InkWell(
                                             onTap: () {
                                               Navigator.of(ctx).pop();
                                               context.go(e.path);
                                             },
-                                            borderRadius: BorderRadius.circular(8),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
                                             splashColor: Colors.white24,
                                             highlightColor: Colors.white10,
                                             child: Padding(
-                                              padding: const EdgeInsets.symmetric(
-                                                horizontal: 6,
-                                                vertical: 10,
-                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 6,
+                                                    vertical: 10,
+                                                  ),
                                               child: Column(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  Icon(e.icon, size: 24, color: Colors.white),
+                                                  Icon(
+                                                    e.icon,
+                                                    size: 24,
+                                                    color: Colors.white,
+                                                  ),
                                                   const SizedBox(height: 6),
                                                   Text(
                                                     e.label,
                                                     style: const TextStyle(
                                                       color: Colors.white,
                                                       fontSize: 12,
-                                                      fontWeight: FontWeight.w600,
+                                                      fontWeight:
+                                                          FontWeight.w600,
                                                       height: 1.25,
                                                     ),
                                                     textAlign: TextAlign.center,
                                                     maxLines: 2,
-                                                    overflow: TextOverflow.ellipsis,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
                                                   ),
                                                 ],
                                               ),
@@ -395,7 +502,11 @@ class _AppShellState extends State<AppShell> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.logout_rounded, color: Colors.white, size: 20),
+                                Icon(
+                                  Icons.logout_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
                                 SizedBox(width: 8),
                                 Text(
                                   'Déconnexion',
@@ -536,7 +647,9 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
     return Container(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
-        border: Border(bottom: BorderSide(color: theme.dividerColor.withOpacity(0.12))),
+        border: Border(
+          bottom: BorderSide(color: theme.dividerColor.withOpacity(0.12)),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.03),
@@ -579,26 +692,29 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
                 ],
               ),
         actions: [
-        if (isOwner) ...[
-          Badge(
-            isLabelVisible: notificationCount > 0,
-            label: Text(
-              notificationCount > 99 ? '99+' : '$notificationCount',
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.notifications_rounded, size: 24),
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (ctx) => const OwnerNotificationsDialog(),
+          if (isOwner) ...[
+            Badge(
+              isLabelVisible: notificationCount > 0,
+              label: Text(
+                notificationCount > 99 ? '99+' : '$notificationCount',
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              tooltip: 'Notifications',
+              child: IconButton(
+                icon: const Icon(Icons.notifications_rounded, size: 24),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (ctx) => const OwnerNotificationsDialog(),
+                ),
+                tooltip: 'Notifications',
+              ),
             ),
-          ),
-          const SizedBox(width: 32),
-        ],
-        if (company.companies.length > 1)
-          Padding(
+            const SizedBox(width: 32),
+          ],
+          if (company.companies.length > 1)
+            Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 200),
@@ -606,19 +722,39 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
                   child: Builder(
                     builder: (context) {
                       final seenIds = <String>{};
-                      final distinctCompanies = company.companies.where((c) => seenIds.add(c.id)).toList();
-                      final value = company.currentCompanyId != null &&
-                              distinctCompanies.any((c) => c.id == company.currentCompanyId)
+                      final distinctCompanies = company.companies
+                          .where((c) => seenIds.add(c.id))
+                          .toList();
+                      final value =
+                          company.currentCompanyId != null &&
+                              distinctCompanies.any(
+                                (c) => c.id == company.currentCompanyId,
+                              )
                           ? company.currentCompanyId
                           : null;
                       return DropdownButton<String>(
                         value: value,
-                        hint: Text('Entreprise', style: theme.textTheme.bodyMedium?.copyWith(fontSize: 14), overflow: TextOverflow.ellipsis),
+                        hint: Text(
+                          'Entreprise',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontSize: 14,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         isDense: true,
                         isExpanded: true,
                         borderRadius: BorderRadius.circular(10),
                         items: distinctCompanies
-                            .map((c) => DropdownMenuItem(value: c.id, child: Text(c.name, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 14))))
+                            .map(
+                              (c) => DropdownMenuItem(
+                                value: c.id,
+                                child: Text(
+                                  c.name,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 14),
+                                ),
+                              ),
+                            )
                             .toList(),
                         onChanged: (id) => company.setCurrentCompanyId(id),
                       );
@@ -644,10 +780,7 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
 
 /// App bar mobile — alignée `app-shell.tsx` (web) : logo + menu → MoreSheet, déconnexion ; pas de drawer ni sélecteur entreprise.
 class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const _MobileAppBar({
-    required this.onMenuPressed,
-    this.preferredHeight = 58,
-  });
+  const _MobileAppBar({required this.onMenuPressed, this.preferredHeight = 58});
 
   final VoidCallback onMenuPressed;
   final double preferredHeight;
@@ -689,7 +822,9 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
         leadingWidth: 0,
         titleSpacing: 0,
         title: Padding(
-          padding: EdgeInsets.only(left: max(12.0, MediaQuery.paddingOf(context).left)),
+          padding: EdgeInsets.only(
+            left: max(12.0, MediaQuery.paddingOf(context).left),
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -709,20 +844,18 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: primary.withOpacity(0.22)),
                         ),
-                        child: Icon(Icons.inventory_2_outlined, size: 18, color: primary),
+                        child: Icon(
+                          Icons.inventory_2_outlined,
+                          size: 18,
+                          color: primary,
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      RichText(
-                        text: TextSpan(
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            fontSize: 16,
-                          ),
-                          children: [
-                            TextSpan(text: 'Faso', style: TextStyle(color: onSurface)),
-                            TextSpan(text: 'Stock', style: TextStyle(color: primary)),
-                          ],
+                      FasoStockWordmark(
+                        style: theme.textTheme.titleMedium!.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                          fontSize: 16,
                         ),
                       ),
                     ],
@@ -741,7 +874,9 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
         ),
         actions: [
           Padding(
-            padding: EdgeInsets.only(right: max(12.0, MediaQuery.paddingOf(context).right)),
+            padding: EdgeInsets.only(
+              right: max(12.0, MediaQuery.paddingOf(context).right),
+            ),
             child: IconButton(
               icon: Icon(Icons.logout_rounded, size: 20, color: onSurface),
               onPressed: () async {
@@ -798,7 +933,10 @@ class _SidebarBrandGlyph extends StatelessWidget {
               child: SizedBox(
                 width: size * 0.5,
                 height: size * 0.5,
-                child: CircularProgressIndicator(strokeWidth: 2, color: primary),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: primary,
+                ),
               ),
             ),
           );
@@ -878,126 +1016,149 @@ class _Sidebar extends StatelessWidget {
         child: SizedBox(
           width: width,
           child: Column(
-          children: [
-            // En-tête marque — logo sans carte de fond ; tailles calées sur collapsedWidth (64px).
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                collapsed ? 6 : AppTheme.spaceMd,
-                collapsed ? AppTheme.spaceLg : AppTheme.spaceXl,
-                collapsed ? 6 : AppTheme.spaceMd,
-                collapsed ? AppTheme.spaceSm : AppTheme.spaceLg,
-              ),
-              child: Row(
-              mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-              children: [
-                _SidebarBrandGlyph(
-                  logoUrl: company.currentCompany?.logoUrl?.trim(),
-                  primary: primary,
-                  collapsed: collapsed,
+            children: [
+              // En-tête marque — logo sans carte de fond ; tailles calées sur collapsedWidth (64px).
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? 6 : AppTheme.spaceMd,
+                  collapsed ? AppTheme.spaceLg : AppTheme.spaceXl,
+                  collapsed ? 6 : AppTheme.spaceMd,
+                  collapsed ? AppTheme.spaceSm : AppTheme.spaceLg,
                 ),
-                if (!collapsed) ...[
-                  const SizedBox(width: AppTheme.spaceMd),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          isAdmin ? 'Admin' : 'FasoStock',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.3,
-                            fontSize: 18,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          isAdmin ? 'Plateforme' : 'Gestion & caisse',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.9),
-                            fontSize: 13,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                child: Row(
+                  mainAxisAlignment: collapsed
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.start,
+                  children: [
+                    _SidebarBrandGlyph(
+                      logoUrl: company.currentCompany?.logoUrl?.trim(),
+                      primary: primary,
+                      collapsed: collapsed,
                     ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.fromLTRB(
-                collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
-                AppTheme.spaceSm,
-                collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
-                AppTheme.spaceLg,
-              ),
-              children: navItems.map((e) => _NavTile(
-                path: e.path,
-                label: e.label,
-                icon: e.icon,
-                collapsed: collapsed,
-              )).toList(),
-            ),
-          ),
-          // Bouton réduire — style pill
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
-              AppTheme.spaceSm,
-              collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
-              collapsed ? AppTheme.spaceMd : AppTheme.spaceLg,
-            ),
-            child: Tooltip(
-              message: collapsed ? 'Agrandir le menu' : 'Réduire le menu',
-              child: Material(
-                color: theme.colorScheme.surfaceContainerHigh.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                child: InkWell(
-                  onTap: onToggleCollapse,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      vertical: collapsed ? 10 : 12,
-                      horizontal: collapsed ? 10 : 14,
-                    ),
-                    child: Row(
-                      mainAxisSize: collapsed ? MainAxisSize.min : MainAxisSize.max,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          collapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-                          size: 20,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        if (!collapsed) ...[
-                          const SizedBox(width: AppTheme.spaceSm),
-                          Expanded(
-                          child: Text(
-                            'Réduire le menu',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 13,
-                            ),
+                    if (!collapsed) ...[
+                      const SizedBox(width: AppTheme.spaceMd),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            isAdmin
+                                ? Text(
+                                    'Admin',
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.3,
+                                      fontSize: 18,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  )
+                                : FasoStockWordmark(
+                                    style: theme.textTheme.titleLarge!.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.3,
+                                      fontSize: 18,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                            Text(
+                              isAdmin ? 'Plateforme' : 'Gestion & caisse',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant
+                                    .withOpacity(0.9),
+                                fontSize: 13,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                        ],
-                      ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.fromLTRB(
+                    collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
+                    AppTheme.spaceSm,
+                    collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
+                    AppTheme.spaceLg,
+                  ),
+                  children: navItems
+                      .map(
+                        (e) => _NavTile(
+                          path: e.path,
+                          label: e.label,
+                          icon: e.icon,
+                          collapsed: collapsed,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+              // Bouton réduire — style pill
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
+                  AppTheme.spaceSm,
+                  collapsed ? AppTheme.spaceSm : AppTheme.spaceMd,
+                  collapsed ? AppTheme.spaceMd : AppTheme.spaceLg,
+                ),
+                child: Tooltip(
+                  message: collapsed ? 'Agrandir le menu' : 'Réduire le menu',
+                  child: Material(
+                    color: theme.colorScheme.surfaceContainerHigh.withOpacity(
+                      0.6,
+                    ),
+                    borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                    child: InkWell(
+                      onTap: onToggleCollapse,
+                      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(
+                          vertical: collapsed ? 10 : 12,
+                          horizontal: collapsed ? 10 : 14,
+                        ),
+                        child: Row(
+                          mainAxisSize: collapsed
+                              ? MainAxisSize.min
+                              : MainAxisSize.max,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              collapsed
+                                  ? Icons.chevron_right_rounded
+                                  : Icons.chevron_left_rounded,
+                              size: 20,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            if (!collapsed) ...[
+                              const SizedBox(width: AppTheme.spaceSm),
+                              Expanded(
+                                child: Text(
+                                  'Réduire le menu',
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
         ),
       ),
     );
@@ -1049,7 +1210,7 @@ class _NavTile extends StatelessWidget {
                   child: SizedBox(
                     width: 44,
                     height: 44,
-                      child: Center(
+                    child: Center(
                       child: Icon(
                         icon,
                         size: 26,
@@ -1086,9 +1247,7 @@ class _NavTile extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Material(
-            color: isActive
-                ? primary.withOpacity(0.1)
-                : Colors.transparent,
+            color: isActive ? primary.withOpacity(0.1) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
             child: InkWell(
               onTap: () => context.go(path),
@@ -1106,7 +1265,8 @@ class _NavTile extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: isActive
                             ? primary.withOpacity(0.15)
-                            : theme.colorScheme.surfaceContainerHigh.withOpacity(0.5),
+                            : theme.colorScheme.surfaceContainerHigh
+                                  .withOpacity(0.5),
                         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                       ),
                       child: Icon(
@@ -1122,7 +1282,9 @@ class _NavTile extends StatelessWidget {
                       child: Text(
                         label,
                         style: theme.textTheme.bodyLarge?.copyWith(
-                          fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                          fontWeight: isActive
+                              ? FontWeight.w600
+                              : FontWeight.w500,
                           fontSize: 15,
                           color: isActive
                               ? primary
@@ -1174,14 +1336,21 @@ class _BottomNav extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final loc = GoRouterState.of(context).uri.path;
-    const bottomPaths = [AppRoutes.dashboard, AppRoutes.products, AppRoutes.sales];
+    const bottomPaths = [
+      AppRoutes.dashboard,
+      AppRoutes.products,
+      AppRoutes.sales,
+    ];
     final mainItems = navItems.any((e) => e.path == AppRoutes.dashboard)
         ? navItems.where((e) => bottomPaths.contains(e.path)).toList()
         : navItems.take(3).toList();
     if (mainItems.isEmpty) return const SizedBox.shrink();
 
-    int selectedIndex = mainItems.indexWhere((e) =>
-        e.path == AppRoutes.dashboard ? loc == e.path : loc.startsWith(e.path));
+    int selectedIndex = mainItems.indexWhere(
+      (e) => e.path == AppRoutes.dashboard
+          ? loc == e.path
+          : loc.startsWith(e.path),
+    );
     if (selectedIndex < 0) selectedIndex = 0;
 
     final primary = theme.colorScheme.primary;
