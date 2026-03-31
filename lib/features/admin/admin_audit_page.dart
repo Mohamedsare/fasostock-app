@@ -48,15 +48,19 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
         _selectedCompanyId,
         limit: 100,
       );
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _entries = list;
         _loading = false;
       });
+      }
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _loading = false;
         _error = AppErrorHandler.toUserMessage(e, fallback: 'Impossible de charger le journal.');
       });
+      }
     }
   }
 
@@ -91,7 +95,7 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
                 final dropdown = SizedBox(
                   width: useRow ? 320 : double.infinity,
                   child: DropdownButtonFormField<String?>(
-                    value: _selectedCompanyId,
+                    initialValue: _selectedCompanyId,
                     decoration: adminInputDecoration(labelText: 'Entreprise'),
                     dropdownColor: AdminPalette.surface,
                     style: const TextStyle(color: AdminPalette.title, fontSize: 15),
@@ -197,7 +201,7 @@ class _AdminAuditPageState extends State<AdminAuditPage> {
                       physics: const NeverScrollableScrollPhysics(),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       itemCount: _entries.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final e = _entries[index];
                         return ListTile(

@@ -54,7 +54,7 @@ class AppTheme {
         surfaceContainerHighest: _surfaceContainerLight,
         surfaceContainerLow: const Color(0xFFF5F4F0),
         surfaceContainerLowest: _cardLight,
-        primaryContainer: _accent.withOpacity(0.12),
+        primaryContainer: _accent.withValues(alpha: 0.12),
         onPrimaryContainer: const Color(0xFF5C2A0E),
       ),
       scaffoldBackgroundColor: _surfaceLight,
@@ -81,13 +81,13 @@ class AppTheme {
         color: _cardLight,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
-        shadowColor: Colors.black.withOpacity(0.04),
+        shadowColor: Colors.black.withValues(alpha: 0.04),
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(radiusMd)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMd),
-          borderSide: BorderSide(color: Colors.black.withOpacity(0.06)),
+          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMd),
@@ -96,7 +96,7 @@ class AppTheme {
         filled: true,
         fillColor: _surfaceContainerLight,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withOpacity(0.65), fontSize: 14),
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65), fontSize: 14),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -112,7 +112,7 @@ class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMd)),
-          side: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
+          side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.3)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
@@ -132,7 +132,7 @@ class AppTheme {
         dense: true,
       ),
       dividerTheme: DividerThemeData(
-        color: colorScheme.outline.withOpacity(0.08),
+        color: colorScheme.outline.withValues(alpha: 0.08),
         thickness: 1,
         space: 1,
       ),
@@ -154,7 +154,7 @@ class AppTheme {
         height: 64,
         elevation: 0,
         backgroundColor: _cardLight,
-        indicatorColor: colorScheme.primaryContainer.withOpacity(0.9),
+        indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 26,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
@@ -207,7 +207,7 @@ class AppTheme {
         surfaceContainerHighest: _surfaceContainerDark,
         surfaceContainerLow: const Color(0xFF2C2C2C),
         surfaceContainerLowest: const Color(0xFF252525),
-        primaryContainer: _accent.withOpacity(0.18),
+        primaryContainer: _accent.withValues(alpha: 0.18),
       ),
       scaffoldBackgroundColor: _surfaceDark,
       fontFamily: 'Roboto',
@@ -275,7 +275,7 @@ class AppTheme {
         height: 64,
         elevation: 0,
         backgroundColor: _surfaceContainerDark,
-        indicatorColor: colorScheme.primaryContainer.withOpacity(0.9),
+        indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 26,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
@@ -337,7 +337,7 @@ class AppTheme {
         surfaceContainerHighest: _surfaceContainerLight,
         surfaceContainerLow: const Color(0xFFF5F4F0),
         surfaceContainerLowest: _cardLight,
-        primaryContainer: _accent.withOpacity(0.12),
+        primaryContainer: _accent.withValues(alpha: 0.12),
         onPrimaryContainer: const Color(0xFF5C2A0E),
       ),
       scaffoldBackgroundColor: _surfaceLight,
@@ -364,13 +364,13 @@ class AppTheme {
         color: _cardLight,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
-        shadowColor: Colors.black.withOpacity(0.04),
+        shadowColor: Colors.black.withValues(alpha: 0.04),
       ),
       inputDecorationTheme: InputDecorationTheme(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(radiusMdM)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMdM),
-          borderSide: BorderSide(color: Colors.black.withOpacity(0.06)),
+          borderSide: BorderSide(color: Colors.black.withValues(alpha: 0.06)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMdM),
@@ -379,7 +379,7 @@ class AppTheme {
         filled: true,
         fillColor: _surfaceContainerLight,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withOpacity(0.65), fontSize: 12),
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65), fontSize: 12),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -395,7 +395,7 @@ class AppTheme {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           minimumSize: const Size(0, 40),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          side: BorderSide(color: colorScheme.outline.withOpacity(0.3)),
+          side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.3)),
           textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
         ),
       ),
@@ -415,7 +415,7 @@ class AppTheme {
         dense: true,
       ),
       dividerTheme: DividerThemeData(
-        color: colorScheme.outline.withOpacity(0.08),
+        color: colorScheme.outline.withValues(alpha: 0.08),
         thickness: 1,
         space: 1,
       ),
@@ -437,7 +437,7 @@ class AppTheme {
         height: 52,
         elevation: 0,
         backgroundColor: _cardLight,
-        indicatorColor: colorScheme.primaryContainer.withOpacity(0.9),
+        indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 18,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
@@ -491,7 +491,7 @@ class AppTheme {
         surfaceContainerHighest: _surfaceContainerDark,
         surfaceContainerLow: const Color(0xFF2C2C2C),
         surfaceContainerLowest: const Color(0xFF252525),
-        primaryContainer: _accent.withOpacity(0.18),
+        primaryContainer: _accent.withValues(alpha: 0.18),
       ),
       scaffoldBackgroundColor: _surfaceDark,
       fontFamily: 'Roboto',
@@ -569,7 +569,7 @@ class AppTheme {
         height: 52,
         elevation: 0,
         backgroundColor: _surfaceContainerDark,
-        indicatorColor: colorScheme.primaryContainer.withOpacity(0.9),
+        indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 18,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
@@ -686,7 +686,7 @@ class AppTheme {
       bodySmall: base.bodySmall?.copyWith(
         fontSize: 11,
         height: 1.35,
-        color: color.withOpacity(0.85),
+        color: color.withValues(alpha: 0.85),
       ),
       labelLarge: base.labelLarge?.copyWith(
         fontWeight: FontWeight.w600,
@@ -703,7 +703,7 @@ class AppTheme {
         fontWeight: FontWeight.w500,
         fontSize: 10,
         letterSpacing: 0.4,
-        color: color.withOpacity(0.8),
+        color: color.withValues(alpha: 0.8),
       ),
     );
   }
@@ -783,7 +783,7 @@ class AppTheme {
       bodySmall: base.bodySmall?.copyWith(
         fontSize: 12,
         height: 1.4,
-        color: color.withOpacity(0.85),
+        color: color.withValues(alpha: 0.85),
       ),
       labelLarge: base.labelLarge?.copyWith(
         fontWeight: FontWeight.w600,
@@ -800,7 +800,7 @@ class AppTheme {
         fontWeight: FontWeight.w500,
         fontSize: 11,
         letterSpacing: 0.4,
-        color: color.withOpacity(0.8),
+        color: color.withValues(alpha: 0.8),
       ),
     );
   }

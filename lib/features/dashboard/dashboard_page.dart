@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../../../data/models/reports.dart';
+import '../../../data/models/store.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
@@ -447,7 +448,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     _scope = 'company';
                     _loadDataFromOffline();
                   }),
-                  selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                  selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                   checkmarkColor: theme.colorScheme.primary,
                   avatar: Icon(Icons.business_rounded, size: 18, color: _scope == 'company' ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
                 ),
@@ -468,7 +469,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       }
                       _loadDataFromOffline();
                     }),
-                    selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                    selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                     checkmarkColor: theme.colorScheme.primary,
                     avatar: Icon(Icons.store_rounded, size: 18, color: _scope == 'store' ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
                   ),
@@ -476,9 +477,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 180, minWidth: 0),
                       child: DropdownButtonFormField<String>(
-                        value: company.currentStoreId != null && company.stores.any((s) => s.id == company.currentStoreId)
+                        initialValue: company.currentStoreId != null && company.stores.any((s) => s.id == company.currentStoreId)
                             ? company.currentStoreId!
-                            : company.stores.first.id,
+                            : defaultSelectedStoreId(company.stores)!,
                         isExpanded: true,
                         decoration: InputDecoration(
                           isDense: true,
@@ -509,7 +510,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                           fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                         ),
                       ),
-                      selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                      selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                       onSelected: (_) => setState(() {
                         _period = p;
                         _loadDataFromOffline();
@@ -544,7 +545,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.3), width: 2),
+        side: BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.3), width: 2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -694,7 +695,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
@@ -772,7 +773,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: k.accentBorder
-            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.4), width: 2)
+            ? BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.4), width: 2)
             : BorderSide.none,
       ),
       child: InkWell(
@@ -800,7 +801,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       Container(
                         padding: EdgeInsets.all(compact ? 6 : 8),
                     decoration: BoxDecoration(
-                      color: k.color.withOpacity(0.12),
+                      color: k.color.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Icon(k.icon, size: 20, color: k.color),
@@ -953,7 +954,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       show: true,
                       drawVerticalLine: false,
                       horizontalInterval: null,
-                      getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withOpacity(0.4), strokeWidth: 1),
+                      getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withValues(alpha: 0.4), strokeWidth: 1),
                     ),
                     barTouchData: BarTouchData(
                       touchTooltipData: BarTouchTooltipData(
@@ -1075,7 +1076,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     gridData: FlGridData(
                       show: true,
                       drawVerticalLine: false,
-                      getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withOpacity(0.35), strokeWidth: 1),
+                      getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withValues(alpha: 0.35), strokeWidth: 1),
                     ),
                     titlesData: FlTitlesData(
                       topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -1138,7 +1139,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                         dotData: FlDotData(show: d.salesByDay.length <= 18),
                         belowBarData: BarAreaData(
                           show: true,
-                          color: theme.colorScheme.primary.withOpacity(0.12),
+                          color: theme.colorScheme.primary.withValues(alpha: 0.12),
                         ),
                       ),
                     ],
@@ -1272,8 +1273,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       color: theme.colorScheme.primary,
                       onTap: () {
                         final storeId = context.read<CompanyProvider>().currentStoreId;
-                        if (storeId != null) context.go(AppRoutes.posQuick(storeId));
-                        else context.go(AppRoutes.stores);
+                        if (storeId != null) {
+                          context.go(AppRoutes.posQuick(storeId));
+                        } else {
+                          context.go(AppRoutes.stores);
+                        }
                       },
                     ),
                   if (canOpenInvoiceA4)
@@ -1283,8 +1287,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       color: const Color(0xFF059669),
                       onTap: () {
                         final storeId = context.read<CompanyProvider>().currentStoreId;
-                        if (storeId != null) context.go(AppRoutes.pos(storeId));
-                        else context.go(AppRoutes.stores);
+                        if (storeId != null) {
+                          context.go(AppRoutes.pos(storeId));
+                        } else {
+                          context.go(AppRoutes.stores);
+                        }
                       },
                     ),
                   _ShortcutTile(icon: Icons.shopping_cart_rounded, label: 'Ventes', color: const Color(0xFF2563EB), onTap: () => context.go(AppRoutes.sales)),
@@ -1409,7 +1416,7 @@ class _ShortcutTile extends StatelessWidget {
           width: double.infinity,
           padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16, vertical: compact ? 10 : 12),
           decoration: BoxDecoration(
-            border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.5)),
+            border: Border.all(color: Theme.of(context).dividerColor.withValues(alpha: 0.5)),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -1418,7 +1425,7 @@ class _ShortcutTile extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, size: 20, color: color),

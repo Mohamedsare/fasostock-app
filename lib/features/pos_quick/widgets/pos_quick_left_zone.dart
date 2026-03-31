@@ -53,7 +53,7 @@ class PosQuickLeftZone extends StatelessWidget {
                 textInputAction: TextInputAction.done,
                 decoration: InputDecoration(
                   hintText: 'Scanner ou rechercher un produit...',
-                  hintStyle: TextStyle(color: PosQuickColors.textePrincipal.withOpacity(0.5)),
+                  hintStyle: TextStyle(color: PosQuickColors.textePrincipal.withValues(alpha: 0.5)),
                   prefixIcon: IconButton(
                     icon: const Icon(Icons.qr_code_scanner_rounded, color: PosQuickColors.orangePrincipal, size: 26),
                     onPressed: onScanPressed,

@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../core/errors/app_error_handler.dart';
 import 'physical_printer_pdf.dart';
+import '../../../data/models/sale.dart';
 import '../../../data/models/store.dart';
 import '../../../data/repositories/stores_repository.dart';
 import '../../../shared/utils/format_currency.dart';
@@ -33,6 +34,20 @@ class InvoiceLineData {
   final double total;
 }
 
+/// Une ligne de règlement sur la facture (espèces, crédit, etc.).
+class InvoicePaymentLineData {
+  const InvoicePaymentLineData({
+    required this.label,
+    required this.amount,
+    this.isImmediateEncaisse = true,
+  });
+
+  final String label;
+  final double amount;
+  /// Espèces, mobile money, carte, virement. `false` = montant porté au crédit client ([PaymentMethod.other]).
+  final bool isImmediateEncaisse;
+}
+
 /// Données complètes pour générer une facture A4 PDF.
 class InvoiceA4Data {
   const InvoiceA4Data({
@@ -48,6 +63,7 @@ class InvoiceA4Data {
     this.customerPhone,
     this.customerAddress,
     this.depositAmount,
+    this.paymentLines,
     this.amountInWords,
     this.logoBytes,
   });
@@ -63,7 +79,10 @@ class InvoiceA4Data {
   final String? customerName;
   final String? customerPhone;
   final String? customerAddress;
+  /// Ancien mode : uniquement « encaissé » si [paymentLines] est vide (ex. brouillon sans détail).
   final double? depositAmount;
+  /// Détail des paiements : permet encaisse partiel, total et crédit sans confondre « acompte » et créance.
+  final List<InvoicePaymentLineData>? paymentLines;
   final String? amountInWords;
   /// Octets du logo entreprise (optionnel) — affiché en en-tête de la facture A4.
   final Uint8List? logoBytes;
@@ -71,6 +90,66 @@ class InvoiceA4Data {
 
 /// Génère un PDF facture A4 à partir des paramètres boutique et des données de vente.
 class InvoiceA4PdfService {
+  static String paymentMethodLabelFr(PaymentMethod m) {
+    switch (m) {
+      case PaymentMethod.cash:
+        return 'Espèces';
+      case PaymentMethod.mobile_money:
+        return 'Mobile money';
+      case PaymentMethod.card:
+        return 'Carte bancaire';
+      case PaymentMethod.transfer:
+        return 'Virement';
+      case PaymentMethod.other:
+        return 'À crédit';
+    }
+  }
+
+  static String _paymentLineLabel(PaymentMethod method, String? reference) {
+    final base = paymentMethodLabelFr(method);
+    final ref = reference?.trim();
+    if (ref != null &&
+        ref.isNotEmpty &&
+        ref.toLowerCase() != base.toLowerCase()) {
+      return '$base — $ref';
+    }
+    return base;
+  }
+
+  static List<InvoicePaymentLineData> paymentLinesFromSalePayments(
+    List<SalePayment> payments,
+  ) {
+    final out = <InvoicePaymentLineData>[];
+    for (final p in payments) {
+      if (p.amount <= 0) continue;
+      out.add(
+        InvoicePaymentLineData(
+          label: _paymentLineLabel(p.method, p.reference),
+          amount: p.amount,
+          isImmediateEncaisse: p.method != PaymentMethod.other,
+        ),
+      );
+    }
+    return out;
+  }
+
+  static List<InvoicePaymentLineData> paymentLinesFromCreateInputs(
+    List<CreateSalePaymentInput> payments,
+  ) {
+    final out = <InvoicePaymentLineData>[];
+    for (final p in payments) {
+      if (p.amount <= 0) continue;
+      out.add(
+        InvoicePaymentLineData(
+          label: _paymentLineLabel(p.method, p.reference),
+          amount: p.amount,
+          isImmediateEncaisse: p.method != PaymentMethod.other,
+        ),
+      );
+    }
+    return out;
+  }
+
   static Future<File?> _logoCacheFile(String storeId) async {
     if (kIsWeb) return null;
     final dir = await getApplicationDocumentsDirectory();
@@ -598,12 +677,76 @@ class InvoiceA4PdfService {
   }
 
   static pw.Widget _buildTotals(InvoiceA4Data data, String currency, PdfColor primaryColor) {
-    final deposit = data.depositAmount ?? 0;
-    final remaining = (data.total - deposit).clamp(0.0, double.infinity);
+    final linesList = data.paymentLines;
+    var encaisseImmediate = 0.0;
+    if (linesList != null) {
+      for (final pl in linesList) {
+        if (pl.isImmediateEncaisse) encaisseImmediate += pl.amount;
+      }
+    }
+    final hasLines = linesList != null && linesList.isNotEmpty;
+
+    double encaisseEffectif;
+    if (hasLines) {
+      encaisseEffectif = encaisseImmediate;
+    } else if (data.depositAmount != null) {
+      encaisseEffectif = data.depositAmount!.clamp(0.0, double.infinity);
+    } else {
+      encaisseEffectif = 0.0;
+    }
+
+    final resteDu = (data.total - encaisseEffectif).clamp(0.0, double.infinity);
+    final totalPositive = data.total > 0.001;
+    final showReglement =
+        totalPositive &&
+        (hasLines ||
+            (data.depositAmount != null && data.depositAmount! > 0.001));
+
+    pw.Widget? statutLigne;
+    if (showReglement) {
+      if (resteDu < 0.01) {
+        statutLigne = pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text(
+            _sanitizeForPdf('Statut : facture intégralement réglée'),
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontStyle: pw.FontStyle.italic,
+              color: PdfColors.grey800,
+            ),
+          ),
+        );
+      } else if (encaisseEffectif < 0.01) {
+        statutLigne = pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text(
+            _sanitizeForPdf('Statut : paiement à crédit — solde à régler'),
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontStyle: pw.FontStyle.italic,
+              color: PdfColors.grey800,
+            ),
+          ),
+        );
+      } else {
+        statutLigne = pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text(
+            _sanitizeForPdf('Statut : règlement partiel — solde à régler'),
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontStyle: pw.FontStyle.italic,
+              color: PdfColors.grey800,
+            ),
+          ),
+        );
+      }
+    }
+
     return pw.Align(
       alignment: pw.Alignment.centerRight,
       child: pw.Container(
-        width: 240,
+        width: 280,
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
@@ -611,9 +754,37 @@ class InvoiceA4PdfService {
             if (data.discount > 0) _totalRowSimple('Remise', -data.discount),
             if (data.tax > 0) _totalRowSimple('TVA', data.tax),
             pw.SizedBox(height: 8),
-            _totalRowBlock('Total Net', data.total, primaryColor),
-            _totalRowBlock('Total Acompte', deposit, primaryColor),
-            _totalRowBlock('Reste à payer', remaining, primaryColor),
+            _totalRowBlock(
+              data.tax > 0 ? 'Montant total TTC' : 'Montant total',
+              data.total,
+              primaryColor,
+            ),
+            if (showReglement) ...[
+              pw.SizedBox(height: 10),
+              pw.Text(
+                _sanitizeForPdf('Règlement'),
+                style: pw.TextStyle(
+                  fontSize: 11,
+                  fontWeight: pw.FontWeight.bold,
+                  color: primaryColor,
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              if (linesList != null && linesList.isNotEmpty)
+                ...linesList.map(
+                  (pl) => _totalRowSimple(pl.label, pl.amount),
+                )
+              else if (data.depositAmount != null)
+                _totalRowSimple('Montant encaissé', encaisseEffectif),
+              pw.SizedBox(height: 6),
+              _totalRowBlock(
+                'Total encaissé',
+                encaisseEffectif,
+                primaryColor,
+              ),
+              _totalRowBlock('Reste à payer', resteDu, primaryColor),
+              ?statutLigne,
+            ],
           ],
         ),
       ),

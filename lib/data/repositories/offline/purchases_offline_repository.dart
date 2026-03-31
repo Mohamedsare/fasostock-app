@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:drift/drift.dart';
 import '../../local/drift/app_database.dart';
 import '../../models/purchase.dart';
+import '../../models/sale.dart' show ProductRef;
 
 /// Offline-first purchases: UI reads from Drift; sync writes from Supabase.
 class PurchasesOfflineRepository {
@@ -94,7 +95,12 @@ class PurchasesOfflineRepository {
     for (final i in items) {
       itemsByPurchase.putIfAbsent(i.purchaseId, () => []).add(i);
     }
-    return purchases.map((p) => _toPurchase(p, storeMap, supplierMap, itemsByPurchase)).toList();
+    final productIds = items.map((i) => i.productId).toSet();
+    final localProductRows = await _db.getLocalProductsByIds(productIds);
+    final productById = {for (final pr in localProductRows) pr.id: pr};
+    return purchases
+        .map((p) => _toPurchase(p, storeMap, supplierMap, itemsByPurchase, productById))
+        .toList();
   }
 
   /// Supprime un achat du cache local (après suppression côté serveur).
@@ -107,6 +113,7 @@ class PurchasesOfflineRepository {
     Map<String, LocalStore> storeMap,
     Map<String, LocalSupplier> supplierMap,
     Map<String, List<LocalPurchaseItem>> itemsByPurchase,
+    Map<String, LocalProduct> productById,
   ) {
     final store = storeMap[p.storeId];
     final supplier = supplierMap[p.supplierId];
@@ -125,15 +132,26 @@ class PurchasesOfflineRepository {
       store: store != null ? StoreRef(id: store.id, name: store.name) : null,
       supplier: supplier != null ? SupplierRef(id: supplier.id, name: supplier.name, phone: supplier.phone) : null,
       purchaseItems: itemRows
-          .map((i) => PurchaseItem(
-                id: i.id,
-                purchaseId: i.purchaseId,
-                productId: i.productId,
-                quantity: i.quantity,
-                unitPrice: i.unitPrice,
-                total: i.total,
-                product: null,
-              ))
+          .map((i) {
+            final lp = productById[i.productId];
+            return PurchaseItem(
+              id: i.id,
+              purchaseId: i.purchaseId,
+              productId: i.productId,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+              total: i.total,
+              product: lp != null
+                  ? ProductRef(
+                      id: lp.id,
+                      name: lp.name,
+                      sku: lp.sku,
+                      unit: lp.unit,
+                      imageUrl: lp.imageUrl?.isNotEmpty == true ? lp.imageUrl : null,
+                    )
+                  : null,
+            );
+          })
           .toList(),
       purchasePayments: null,
     );

@@ -11,15 +11,27 @@ String _escape(String v) {
   return s;
 }
 
-/// Export ventes en CSV (numéro, date, boutique, client, statut, sous_total, remise, tva, total).
+/// Export ventes en CSV (numéro, date, boutique, vente_par, client, statut, sous_total, remise, tva, total).
 String salesToCsv(List<Sale> sales) {
-  const headers = ['numero', 'date', 'boutique', 'client', 'statut', 'sous_total', 'remise', 'tva', 'total'];
+  const headers = [
+    'numero',
+    'date',
+    'boutique',
+    'vente_par',
+    'client',
+    'statut',
+    'sous_total',
+    'remise',
+    'tva',
+    'total',
+  ];
   final rows = sales.map((s) {
     final date = s.createdAt.length >= 19 ? s.createdAt.substring(0, 19) : s.createdAt;
     return [
       _escape(s.saleNumber),
       _escape(date),
-      _escape(s.store?.name ?? ''),
+      _escape(s.store?.name ?? 'Boutique'),
+      _escape(s.createdByLabel ?? ''),
       _escape(s.customer?.name ?? ''),
       _escape(s.status.value),
       '${s.subtotal}',

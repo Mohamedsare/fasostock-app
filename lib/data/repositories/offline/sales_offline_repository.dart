@@ -45,16 +45,65 @@ class SalesOfflineRepository {
 
   Stream<List<Sale>> watchSales(String companyId, {String? storeId}) {
     return _db.watchLocalSales(companyId, storeId: storeId).asyncMap((localSales) async {
-      final sales = <Sale>[];
-      for (final ls in localSales) {
-        final items = await _db.getLocalSaleItems(ls.id);
-        sales.add(_toSale(ls, items));
+      if (localSales.isEmpty) return [];
+      final ids = localSales.map((s) => s.id).toList();
+      final allItems = await _db.getLocalSaleItemsForSales(ids);
+      final bySaleId = <String, List<LocalSaleItem>>{};
+      for (final it in allItems) {
+        bySaleId.putIfAbsent(it.saleId, () => []).add(it);
       }
-      return sales;
+      final stores = await _db.getLocalStores(companyId);
+      final storeNameById = {for (final st in stores) st.id: st.name};
+      final customers = await _db.getLocalCustomersByCompany(companyId);
+      final customerById = {for (final c in customers) c.id: c};
+      final members = await _db.getLocalCompanyMembersByCompany(companyId);
+      final sellerLabelByUserId = <String, String>{};
+      for (final m in members) {
+        final name = m.profileFullName?.trim();
+        final email = m.email?.trim();
+        if (name != null && name.isNotEmpty) {
+          sellerLabelByUserId[m.userId] = name;
+        } else if (email != null && email.isNotEmpty) {
+          sellerLabelByUserId[m.userId] = email;
+        }
+      }
+      return [
+        for (final ls in localSales)
+          _toSale(
+            ls,
+            bySaleId[ls.id] ?? const [],
+            storeNameById: storeNameById,
+            customerById: customerById,
+            sellerLabelByUserId: sellerLabelByUserId,
+          ),
+      ];
     });
   }
 
-  static Sale _toSale(LocalSale row, List<LocalSaleItem> items) {
+  static String _sellerDisplayLabel(String userId, Map<String, String> sellerLabelByUserId) {
+    final label = sellerLabelByUserId[userId];
+    if (label != null && label.isNotEmpty) return label;
+    if (userId.length >= 8) return 'Utilisateur ${userId.substring(0, 8)}…';
+    return 'Utilisateur';
+  }
+
+  static Sale _toSale(
+    LocalSale row,
+    List<LocalSaleItem> items, {
+    required Map<String, String> storeNameById,
+    required Map<String, LocalCustomer> customerById,
+    required Map<String, String> sellerLabelByUserId,
+  }) {
+    final storeName = storeNameById[row.storeId];
+    final storeRef = StoreRef(id: row.storeId, name: storeName?.trim().isNotEmpty == true ? storeName!.trim() : 'Boutique');
+    CustomerRef? customerRef;
+    final cid = row.customerId;
+    if (cid != null && cid.isNotEmpty) {
+      final lc = customerById[cid];
+      customerRef = lc != null
+          ? CustomerRef(id: lc.id, name: lc.name, phone: lc.phone)
+          : CustomerRef(id: cid, name: '—', phone: null);
+    }
     return Sale(
       id: row.id,
       companyId: row.companyId,
@@ -69,8 +118,8 @@ class SalesOfflineRepository {
       createdBy: row.createdBy,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      store: null,
-      customer: null,
+      store: storeRef,
+      customer: customerRef,
       saleItems: items.map((i) => SaleItem(
         id: i.id,
         saleId: i.saleId,
@@ -84,6 +133,7 @@ class SalesOfflineRepository {
       salePayments: null,
       saleMode: row.saleMode != null && row.saleMode!.isNotEmpty ? SaleMode.fromString(row.saleMode!) : null,
       documentType: row.documentType != null && row.documentType!.isNotEmpty ? DocumentType.fromString(row.documentType!) : null,
+      createdByLabel: _sellerDisplayLabel(row.createdBy, sellerLabelByUserId),
     );
   }
 }

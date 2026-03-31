@@ -115,7 +115,7 @@ class StockTransferItem {
   final String? productName;
 
   factory StockTransferItem.fromJson(Map<String, dynamic> json) {
-    final product = json['product'] as Map<String, dynamic>?;
+    final productMap = _productMapFromJson(json['product']);
     return StockTransferItem(
       id: json['id'] as String,
       transferId: json['transfer_id'] as String,
@@ -123,8 +123,21 @@ class StockTransferItem {
       quantityRequested: json['quantity_requested'] as int,
       quantityShipped: json['quantity_shipped'] as int? ?? 0,
       quantityReceived: json['quantity_received'] as int? ?? 0,
-      productName: product?['name'] as String?,
+      productName: productMap?['name'] as String?,
     );
+  }
+
+  /// PostgREST renvoie souvent un objet ; certaines formes legacy une liste d’un seul élément.
+  static Map<String, dynamic>? _productMapFromJson(Object? raw) {
+    if (raw == null) return null;
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is List && raw.isNotEmpty) {
+      final first = raw.first;
+      if (first is Map<String, dynamic>) return first;
+      if (first is Map) return Map<String, dynamic>.from(first);
+    }
+    return null;
   }
 }
 

@@ -86,12 +86,15 @@ class AuthService {
       'is_active': true,
     });
 
+    final businessSlug = input.businessTypeSlug?.trim();
     final rpc = await _supabase.rpc('create_company_with_owner', params: {
       'p_company_name': input.companyName,
       'p_company_slug': input.companySlug.isNotEmpty ? input.companySlug : slug,
       'p_store_name': input.firstStoreName,
       'p_store_code': null,
       'p_store_phone': input.firstStorePhone.isNotEmpty ? input.firstStorePhone : null,
+      'p_business_type_slug':
+          (businessSlug != null && businessSlug.isNotEmpty) ? businessSlug : null,
     });
     if (rpc == null) throw Exception('Création entreprise échouée.');
     final map = rpc as Map<String, dynamic>;
@@ -133,6 +136,7 @@ class RegisterCompanyInput {
     required this.ownerFullName,
     required this.firstStoreName,
     required this.firstStorePhone,
+    this.businessTypeSlug,
   });
   final String companyName;
   final String companySlug;
@@ -141,6 +145,8 @@ class RegisterCompanyInput {
   final String ownerFullName;
   final String firstStoreName;
   final String firstStorePhone;
+  /// Slug aligné `business_type_slugs.dart` / `companies.business_type_slug`.
+  final String? businessTypeSlug;
 }
 
 class RegisterCompanyResult {

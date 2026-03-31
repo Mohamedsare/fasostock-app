@@ -27,11 +27,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
     setState(() => _loading = true);
     try {
       final list = await _repo.list(limit: 100);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _items = list;
           _loading = false;
         });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -95,7 +96,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   Icon(
                     Icons.notifications_none_rounded,
                     size: 64,
-                    color: theme.colorScheme.onSurfaceVariant.withOpacity(0.5),
+                    color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                   ),
                   const SizedBox(height: 16),
                   Text(

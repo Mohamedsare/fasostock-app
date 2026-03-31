@@ -1,4 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/errors/app_error_handler.dart';
+import '../../core/utils/public_website_url.dart';
 import '../models/profile.dart';
 
 /// Paramètres entreprise et profil — companySettingsApi + profilesApi (web).
@@ -8,6 +10,7 @@ class SettingsRepository {
   final SupabaseClient _client;
 
   static const _keyDefaultStockAlert = 'default_stock_alert_threshold';
+  static const _keyPublicWebsiteUrl = 'public_website_url';
   static const _defaultStockAlertValue = 5;
 
   Future<int> getDefaultStockAlertThreshold(String companyId) async {
@@ -25,6 +28,59 @@ class SettingsRepository {
       if (n != null && n >= 0) return n;
     }
     return _defaultStockAlertValue;
+  }
+
+  /// Site web public — encodé dans le QR des tickets caisse rapide si renseigné.
+  Future<String?> getPublicWebsiteUrl(String companyId) async {
+    final data = await _client
+        .from('company_settings')
+        .select('value')
+        .eq('company_id', companyId)
+        .eq('key', _keyPublicWebsiteUrl)
+        .maybeSingle();
+    if (data == null) return null;
+    final raw = (data as Map)['value'];
+    if (raw == null) return null;
+    final s = raw is String ? raw : raw.toString().trim();
+    return normalizePublicWebsiteUrlForQr(s);
+  }
+
+  /// [url] vide ou null : supprime le paramètre (QR repasse au format texte ticket).
+  Future<void> setPublicWebsiteUrl(String companyId, String? url) async {
+    final trimmed = url?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      await _client
+          .from('company_settings')
+          .delete()
+          .eq('company_id', companyId)
+          .eq('key', _keyPublicWebsiteUrl);
+      return;
+    }
+    final normalized = normalizePublicWebsiteUrlForQr(trimmed);
+    if (normalized == null) {
+      throw const UserFriendlyError(
+        'URL du site invalide. Exemple : https://srfaso.com',
+      );
+    }
+    final existing = await _client
+        .from('company_settings')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('key', _keyPublicWebsiteUrl)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from('company_settings')
+          .update({'value': normalized})
+          .eq('company_id', companyId)
+          .eq('key', _keyPublicWebsiteUrl);
+    } else {
+      await _client.from('company_settings').insert({
+        'company_id': companyId,
+        'key': _keyPublicWebsiteUrl,
+        'value': normalized,
+      });
+    }
   }
 
   Future<void> setDefaultStockAlertThreshold(String companyId, int value) async {

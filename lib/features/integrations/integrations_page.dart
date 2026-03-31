@@ -33,11 +33,13 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     try {
       final keys = await _repo.listApiKeys(companyId);
       final webhooks = await _repo.listWebhooks(companyId);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _keys = keys;
         _webhooks = webhooks;
         _loading = false;
       });
+      }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
       if (mounted) AppToast.error(context, AppErrorHandler.toUserMessage(e));

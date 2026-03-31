@@ -51,7 +51,7 @@ class _AdminSettingsPageState extends State<AdminSettingsPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    final get = (String k) => _form[k] ?? '';
+    String get(String k) => _form[k] ?? '';
     final isWide = MediaQuery.sizeOf(context).width >= 900;
     final padding = isWide ? 32.0 : 20.0;
 

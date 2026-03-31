@@ -4,6 +4,7 @@ import 'sale.dart'; // PaymentMethod
 enum PurchaseStatus {
   draft,
   confirmed,
+  // ignore: constant_identifier_names — aligné clé API `partially_received`
   partially_received,
   received,
   cancelled,

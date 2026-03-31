@@ -51,7 +51,14 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     if (userId != null) {
       try {
         await ref.read(syncServiceV2Provider).sync(userId: userId, companyId: company.currentCompanyId, storeId: company.currentStoreId);
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'stores_page',
+          logContext: const {'op': 'pull_refresh'},
+        );
+      }
     }
     if (mounted) await company.refreshStores();
   }
@@ -64,7 +71,14 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     Future.microtask(() async {
       try {
         await ref.read(syncServiceV2Provider).sync(userId: uid, companyId: company.currentCompanyId, storeId: company.currentStoreId);
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'stores_page',
+          logContext: const {'op': 'background_sync'},
+        );
+      }
       if (mounted) context.read<CompanyProvider>().refreshStores();
     });
   }
@@ -306,10 +320,10 @@ class _StoresPageState extends ConsumerState<StoresPage> {
   Widget _buildErrorCard(BuildContext context, String error) {
     return Card(
       elevation: 0,
-      color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+      color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.3),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Theme.of(context).colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: Theme.of(context).colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -341,7 +355,7 @@ class _StoresPageState extends ConsumerState<StoresPage> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
                 shape: BoxShape.circle,
               ),
               child: Icon(

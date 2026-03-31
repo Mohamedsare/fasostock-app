@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+
+import '../../../core/utils/public_website_url.dart';
 import 'receipt_ticket_layout.dart';
 
 /// Données du ticket (aligné web ReceiptTicket).
@@ -23,6 +25,7 @@ class ReceiptTicketData {
     DateTime? date,
     this.customerName,
     this.customerPhone,
+    this.qrCompanyWebsiteUrl,
   }) : date = date ?? DateTime.now();
 
   final String storeName;
@@ -44,6 +47,8 @@ class ReceiptTicketData {
   final double? amountReceived;
   final double? change;
   final DateTime date;
+  /// Si renseigné (URL https), le QR du ticket ouvre ce lien ; sinon payload texte ticket (historique).
+  final String? qrCompanyWebsiteUrl;
 }
 
 class ReceiptItemData {
@@ -62,6 +67,9 @@ class ReceiptItemData {
 /// Contenu du QR (même chaîne pour l’aperçu et le PDF thermique).
 extension ReceiptTicketDataQr on ReceiptTicketData {
   String buildQrPayload() {
+    final url = normalizePublicWebsiteUrlForQr(qrCompanyWebsiteUrl);
+    if (url != null) return url;
+
     final buf = StringBuffer();
     buf.writeln('FASOSTOCK');
     buf.writeln('Ticket: $saleNumber');

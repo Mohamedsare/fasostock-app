@@ -120,8 +120,8 @@ class AdminRepository {
   Future<void> adminUpdateProfile(String userId, {String? fullName, bool? isSuperAdmin}) async {
     await _client.rpc('admin_update_profile', params: {
       'p_user_id': userId,
-      if (fullName != null) 'p_full_name': fullName,
-      if (isSuperAdmin != null) 'p_is_super_admin': isSuperAdmin,
+      'p_full_name': ?fullName,
+      'p_is_super_admin': ?isSuperAdmin,
     });
   }
 
@@ -197,7 +197,9 @@ class AdminRepository {
   }
 
   Future<void> setPlatformSettings(Map<String, String> settings) async {
-    for (final e in settings.entries) await setPlatformSetting(e.key, e.value);
+    for (final e in settings.entries) {
+      await setPlatformSetting(e.key, e.value);
+    }
   }
 
   Future<List<Map<String, dynamic>>> listLandingChatMessages({int limit = 500}) async {

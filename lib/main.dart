@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -138,8 +137,12 @@ class _AppLoaderState extends State<_AppLoader> {
     } catch (e, st) {
       AppErrorHandler.log(e, st);
       final message = AppErrorHandler.toUserMessage(e, fallback: 'Une erreur inattendue s\'est produite. Rouvrez l\'app.');
+      final errorTheme = ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C)),
+      );
       return MaterialApp(
-        theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C))),
+        theme: errorTheme,
         home: Scaffold(
           body: SafeArea(
             child: Padding(
@@ -150,9 +153,9 @@ class _AppLoaderState extends State<_AppLoader> {
                 children: [
                   const Icon(Icons.error_outline, size: 48, color: Colors.red),
                   const SizedBox(height: 16),
-                  Text('Erreur au démarrage', style: Theme.of(context).textTheme.titleLarge),
+                  Text('Erreur au démarrage', style: errorTheme.textTheme.titleLarge),
                   const SizedBox(height: 8),
-                  Text(message, style: Theme.of(context).textTheme.bodyMedium),
+                  Text(message, style: errorTheme.textTheme.bodyMedium),
                 ],
               ),
             ),
@@ -249,10 +252,12 @@ class _ConfigSupabaseScreenState extends State<_ConfigSupabaseScreen> {
       await SupabaseConfigStorage.set(url: url, anonKey: key);
       if (mounted) widget.onSaved();
     } catch (e) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _error = 'Erreur lors de l\'enregistrement. Réessayez.';
         _saving = false;
       });
+      }
     }
   }
 

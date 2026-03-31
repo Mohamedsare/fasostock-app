@@ -252,12 +252,17 @@ final dashboardDataChangeTriggerStreamProvider = StreamProvider.autoDispose.fami
   return db.watchDashboardDataTrigger(companyId).map((_) => Object());
 });
 
-/// Stream des mouvements de stock depuis Drift (par boutique).
+/// Stream des mouvements de stock depuis Drift (par boutique), avec libellé produit depuis le catalogue local.
 final stockMovementsStreamProvider = StreamProvider.autoDispose.family<List<StockMovement>, String>((ref, storeId) {
   if (storeId.isEmpty) return Stream.value([]);
   final db = ref.watch(appDatabaseProvider);
-  return db.watchLocalStockMovements(storeId, limit: 500).map((rows) =>
-      rows.map((r) => StockMovement(
+  return db.watchLocalStockMovements(storeId, limit: 500).asyncMap((rows) async {
+    if (rows.isEmpty) return <StockMovement>[];
+    final ids = rows.map((r) => r.productId).toSet();
+    final refsById = await db.getMovementProductRefsByIds(ids);
+    return rows
+        .map(
+          (r) => StockMovement(
             id: r.id,
             storeId: r.storeId,
             productId: r.productId,
@@ -268,8 +273,11 @@ final stockMovementsStreamProvider = StreamProvider.autoDispose.family<List<Stoc
             createdBy: r.createdBy,
             createdAt: r.createdAt,
             notes: r.notes,
-            product: null,
-          )).toList());
+            product: refsById[r.productId],
+          ),
+        )
+        .toList();
+  });
 });
 
 /// IDs des produits vendus au moins une fois dans les 30 derniers jours (pour notifications owner).

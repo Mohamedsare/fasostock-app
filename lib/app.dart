@@ -41,7 +41,7 @@ class FasoStockApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SalesPageProvider()),
       ],
       child: Consumer<ThemeModeProvider>(
-        builder: (_, themeModeProvider, __) {
+        builder: (_, themeModeProvider, _) {
           final w = MediaQuery.sizeOf(context).width;
           final isMobile = Breakpoints.isMobile(w);
           return MaterialApp.router(

@@ -85,18 +85,18 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
           colors: [
             const Color(0xFF0F172A),
             const Color(0xFF1E293B),
-            const Color(0xFF0F172A).withOpacity(0.95),
+            const Color(0xFF0F172A).withValues(alpha: 0.95),
           ],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFEA580C).withOpacity(0.15),
+            color: const Color(0xFFEA580C).withValues(alpha: 0.15),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.12),
+            color: Colors.black.withValues(alpha: 0.12),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
@@ -107,9 +107,9 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFEA580C).withOpacity(0.2),
+              color: const Color(0xFFEA580C).withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFEA580C).withOpacity(0.4)),
+              border: Border.all(color: const Color(0xFFEA580C).withValues(alpha: 0.4)),
             ),
             child: const Icon(Icons.shield_rounded, color: Color(0xFFEA580C), size: 36),
           ),
@@ -274,13 +274,13 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
                         dotData: const FlDotData(show: false),
                         belowBarData: BarAreaData(
                           show: true,
-                          color: const Color(0xFF0EA5E9).withOpacity(0.08),
+                          color: const Color(0xFF0EA5E9).withValues(alpha: 0.08),
                           gradient: LinearGradient(
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: [
-                              const Color(0xFF0EA5E9).withOpacity(0.15),
-                              const Color(0xFF0EA5E9).withOpacity(0.02),
+                              const Color(0xFF0EA5E9).withValues(alpha: 0.15),
+                              const Color(0xFF0EA5E9).withValues(alpha: 0.02),
                             ],
                           ),
                         ),
@@ -339,7 +339,7 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              const Color(0xFFEA580C).withOpacity(0.85),
+                              const Color(0xFFEA580C).withValues(alpha: 0.85),
                               const Color(0xFFEA580C),
                             ],
                           ),
@@ -422,7 +422,7 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
                 'Top 10 par nombre de ventes',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w700,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.9),
+                  color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.9),
                 ),
               ),
               const SizedBox(height: 20),
@@ -444,7 +444,7 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              const Color(0xFF8B5CF6).withOpacity(0.85),
+                              const Color(0xFF8B5CF6).withValues(alpha: 0.85),
                               const Color(0xFF8B5CF6),
                             ],
                           ),
@@ -538,7 +538,7 @@ class _AdminTableauPageState extends State<AdminTableauPage> {
                             begin: Alignment.bottomCenter,
                             end: Alignment.topCenter,
                             colors: [
-                              const Color(0xFFEA580C).withOpacity(0.7),
+                              const Color(0xFFEA580C).withValues(alpha: 0.7),
                               const Color(0xFFEA580C),
                             ],
                           ),
@@ -619,9 +619,9 @@ class _StatCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: color.withOpacity(0.25)),
+                  border: Border.all(color: color.withValues(alpha: 0.25)),
                 ),
                 child: Icon(icon, size: 24, color: color),
               ),

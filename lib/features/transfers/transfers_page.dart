@@ -77,12 +77,13 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
           storeId: null,
         );
       } catch (e) {
-        if (mounted)
+        if (mounted) {
           AppErrorHandler.show(
             context,
             e,
             fallback: 'Synchronisation échouée. Réessayez.',
           );
+        }
       }
     }
   }
@@ -290,10 +291,12 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
         .toList();
     var transfers = allTransfers.where((t) {
       if (_filterStatus != null && t.status != _filterStatus) return false;
-      if (_filterFromStoreId != null && t.fromStoreId != _filterFromStoreId)
+      if (_filterFromStoreId != null && t.fromStoreId != _filterFromStoreId) {
         return false;
-      if (_filterToStoreId != null && t.toStoreId != _filterToStoreId)
+      }
+      if (_filterToStoreId != null && t.toStoreId != _filterToStoreId) {
         return false;
+      }
       return true;
     }).toList();
     transfers.sort((a, b) {
@@ -384,9 +387,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                           isMobile ? AppTheme.spaceMdM : 12,
                         ),
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.errorContainer.withOpacity(
-                            0.5,
-                          ),
+                          color: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(
                             isMobile ? AppTheme.radiusSmM : 10,
                           ),
@@ -476,7 +477,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                                   final narrow = c.maxWidth < 520;
                                   Widget statusDd() =>
                                       DropdownButtonFormField<TransferStatus?>(
-                                        value: _filterStatus,
+                                        initialValue: _filterStatus,
                                         decoration: InputDecoration(
                                           labelText: 'Statut',
                                           isDense: true,
@@ -507,7 +508,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                                       );
                                   Widget fromDd() =>
                                       DropdownButtonFormField<String?>(
-                                        value: _filterFromStoreId,
+                                        initialValue: _filterFromStoreId,
                                         decoration: InputDecoration(
                                           labelText: 'Boutique origine',
                                           isDense: true,
@@ -539,7 +540,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                                       );
                                   Widget toDd() =>
                                       DropdownButtonFormField<String?>(
-                                        value: _filterToStoreId,
+                                        initialValue: _filterToStoreId,
                                         decoration: InputDecoration(
                                           labelText: 'Boutique destination',
                                           isDense: true,
@@ -631,7 +632,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                         Icon(
                           Icons.inventory_2_outlined,
                           size: 64,
-                          color: theme.colorScheme.outline.withOpacity(0.5),
+                          color: theme.colorScheme.outline.withValues(alpha: 0.5),
                         ),
                         SizedBox(height: spaceL),
                         Text(
@@ -743,6 +744,7 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                             showDialog<void>(
                               context: context,
                               builder: (ctx) => TransferDetailDialog(
+                                companyId: companyId,
                                 transferId: transfer.id,
                                 stores: storeList,
                                 storeName: (id) => _storeName(id, storeList),

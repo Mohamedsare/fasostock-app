@@ -86,7 +86,9 @@ class InventoryRepository {
         final s = search.toLowerCase();
         if (!p.name.toLowerCase().contains(s) &&
             !(p.sku?.toLowerCase().contains(s) ?? false) &&
-            !(p.barcode?.contains(search) ?? false)) continue;
+            !(p.barcode?.contains(search) ?? false)) {
+          continue;
+        }
       }
       if (categoryId != null && p.categoryId != categoryId) continue;
       if (status == 'low' && (p.stockMin <= 0 || quantity > p.stockMin)) continue;

@@ -350,6 +350,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     showDialog<void>(
       context: context,
       builder: (ctx) => TransferDetailDialog(
+        companyId: companyId,
         transferId: t.id,
         stores: stores,
         storeName: (id) {
@@ -597,7 +598,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   @override
   Widget build(BuildContext context) {
     final permissions = context.watch<PermissionsProvider>();
-    if (permissions.hasLoaded && !permissions.isOwner) {
+    if (permissions.hasLoaded && !permissions.canManageWarehouse) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Magasin'),
@@ -626,7 +627,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Ce module dépôt central est réservé au propriétaire de l’entreprise.',
+                    'Ce module dépôt central est réservé au propriétaire ou aux utilisateurs avec le rôle Magasinier.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       height: 1.45,
@@ -1121,11 +1122,7 @@ class _WarehouseTransfersTab extends StatelessWidget {
             leading: const Icon(Icons.local_shipping_outlined),
             title: Text('Dépôt magasin → $toName'),
             subtitle: Text(
-              [
-                'Créé le ${_formatDate(t.createdAt)}',
-                if (t.items != null && t.items!.isNotEmpty)
-                  '${t.items!.length} ligne(s)',
-              ].join(' · '),
+              _transferCardSubtitle(t),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1163,6 +1160,26 @@ class _WarehouseTransfersTab extends StatelessWidget {
     } catch (_) {
       return '—';
     }
+  }
+
+  String _transferCardSubtitle(StockTransfer t) {
+    final parts = <String>['Créé le ${_formatDate(t.createdAt)}'];
+    final items = t.items;
+    if (items != null && items.isNotEmpty) {
+      final names = items
+          .map((i) => i.productName?.trim())
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (names.isNotEmpty) {
+        final shown = names.take(2).join(', ');
+        final extra = items.length > 2 ? ' (+${items.length - 2})' : '';
+        parts.add('$shown$extra');
+      } else {
+        parts.add('${items.length} article(s)');
+      }
+    }
+    return parts.join(' · ');
   }
 }
 

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../../local/drift/app_database.dart';
+import '../../models/inventory.dart';
 import '../../models/stock_transfer.dart';
 
 /// Offline-first transfers: UI reads from Drift; sync writes from Supabase.
@@ -96,18 +97,27 @@ class TransfersOfflineRepository {
     if (transfers.isEmpty) return [];
     final ids = transfers.map((t) => t.id).toList();
     final items = await _db.getLocalTransferItemsForTransfers(ids);
+    final productIds = items.map((i) => i.productId).toSet();
+    final productRefs = await _db.getMovementProductRefsByIds(productIds);
     final itemsByTransfer = <String, List<LocalTransferItem>>{};
     for (final i in items) {
       itemsByTransfer.putIfAbsent(i.transferId, () => []).add(i);
     }
     return transfers
-        .map((t) => _toStockTransfer(t, itemsByTransfer[t.id] ?? []))
+        .map(
+          (t) => _toStockTransfer(
+            t,
+            itemsByTransfer[t.id] ?? [],
+            productRefs,
+          ),
+        )
         .toList();
   }
 
   static StockTransfer _toStockTransfer(
     LocalTransfer t,
     List<LocalTransferItem> itemRows,
+    Map<String, MovementProductRef> productRefs,
   ) {
     return StockTransfer(
       id: t.id,
@@ -134,7 +144,7 @@ class TransfersOfflineRepository {
               quantityRequested: i.quantityRequested,
               quantityShipped: i.quantityShipped,
               quantityReceived: i.quantityReceived,
-              productName: null,
+              productName: productRefs[i.productId]?.name,
             ),
           )
           .toList(),

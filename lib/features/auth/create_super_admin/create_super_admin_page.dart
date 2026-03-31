@@ -143,7 +143,7 @@ class _CreateSuperAdminPageState extends State<CreateSuperAdminPage> {
                   borderRadius: BorderRadius.circular(AppTheme.radiusXl),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
+                      color: Colors.black.withValues(alpha: 0.04),
                       blurRadius: 24,
                       offset: const Offset(0, 8),
                     ),
@@ -181,7 +181,7 @@ class _CreateSuperAdminPageState extends State<CreateSuperAdminPage> {
                         Container(
                           padding: const EdgeInsets.all(AppTheme.spaceMd),
                           decoration: BoxDecoration(
-                            color: colorScheme.errorContainer.withOpacity(0.6),
+                            color: colorScheme.errorContainer.withValues(alpha: 0.6),
                             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                           ),
                           child: Row(
@@ -198,7 +198,7 @@ class _CreateSuperAdminPageState extends State<CreateSuperAdminPage> {
                         Container(
                           padding: const EdgeInsets.all(AppTheme.spaceMd),
                           decoration: BoxDecoration(
-                            color: colorScheme.primaryContainer.withOpacity(0.5),
+                            color: colorScheme.primaryContainer.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                           ),
                           child: Row(

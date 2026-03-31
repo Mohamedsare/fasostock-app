@@ -89,7 +89,7 @@ class PosMainArea extends StatelessWidget {
                 SizedBox(
                   width: MediaQuery.sizeOf(context).width > 600 ? 180 : 140,
                   child: DropdownButtonFormField<String>(
-                    value: customerId.isEmpty || !customers.any((c) => c.id == customerId) ? null : customerId,
+                    initialValue: customerId.isEmpty || !customers.any((c) => c.id == customerId) ? null : customerId,
                     isExpanded: true,
                     decoration: InputDecoration(
                       filled: true,

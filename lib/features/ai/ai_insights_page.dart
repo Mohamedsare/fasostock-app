@@ -472,7 +472,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.12),
+                color: Colors.amber.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -520,7 +520,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.12),
+                color: Colors.amber.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -556,10 +556,10 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
     final theme = Theme.of(context);
     return Card(
       elevation: 0,
-      color: theme.colorScheme.errorContainer.withOpacity(0.25),
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.25),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -634,7 +634,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: c.accent
-            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.5), width: 2)
+            ? BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.5), width: 2)
             : BorderSide(color: theme.dividerColor),
       ),
       child: Padding(
@@ -778,7 +778,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
                     show: true,
                     drawVerticalLine: false,
                     getDrawingHorizontalLine: (_) => FlLine(
-                      color: theme.dividerColor.withOpacity(0.4),
+                      color: theme.dividerColor.withValues(alpha: 0.4),
                       strokeWidth: 1,
                     ),
                   ),
@@ -786,7 +786,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
                     touchTooltipData: BarTouchTooltipData(
                       getTooltipColor: (_) => theme.colorScheme.surfaceContainerHighest,
                       tooltipRoundedRadius: 8,
-                      getTooltipItem: (group, _, __, ___) {
+                      getTooltipItem: (group, _, _, _) {
                         final d = data[group.x];
                         return BarTooltipItem(
                           formatCurrency(d.$1),
@@ -907,7 +907,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: priorityColor.withOpacity(0.12),
+                        color: priorityColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(

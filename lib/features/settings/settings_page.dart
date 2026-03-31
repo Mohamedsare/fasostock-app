@@ -7,6 +7,7 @@ import '../../../core/breakpoints.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
+import '../../../core/utils/public_website_url.dart';
 import '../../../data/models/company.dart';
 import '../../../data/models/store.dart';
 import '../../../data/repositories/company_repository.dart';
@@ -670,6 +671,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 20),
             if (permissions.isOwner && currentCompany != null) ...[
               _buildCompanyLogoSection(context, company, currentCompany),
+              const SizedBox(height: 16),
+              _TicketQrWebsiteSection(companyId: currentCompany.id),
               const SizedBox(height: 16),
             ],
             if (companies.length > 1) ...[
@@ -1622,6 +1625,143 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Site web affiché dans le QR code des tickets (caisse rapide).
+class _TicketQrWebsiteSection extends ConsumerStatefulWidget {
+  const _TicketQrWebsiteSection({required this.companyId});
+
+  final String companyId;
+
+  @override
+  ConsumerState<_TicketQrWebsiteSection> createState() => _TicketQrWebsiteSectionState();
+}
+
+class _TicketQrWebsiteSectionState extends ConsumerState<_TicketQrWebsiteSection> {
+  final _controller = TextEditingController();
+  final _settingsRepo = SettingsRepository();
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(covariant _TicketQrWebsiteSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.companyId != widget.companyId) {
+      setState(() => _loading = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final u = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(widget.companyId);
+    if (!mounted) return;
+    setState(() {
+      _controller.text = u ?? '';
+      _loading = false;
+    });
+  }
+
+  Future<void> _save() async {
+    final raw = _controller.text.trim();
+    setState(() => _saving = true);
+    try {
+      await _settingsRepo.setPublicWebsiteUrl(
+        widget.companyId,
+        raw.isEmpty ? null : raw,
+      );
+      if (!mounted) return;
+      final db = ref.read(appDatabaseProvider);
+      if (raw.isEmpty) {
+        await db.deletePublicWebsiteUrl(widget.companyId);
+      } else {
+        final n = normalizePublicWebsiteUrlForQr(raw);
+        if (n != null) await db.upsertPublicWebsiteUrl(widget.companyId, n);
+      }
+      if (mounted) AppToast.success(context, 'Site web enregistré');
+    } catch (e, st) {
+      AppErrorHandler.log(e, st);
+      if (mounted) AppErrorHandler.show(context, e);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: Center(
+          child: SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.qr_code_2_rounded, size: 20, color: theme.colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'Site web (QR ticket)',
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Les clients qui scannent le QR du ticket sont envoyés vers ce lien (ex. https://srfaso.com). Laissez vide pour le format texte classique.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _controller,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: InputDecoration(
+            labelText: 'URL du site',
+            hintText: 'https://votredomaine.com',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Enregistrer'),
+          ),
+        ),
+      ],
     );
   }
 }

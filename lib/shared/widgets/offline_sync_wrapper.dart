@@ -7,17 +7,23 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/connectivity/connectivity_service.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
+import '../../data/sync/sales_realtime_sync.dart';
+import '../../data/sync/store_inventory_realtime_sync.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/company_provider.dart';
 import '../../providers/permissions_provider.dart';
 import '../../providers/offline_providers.dart';
 
 /// Délai entre deux syncs automatiques en arrière-plan (quand en ligne).
-const Duration _periodicSyncInterval = Duration(seconds: 90);
+/// 45 s : bon compromis pour que ventes / statuts (ex. annulation) se propagent sans attendre ~90 s.
+const Duration _periodicSyncInterval = Duration(seconds: 45);
+
+/// Relecture légère des quantités `store_inventory` (REST) — contourne Realtime si les WS ne passent pas.
+const Duration _inventoryLightPollInterval = Duration(seconds: 2);
 
 /// Initialise la connexion (Connectivity) et réchauffe Drift au premier build.
 /// Déclenche SyncServiceV2 au démarrage, à la reconnexion, au retour de l'app au premier plan,
-/// et toutes les 90 s quand en ligne. Affiche une bannière "Mode hors ligne" quand il n'y a pas de connexion.
+/// et toutes les 45 s quand en ligne. Affiche une bannière "Mode hors ligne" quand il n'y a pas de connexion.
 class OfflineSyncWrapper extends ConsumerStatefulWidget {
   const OfflineSyncWrapper({super.key, required this.child});
 
@@ -31,12 +37,19 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   final ConnectivityService _connectivity = ConnectivityService.instance;
   StreamSubscription<bool>? _sub;
   Timer? _periodicSyncTimer;
+  Timer? _inventoryLightPollTimer;
   bool _isOnline = true;
   bool _dbReady = false;
   /// Dernière paire (utilisateur + entreprise) pour laquelle on a lancé la sync « au démarrage ».
   /// Évite les doublons à chaque rebuild, mais permet une nouvelle sync après login ou changement d’entreprise.
   String? _lastInitialSyncKey;
   int _lastSyncErrors = 0;
+  StoreInventoryRealtimeSync? _storeInventoryRealtime;
+  SalesRealtimeSync? _salesRealtime;
+  bool _postgresRealtimeActive = false;
+  bool? _lastWantPostgresRealtime;
+  /// Dernière entreprise pour laquelle on a déclenché un pull stock immédiat (changement de société).
+  String? _lastInventoryKickCompanyId;
 
   static bool _errorHandlersInstalled = false;
 
@@ -63,7 +76,20 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   Future<void> _onAppResumed() async {
     await _refreshSessionBestEffort();
     if (!mounted) return;
-    if (_isOnline) _runSync(silent: true);
+    if (_isOnline) {
+      final auth = context.read<AuthProvider>();
+      final company = context.read<CompanyProvider>();
+      final cid = company.currentCompanyId;
+      if (auth.user?.id != null && cid != null) {
+        final extra = <String>{};
+        final cs = company.currentStoreId;
+        if (cs != null && cs.isNotEmpty) extra.add(cs);
+        unawaited(
+          ref.read(syncServiceV2Provider).pullStoreInventoryLight(companyId: cid, extraStoreIds: extra),
+        );
+      }
+      _runSync(silent: true);
+    }
     _reloadPermissions();
   }
 
@@ -103,11 +129,38 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     _periodicSyncTimer = Timer.periodic(_periodicSyncInterval, (_) {
       if (_dbReady && _isOnline) _runSync(silent: true);
     });
+    _startInventoryLightPoll();
   }
 
   void _stopPeriodicSync() {
     _periodicSyncTimer?.cancel();
     _periodicSyncTimer = null;
+    _stopInventoryLightPoll();
+  }
+
+  void _startInventoryLightPoll() {
+    _stopInventoryLightPoll();
+    void runInventoryLightPull() {
+      if (!_dbReady || !_isOnline || !mounted) return;
+      final auth = context.read<AuthProvider>();
+      final company = context.read<CompanyProvider>();
+      if (auth.user?.id == null) return;
+      final companyId = company.currentCompanyId;
+      if (companyId == null) return;
+      final sync = ref.read(syncServiceV2Provider);
+      final extra = <String>{};
+      final cs = company.currentStoreId;
+      if (cs != null && cs.isNotEmpty) extra.add(cs);
+      unawaited(sync.pullStoreInventoryLight(companyId: companyId, extraStoreIds: extra));
+    }
+
+    runInventoryLightPull();
+    _inventoryLightPollTimer = Timer.periodic(_inventoryLightPollInterval, (_) => runInventoryLightPull());
+  }
+
+  void _stopInventoryLightPoll() {
+    _inventoryLightPollTimer?.cancel();
+    _inventoryLightPollTimer = null;
   }
 
   void _reloadPermissions() {
@@ -180,18 +233,51 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     });
   }
 
+  /// Stock (`store_inventory`) + ventes (`sales`) : même garde (en ligne + session).
+  /// Offline / sync périodique inchangés : pas de WS hors ligne ; le pull reste le filet.
+  void _setPostgresRealtimeActive(bool active) {
+    if (active == _postgresRealtimeActive) return;
+    _postgresRealtimeActive = active;
+    if (active) {
+      final db = ref.read(appDatabaseProvider);
+      _storeInventoryRealtime ??= StoreInventoryRealtimeSync(db);
+      _salesRealtime ??= SalesRealtimeSync(db, syncService: ref.read(syncServiceV2Provider));
+      unawaited(_storeInventoryRealtime!.start());
+      unawaited(_salesRealtime!.start());
+    } else {
+      unawaited(_storeInventoryRealtime?.stop() ?? Future<void>.value());
+      unawaited(_salesRealtime?.stop() ?? Future<void>.value());
+      _storeInventoryRealtime = null;
+      _salesRealtime = null;
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _stopPeriodicSync();
+    unawaited(_storeInventoryRealtime?.stop() ?? Future<void>.value());
+    unawaited(_salesRealtime?.stop() ?? Future<void>.value());
+    _storeInventoryRealtime = null;
+    _salesRealtime = null;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    context.watch<AuthProvider>();
     ref.read(appDatabaseProvider); // Warm Drift on first build so first screen is instant.
     _maybeRunSyncOnStart();
+    final wantPostgresRealtime =
+        _dbReady && _isOnline && context.read<AuthProvider>().user != null;
+    if (_lastWantPostgresRealtime != wantPostgresRealtime) {
+      _lastWantPostgresRealtime = wantPostgresRealtime;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _setPostgresRealtimeActive(wantPostgresRealtime);
+      });
+    }
     final company = context.watch<CompanyProvider>();
     final permissions = context.read<PermissionsProvider>();
     final companyId = company.currentCompanyId;
@@ -201,6 +287,26 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!context.mounted) return;
         context.read<PermissionsProvider>().load(companyId);
+      });
+    }
+    final authUser = context.read<AuthProvider>().user;
+    if (companyId == null) {
+      _lastInventoryKickCompanyId = null;
+    } else if (_dbReady &&
+        _isOnline &&
+        authUser != null &&
+        companyId != _lastInventoryKickCompanyId) {
+      _lastInventoryKickCompanyId = companyId;
+      final toPull = companyId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final co = context.read<CompanyProvider>();
+        final extra = <String>{};
+        final cs = co.currentStoreId;
+        if (cs != null && cs.isNotEmpty) extra.add(cs);
+        unawaited(
+          ref.read(syncServiceV2Provider).pullStoreInventoryLight(companyId: toPull, extraStoreIds: extra),
+        );
       });
     }
     return Column(

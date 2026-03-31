@@ -14,10 +14,12 @@ import 'package:provider/provider.dart';
 import '../../../core/breakpoints.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
+import '../../../core/utils/sale_pos_edit.dart';
 import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../core/utils/stock_cache_recovery.dart';
+import '../../../core/utils/user_country_time.dart';
 import '../../../core/utils/client_request_id.dart';
 import '../../../data/local/drift/app_database.dart';
 import '../../../data/models/customer.dart';
@@ -35,7 +37,6 @@ import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import 'pos_models.dart';
 import 'services/invoice_a4_pdf_service.dart';
-import 'pos_till_product_filter.dart';
 import 'widgets/pos_cart_panel.dart';
 import 'widgets/pos_cart_tile.dart';
 import 'widgets/pos_main_area.dart';
@@ -43,9 +44,11 @@ import '../pos_quick/pos_quick_constants.dart';
 
 /// Page POS — lecture 100 % Drift (produits, clients, stock), sync v2 en arrière-plan.
 class PosPage extends ConsumerStatefulWidget {
-  const PosPage({super.key, required this.storeId});
+  const PosPage({super.key, required this.storeId, this.editSaleId});
 
   final String storeId;
+  /// Ouvre le POS facture avec une vente complétée à modifier (`?editSale=`).
+  final String? editSaleId;
 
   @override
   ConsumerState<PosPage> createState() => _PosPageState();
@@ -82,12 +85,36 @@ class _PosPageState extends ConsumerState<PosPage> {
   late final ValueNotifier<PaymentMethod> _paymentMethodNotifier;
   final Map<String, TextEditingController> _qtyControllers = {};
 
+  String? _activeEditSaleId;
+  Map<String, int> _editStockRelease = {};
+  bool _saleEditBootstrapping = false;
+  String? _saleEditBarrierError;
+
   /// Sync périodique : les produits (ou clients/stock) ajoutés ailleurs apparaissent sur la caisse sans qu'elle ait à rafraîchir.
   static const Duration _periodicSyncInterval = Duration(seconds: 45);
+
+  int _effectiveStock(String productId, Map<String, int> stockByProductId) {
+    final base = stockByProductId[productId] ?? 0;
+    final release = _editStockRelease[productId] ?? 0;
+    return base + release;
+  }
+
+  bool _isProductShownOnTill(Product p, Map<String, int> stockByProductId) {
+    if (!p.isActive) return false;
+    if (!p.isAvailableInBoutiqueStock) return false;
+    return _effectiveStock(p.id, stockByProductId) > 0;
+  }
 
   @override
   void initState() {
     super.initState();
+    final ep = widget.editSaleId?.trim() ?? '';
+    if (ep.isNotEmpty) _saleEditBootstrapping = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      context.read<CompanyProvider>().setCurrentStoreId(widget.storeId);
+      if (ep.isNotEmpty) await _bootstrapSaleEdit();
+    });
     _updateTime();
     _clockTimer = Timer.periodic(
       const Duration(seconds: 1),
@@ -122,7 +149,7 @@ class _PosPageState extends ConsumerState<PosPage> {
 
   void _updateTime() {
     if (!mounted) return;
-    final t = DateFormat('HH:mm').format(DateTime.now());
+    final t = formatDeviceWallClockHm(DateTime.now());
     if (t != _currentTime) setState(() => _currentTime = t);
   }
 
@@ -170,14 +197,14 @@ class _PosPageState extends ConsumerState<PosPage> {
     });
   }
 
-  /// Filtre par recherche, actifs — et masque les produits en rupture (stock ≤ 0) en caisse Facture A4.
+  /// Filtre recherche / catégorie ; boutique active avec stock effectif > 0.
   List<Product> _filteredProducts(
     List<Product> products,
     Map<String, int> stockByProductId,
   ) {
     final search = _searchController.text.trim().toLowerCase();
     return products.where((p) {
-      if (!isProductShownOnStoreTill(p, stockByProductId)) return false;
+      if (!_isProductShownOnTill(p, stockByProductId)) return false;
       if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId) {
         return false;
       }
@@ -195,7 +222,7 @@ class _PosPageState extends ConsumerState<PosPage> {
   int get _cartItemCount => _cart.fold(0, (n, c) => n + c.quantity);
 
   List<PosCartItem> _stockWarnings(Map<String, int> stockByProductId) => _cart
-      .where((c) => (stockByProductId[c.productId] ?? 0) < c.quantity)
+      .where((c) => _effectiveStock(c.productId, stockByProductId) < c.quantity)
       .toList();
 
   String? _selectedCustomerName(List<Customer> customers) {
@@ -499,13 +526,14 @@ class _PosPageState extends ConsumerState<PosPage> {
   static String _defaultUnitForProduct(Product p) {
     final u = (p.unit).trim().toLowerCase();
     if (u.isEmpty) return 'pce';
-    if (kInvoiceUnits.any((x) => x.toLowerCase() == u))
+    if (kInvoiceUnits.any((x) => x.toLowerCase() == u)) {
       return kInvoiceUnits.firstWhere((x) => x.toLowerCase() == u);
+    }
     return 'pce';
   }
 
   void _addToCart(Product p, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[p.id] ?? 0;
+    final stock = _effectiveStock(p.id, stockByProductId);
     setState(() {
       PosCartItem? existing;
       try {
@@ -563,7 +591,7 @@ class _PosPageState extends ConsumerState<PosPage> {
     int delta,
     Map<String, int> stockByProductId,
   ) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _effectiveStock(productId, stockByProductId);
     int? newQty;
     setState(() {
       final beforeLen = _cart.length;
@@ -601,7 +629,7 @@ class _PosPageState extends ConsumerState<PosPage> {
   }
 
   void _setQty(String productId, int value, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _effectiveStock(productId, stockByProductId);
     PosCartItem? current;
     try {
       current = _cart.firstWhere((c) => c.productId == productId);
@@ -657,10 +685,206 @@ class _PosPageState extends ConsumerState<PosPage> {
       final uri = Uri.tryParse(url);
       if (uri == null || !uri.hasScheme) return null;
       final response = await http.get(uri).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty)
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
         return response.bodyBytes;
+      }
     } catch (_) {}
     return null;
+  }
+
+  List<CreateSaleItemInput> _cartToSaleItems() {
+    return _cart
+        .map(
+          (c) => CreateSaleItemInput(
+            productId: c.productId,
+            quantity: c.quantity,
+            unitPrice: c.unitPrice,
+            discount: (c.quantity * c.unitPrice - c.total).clamp(0.0, double.infinity),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> _bootstrapSaleEdit() async {
+    final rawId = widget.editSaleId?.trim() ?? '';
+    if (rawId.isEmpty || !mounted) return;
+    if (!context.read<PermissionsProvider>().hasPermission(Permissions.salesUpdate)) {
+      setState(() {
+        _saleEditBarrierError = 'Vous n\'avez pas la permission de modifier des ventes.';
+        _saleEditBootstrapping = false;
+      });
+      return;
+    }
+    setState(() {
+      _saleEditBootstrapping = true;
+      _saleEditBarrierError = null;
+    });
+    try {
+      final sale = await _salesRepo.get(rawId);
+      if (!mounted) return;
+      if (sale == null) {
+        setState(() {
+          _saleEditBarrierError = 'Vente introuvable.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (sale.storeId != widget.storeId) {
+        setState(() {
+          _saleEditBarrierError = 'Cette vente appartient à une autre boutique.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (sale.status != SaleStatus.completed) {
+        setState(() {
+          _saleEditBarrierError = 'Seules les ventes complétées peuvent être modifiées.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (!saleOpensOnInvoicePosScreen(sale)) {
+        if (!mounted) return;
+        context.go('${AppRoutes.posQuick(sale.storeId)}?${saleEditQuery(sale.id)}');
+        return;
+      }
+      final items = sale.saleItems ?? await _salesRepo.getItems(sale.id);
+      final payments = sale.salePayments ?? await _salesRepo.getPayments(sale.id);
+      if (!mounted) return;
+      final release = <String, int>{};
+      final cart = <PosCartItem>[];
+      for (final item in items) {
+        release[item.productId] = (release[item.productId] ?? 0) + item.quantity;
+        cart.add(
+          PosCartItem(
+            productId: item.productId,
+            name: item.product?.name ?? 'Produit',
+            sku: item.product?.sku,
+            unit: _defaultUnitForProduct(
+              Product(
+                id: item.productId,
+                companyId: sale.companyId,
+                name: item.product?.name ?? '',
+                unit: item.product?.unit ?? 'pce',
+                salePrice: item.unitPrice,
+                isActive: true,
+              ),
+            ),
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.total,
+            imageUrl: null,
+          ),
+        );
+      }
+      _clearQtyControllers();
+      double paySum = 0;
+      if (payments.isNotEmpty) {
+        paySum = payments.fold<double>(0, (s, p) => s + p.amount);
+      }
+      setState(() {
+        _editStockRelease = release;
+        _cart = cart;
+        _activeEditSaleId = sale.id;
+        _customerId = sale.customerId ?? '';
+        _discount = sale.discount;
+        _discountController.text = sale.discount > 0 ? '${sale.discount}' : '';
+        if (payments.isNotEmpty) {
+          _paymentMethod = payments.first.method;
+          _paymentMethodNotifier.value = _paymentMethod;
+          _amountReceived = paySum.clamp(0, double.infinity);
+          _amountReceivedController.text = paySum > 0 ? '$paySum' : '';
+        }
+        _saleEditBootstrapping = false;
+      });
+      for (final c in _cart) {
+        _qtyControllers[c.productId] = TextEditingController(
+          text: c.quantity == 0 ? '' : '${c.quantity}',
+        );
+      }
+    } catch (e, st) {
+      AppErrorHandler.log(e, st);
+      if (!mounted) return;
+      setState(() {
+        _saleEditBarrierError = AppErrorHandler.toUserMessage(e);
+        _saleEditBootstrapping = false;
+      });
+    }
+  }
+
+  Future<void> _persistLocalAfterSaleUpdate(Sale updated) async {
+    final db = ref.read(appDatabaseProvider);
+    final now = DateTime.now().toIso8601String();
+    final items = updated.saleItems ?? await _salesRepo.getItems(updated.id);
+    await db.upsertLocalSale(
+      LocalSalesCompanion.insert(
+        id: updated.id,
+        companyId: updated.companyId,
+        storeId: updated.storeId,
+        customerId: drift.Value(updated.customerId),
+        saleNumber: updated.saleNumber,
+        status: updated.status.value,
+        subtotal: drift.Value(updated.subtotal),
+        discount: drift.Value(updated.discount),
+        tax: drift.Value(updated.tax),
+        total: updated.total,
+        createdBy: updated.createdBy,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+        saleMode: drift.Value(updated.saleMode?.value),
+        documentType: drift.Value(updated.documentType?.value),
+        synced: const drift.Value(true),
+      ),
+    );
+    await db.deleteLocalSaleItemsBySaleId(updated.id);
+    if (items.isNotEmpty) {
+      await db.upsertLocalSaleItems(
+        items.map(
+          (i) => LocalSaleItemsCompanion.insert(
+            id: i.id,
+            saleId: i.saleId,
+            productId: i.productId,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            total: i.total,
+            createdAt: now,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _afterInvoiceSaleEditSuccess(Sale sale) async {
+    if (!context.mounted) return;
+    final router = GoRouter.of(context);
+    final storeId = widget.storeId;
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+
+    context.read<CompanyProvider>().setCurrentStoreId(storeId);
+    context.read<SalesPageProvider>().setFilters(storeId: storeId);
+    context.read<SalesPageProvider>().invalidate();
+    AppToast.success(
+      context,
+      'Vente #${sale.saleNumber} mise à jour.',
+    );
+
+    if (companyId != null) {
+      try {
+        await ref.read(salesOfflineRepositoryProvider).upsertSale(sale);
+      } catch (e2, st2) {
+        AppErrorHandler.log(e2, st2);
+      }
+      ref.invalidate(salesStreamProvider((companyId: companyId, storeId: storeId)));
+    }
+    await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([storeId]);
+    ref.invalidate(inventoryQuantitiesStreamProvider(storeId));
+    try {
+      await _persistLocalAfterSaleUpdate(sale);
+    } catch (e3, st3) {
+      AppErrorHandler.log(e3, st3);
+    }
+
+    router.go(AppRoutes.sales);
   }
 
   Future<void> _handlePayment(
@@ -670,8 +894,9 @@ class _PosPageState extends ConsumerState<PosPage> {
   ) async {
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     final userId = context.read<AuthProvider>().user?.id;
-    if (companyId == null || userId == null || store == null || !_canPay)
+    if (companyId == null || userId == null || store == null || !_canPay) {
       return;
+    }
     if (_cart.any((c) => c.quantity <= 0)) {
       AppToast.error(
         context,
@@ -687,6 +912,39 @@ class _PosPageState extends ConsumerState<PosPage> {
       AppToast.error(context, 'Associez un client pour une vente à crédit.');
       return;
     }
+
+    if (_activeEditSaleId != null) {
+      if (!ConnectivityService.instance.isOnline) {
+        AppToast.error(context, 'La modification nécessite une connexion internet.');
+        return;
+      }
+      setState(() => _creating = true);
+      try {
+        await _salesRepo.updateCompleted(
+          saleId: _activeEditSaleId!,
+          customerId: _customerId.isEmpty ? null : _customerId,
+          items: _cartToSaleItems(),
+          payments: _buildPayments(),
+          discount: _discount,
+          saleMode: SaleMode.invoicePos,
+          documentType: DocumentType.a4Invoice,
+        );
+        final sale = await _salesRepo.get(_activeEditSaleId!);
+        if (sale == null) throw Exception('Vente introuvable après mise à jour');
+        await _afterInvoiceSaleEditSuccess(sale);
+      } catch (e, st) {
+        if (mounted) {
+          if (shouldRecoverInventoryCachesFromRpcError(e)) {
+            recoverStoreInventoryCacheAfterRpcError(ref, widget.storeId, _refreshSync);
+          }
+          AppErrorHandler.show(context, e, stackTrace: st);
+        }
+      } finally {
+        if (mounted) setState(() => _creating = false);
+      }
+      return;
+    }
+
     setState(() => _creating = true);
     Future<void> saveOfflineAndShowInvoice(
       List<CreateSalePaymentInput> payments,
@@ -829,9 +1087,11 @@ class _PosPageState extends ConsumerState<PosPage> {
         total: _total,
         customerName: selectedCustomer?.name,
         customerPhone: selectedCustomer?.phone,
-        depositAmount: _acompte,
+        paymentLines:
+            InvoiceA4PdfService.paymentLinesFromCreateInputs(payments),
         logoBytes: logoBytesOffline,
       );
+      if (!mounted) return;
       setState(() {
         _cart = [];
         _discount = 0;
@@ -911,9 +1171,12 @@ class _PosPageState extends ConsumerState<PosPage> {
       if (logoBytes != null && logoBytes.isNotEmpty) {
         await InvoiceA4PdfService.cacheLogoBytes(storeForInvoice.id, logoBytes);
       }
-      final depositFromPayments = sale.salePayments != null
-          ? sale.salePayments!.fold<double>(0, (s, p) => s + p.amount)
-          : _acompte;
+      final paymentLinesForPdf =
+          sale.salePayments != null && sale.salePayments!.isNotEmpty
+          ? InvoiceA4PdfService.paymentLinesFromSalePayments(
+              sale.salePayments!,
+            )
+          : InvoiceA4PdfService.paymentLinesFromCreateInputs(payments);
       final invoiceA4 = InvoiceA4Data(
         store: storeForInvoice,
         saleNumber: sale.saleNumber,
@@ -935,9 +1198,10 @@ class _PosPageState extends ConsumerState<PosPage> {
         total: _total,
         customerName: selectedCustomer?.name,
         customerPhone: selectedCustomer?.phone,
-        depositAmount: depositFromPayments,
+        paymentLines: paymentLinesForPdf,
         logoBytes: logoBytes,
       );
+      if (!mounted) return;
       setState(() {
         _cart = [];
         _discount = 0;
@@ -1002,10 +1266,12 @@ class _PosPageState extends ConsumerState<PosPage> {
         body: const Center(child: CircularProgressIndicator()),
       );
     }
+    final saleEditParam = widget.editSaleId?.trim() ?? '';
+    final isSaleEditEntry = saleEditParam.isNotEmpty;
     final canInvoiceA4 =
         permissions.hasPermission(Permissions.salesInvoiceA4) ||
         permissions.hasPermission(Permissions.salesCreate);
-    if (!canInvoiceA4) {
+    if (!isSaleEditEntry && !canInvoiceA4) {
       return Scaffold(
         appBar: AppBar(title: const Text('Facture A4')),
         body: Center(
@@ -1036,6 +1302,82 @@ class _PosPageState extends ConsumerState<PosPage> {
           ),
         ),
       );
+    }
+
+    if (isSaleEditEntry) {
+      if (!permissions.hasPermission(Permissions.salesUpdate)) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Facture A4')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lock_rounded, size: 64, color: theme.colorScheme.error),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Vous n'avez pas la permission de modifier des ventes.",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: () => context.go(AppRoutes.sales),
+                    icon: const Icon(Icons.list_rounded),
+                    label: const Text('Retour aux ventes'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      if (_saleEditBarrierError != null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Modifier une vente')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _saleEditBarrierError!,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: () => context.go(AppRoutes.sales),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    label: const Text('Retour aux ventes'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      if (_saleEditBootstrapping || _activeEditSaleId == null) {
+        return Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: theme.colorScheme.primary),
+                const SizedBox(height: 16),
+                Text(
+                  'Ouverture de la vente en caisse facture…',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
     }
 
     final companyId = context.read<CompanyProvider>().currentCompanyId;
@@ -1150,6 +1492,7 @@ class _PosPageState extends ConsumerState<PosPage> {
       body: Column(
         children: [
           _buildPosHeader(store!),
+          if (_activeEditSaleId != null) _buildSaleEditModeBanner(theme),
           if (!isOnline) _buildOfflineBanner(),
           Expanded(
             child: Row(
@@ -1223,7 +1566,7 @@ class _PosPageState extends ConsumerState<PosPage> {
       );
       return PosCartTile(
         item: c,
-        stock: stockByProductId[c.productId] ?? 0,
+        stock: _effectiveStock(c.productId, stockByProductId),
         qtyController: controller,
         onQtyDelta: (delta) => _updateQty(c.productId, delta, stockByProductId),
         onSetQty: (v) => _setQty(c.productId, v, stockByProductId),
@@ -1362,7 +1705,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                 hintText: '0',
                 filled: true,
                 fillColor: theme.colorScheme.surfaceContainerHighest
-                    .withOpacity(0.5),
+                    .withValues(alpha: 0.5),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -1393,9 +1736,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             decoration: InputDecoration(
               hintText: _total > 0 ? formatCurrency(_total) : '0',
               filled: true,
-              fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(
-                0.5,
-              ),
+              fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -1486,7 +1827,9 @@ class _PosPageState extends ConsumerState<PosPage> {
           child: Text(
             _creating
                 ? 'Enregistrement...'
-                : 'Payer (${_labelForPayment(effectivePayment)})',
+                : (_activeEditSaleId != null
+                    ? 'Enregistrer la modification'
+                    : 'Payer (${_labelForPayment(effectivePayment)})'),
           ),
         ),
       ],
@@ -1511,7 +1854,7 @@ class _PosPageState extends ConsumerState<PosPage> {
         border: const Border(top: BorderSide(color: PosQuickColors.bordure)),
         boxShadow: [
           BoxShadow(
-            color: theme.colorScheme.shadow.withOpacity(0.08),
+            color: theme.colorScheme.shadow.withValues(alpha: 0.08),
             blurRadius: 12,
             offset: const Offset(0, -2),
           ),
@@ -1589,7 +1932,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
           boxShadow: [
             BoxShadow(
-              color: theme.colorScheme.shadow.withOpacity(0.2),
+              color: theme.colorScheme.shadow.withValues(alpha: 0.2),
               blurRadius: 20,
               offset: const Offset(0, -4),
             ),
@@ -1606,7 +1949,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        'Articles (${_cartItemCount})',
+                        'Articles ($_cartItemCount)',
                         style: theme.textTheme.bodyLarge?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w500,
@@ -1652,7 +1995,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                       const SizedBox(height: 20),
                       Divider(
                         height: 1,
-                        color: theme.dividerColor.withOpacity(0.6),
+                        color: theme.dividerColor.withValues(alpha: 0.6),
                       ),
                       const SizedBox(height: 16),
                       Text(
@@ -1665,7 +2008,7 @@ class _PosPageState extends ConsumerState<PosPage> {
                       const SizedBox(height: 12),
                       ValueListenableBuilder<PaymentMethod>(
                         valueListenable: _paymentMethodNotifier,
-                        builder: (_, pm, __) => _buildCartFooter(
+                        builder: (_, pm, _) => _buildCartFooter(
                           theme,
                           store,
                           customers,
@@ -1686,6 +2029,38 @@ class _PosPageState extends ConsumerState<PosPage> {
         ),
       ),
     ).then((_) {});
+  }
+
+  Widget _buildSaleEditModeBanner(ThemeData theme) {
+    return Material(
+      color: theme.colorScheme.primaryContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.edit_note_rounded, color: theme.colorScheme.onPrimaryContainer, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Modification d\'une vente (facture A4). Enregistrez pour appliquer — connexion requise.',
+                  style: TextStyle(
+                    color: theme.colorScheme.onPrimaryContainer,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => context.go(AppRoutes.pos(widget.storeId)),
+                child: Text('Quitter', style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildOfflineBanner() {
@@ -1841,12 +2216,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                   final doc = await InvoiceA4PdfService.buildDocument(data);
                   return doc.save();
                 } catch (e) {
-                  if (ctx.mounted)
+                  if (ctx.mounted) {
                     AppErrorHandler.show(
                       ctx,
                       e,
                       fallback: 'Impossible d\'afficher la facture PDF.',
                     );
+                  }
                   return Uint8List(0);
                 }
               },
@@ -1938,12 +2314,13 @@ class _PosPageState extends ConsumerState<PosPage> {
                         // Annulation du dialogue d’enregistrement : on laisse la fenêtre ouverte
                       }
                     } catch (e) {
-                      if (ctx.mounted)
+                      if (ctx.mounted) {
                         AppErrorHandler.show(
                           ctx,
                           e,
                           fallback: 'Impossible de télécharger la facture.',
                         );
+                      }
                     }
                   },
                   icon: const Icon(Icons.download_rounded, size: 20),

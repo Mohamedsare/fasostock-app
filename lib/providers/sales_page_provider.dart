@@ -19,6 +19,8 @@ class SalesPageProvider extends ChangeNotifier {
   SaleStatus? _filterStatus;
   String _filterFrom = '';
   String _filterTo = '';
+  String _filterSearch = '';
+  String? _filterCashierUserId;
 
   String? _lastCompanyId;
 
@@ -31,17 +33,49 @@ class SalesPageProvider extends ChangeNotifier {
   SaleStatus? get filterStatus => _filterStatus;
   String get filterFrom => _filterFrom;
   String get filterTo => _filterTo;
+  String get filterSearch => _filterSearch;
+  String? get filterCashierUserId => _filterCashierUserId;
 
-  void setFilters({
-    String? storeId,
-    SaleStatus? status,
-    String? from,
-    String? to,
-  }) {
+  /// Filtre boutique — utilisé aussi par le POS pour aligner la liste.
+  void setFilters({String? storeId}) {
     if (storeId != null) _filterStoreId = storeId;
-    if (status != null) _filterStatus = status;
-    if (from != null) _filterFrom = from;
-    if (to != null) _filterTo = to;
+    notifyListeners();
+  }
+
+  void setStatusFilter(SaleStatus? status) {
+    _filterStatus = status;
+    notifyListeners();
+  }
+
+  void setFromDate(String dayYmd) {
+    _filterFrom = dayYmd;
+    notifyListeners();
+  }
+
+  void setToDate(String dayYmd) {
+    _filterTo = dayYmd;
+    notifyListeners();
+  }
+
+  void clearFromDate() {
+    _filterFrom = '';
+    notifyListeners();
+  }
+
+  void clearToDate() {
+    _filterTo = '';
+    notifyListeners();
+  }
+
+  /// Texte de recherche (déjà debouncé côté UI).
+  void setSearchQuery(String query) {
+    _filterSearch = query;
+    notifyListeners();
+  }
+
+  /// `null` = tous les caissiers.
+  void setCashierFilter(String? userId) {
+    _filterCashierUserId = userId;
     notifyListeners();
   }
 

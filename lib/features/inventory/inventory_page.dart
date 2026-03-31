@@ -37,6 +37,19 @@ const Map<String, String> _movementLabels = {
   'inventory_correction': 'Correction inventaire',
 };
 
+/// Libellé affiché : toujours le **nom complet** issu du catalogue [productNameById]
+/// (même source que l’onglet Stock), puis repli sur l’embedding du mouvement.
+String _movementProductLabel(
+  StockMovement m,
+  Map<String, String> productNameById,
+) {
+  final fromCatalog = productNameById[m.productId]?.trim();
+  if (fromCatalog != null && fromCatalog.isNotEmpty) return fromCatalog;
+  final embedded = m.product?.name.trim();
+  if (embedded != null && embedded.isNotEmpty) return embedded;
+  return '—';
+}
+
 /// Page Stock — lecture 100 % Drift (produits + stock + catégories), sync v2 en arrière-plan.
 class InventoryPage extends ConsumerStatefulWidget {
   const InventoryPage({super.key});
@@ -102,7 +115,14 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
           companyId: company.currentCompanyId,
           storeId: storeId ?? company.currentStoreId,
         );
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'inventory_page',
+          logContext: const {'op': 'refresh_sync'},
+        );
+      }
     }
   }
 
@@ -161,8 +181,9 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
     int defaultThreshold,
   ) {
     if (_filterStatus == 'all') return items;
-    if (_filterStatus == 'out')
+    if (_filterStatus == 'out') {
       return items.where((i) => i.quantity == 0).toList();
+    }
     return items.where((i) {
       final min = _effectiveMin(i, overrides, defaultThreshold);
       return min > 0 && i.quantity <= min;
@@ -225,10 +246,11 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       if (!mounted) return;
       ref.invalidate(defaultStockAlertThresholdStreamProvider(companyId));
       await _refreshSync();
-      if (mounted)
+      if (mounted) {
         setState(() {
         _showStockSettings = false;
       });
+      }
       if (mounted) AppToast.success(context, 'Seuil d\'alerte enregistré');
     } catch (e) {
       if (mounted) AppErrorHandler.show(context, e);
@@ -459,15 +481,17 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
     final stores = storesAsync.value ?? [];
     final categories = categoriesAsync.value ?? [];
     Store? store;
-    try {
-      store = stores.firstWhere((s) => s.id == storeId);
-    } catch (_) {}
+    if (storeId != null) {
+      for (final s in stores) {
+        if (s.id == storeId) {
+          store = s;
+          break;
+        }
+      }
+    }
     final effectiveStoreId = storeId;
     final storeName = store?.name;
 
-    if (effectiveStoreId != null && _showMovements) {
-      Future.microtask(() => _refreshSync(storeId: effectiveStoreId));
-    }
     final thresholdAsync = ref.watch(
       defaultStockAlertThresholdStreamProvider(companyId ?? ''),
     );
@@ -503,14 +527,19 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
         : _currentMovementsPage;
     if (movementsEffectivePage != _currentMovementsPage) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted)
+        if (mounted) {
           setState(() => _currentMovementsPage = movementsEffectivePage);
+        }
       });
     }
     final paginatedMovements = movements
         .skip(movementsEffectivePage * _movementsPageSize)
         .take(_movementsPageSize)
         .toList();
+    final productNameById = <String, String>{
+      for (final p in products)
+        if (p.name.trim().isNotEmpty) p.id: p.name.trim(),
+    };
     final now = DateTime.now().toUtc().toIso8601String();
     var items = effectiveStoreId != null
         ? _buildItemsFromProductsAndStock(
@@ -532,8 +561,9 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       }).toList();
     }
     if (_filterCategory.isNotEmpty) {
+      final productById = {for (final p in products) p.id: p};
       items = items.where((i) {
-        final p = products.where((p) => p.id == i.productId).firstOrNull;
+        final p = productById[i.productId];
         return p?.categoryId == _filterCategory;
       }).toList();
     }
@@ -915,7 +945,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                       ? _filterCategory
                                       : '');
                             final dropdownCat = DropdownButtonFormField<String>(
-                              value: categoryValue,
+                              initialValue: categoryValue,
                               decoration: InputDecoration(
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
@@ -952,14 +982,14 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                 setState(() => _filterCategory = v ?? '');
                               },
                             );
-                            const _statusValues = ['all', 'low', 'out'];
+                            const statusValues = ['all', 'low', 'out'];
                             final statusValue =
-                                _statusValues.contains(_filterStatus)
+                                statusValues.contains(_filterStatus)
                                 ? _filterStatus
                                 : 'all';
                             final dropdownStatut =
                                 DropdownButtonFormField<String>(
-                              value: statusValue,
+                              initialValue: statusValue,
                               decoration: InputDecoration(
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
@@ -1126,6 +1156,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                 children: [
                                   _MovementsTable(
                                     movements: paginatedMovements,
+                                    productNameById: productNameById,
                                   ),
                                   if (movementsPageCount > 1) ...[
                                     const SizedBox(height: 16),
@@ -1175,8 +1206,9 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                       ) {
                                         if (!mounted ||
                                             !context.mounted ||
-                                            _adjustingItem == null)
+                                            _adjustingItem == null) {
                                           return;
+                                        }
                                         final uid = context
                                             .read<AuthProvider>()
                                             .user
@@ -1237,10 +1269,11 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                   },
                                 ),
                               ).then((_) {
-                                          if (mounted)
+                                          if (mounted) {
                                             setState(
                                               () => _adjustingItem = null,
                                             );
+                                          }
                                   });
                                 });
                               }
@@ -1442,7 +1475,7 @@ class _StockTable extends StatelessWidget {
                             ? Image.network(
                                 i.product!.productImages!.first.url,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Icon(
+                                errorBuilder: (_, _, _) => Icon(
                                   Icons.inventory_2_rounded,
                                   size: 22,
                                   color: theme.colorScheme.onSurfaceVariant,
@@ -1519,9 +1552,13 @@ class _StockTable extends StatelessWidget {
 }
 
 class _MovementsTable extends StatelessWidget {
-  const _MovementsTable({required this.movements});
+  const _MovementsTable({
+    required this.movements,
+    required this.productNameById,
+  });
 
   final List<StockMovement> movements;
+  final Map<String, String> productNameById;
 
   @override
   Widget build(BuildContext context) {
@@ -1554,6 +1591,7 @@ class _MovementsTable extends StatelessWidget {
         ],
         rows: movements.map((m) {
           final label = _movementLabels[m.type] ?? m.type;
+          final productLabel = _movementProductLabel(m, productNameById);
           return DataRow(
             cells: [
               DataCell(
@@ -1564,7 +1602,7 @@ class _MovementsTable extends StatelessWidget {
                   style: theme.textTheme.bodySmall,
                 ),
               ),
-              DataCell(Text(m.product?.name ?? '—')),
+              DataCell(Text(productLabel)),
               DataCell(Text(label)),
               DataCell(
                 Text(
@@ -1583,12 +1621,5 @@ class _MovementsTable extends StatelessWidget {
         }).toList(),
       ),
     );
-  }
-}
-
-extension _FirstOrNull<E> on Iterable<E> {
-  E? get firstOrNull {
-    for (final e in this) return e;
-    return null;
   }
 }

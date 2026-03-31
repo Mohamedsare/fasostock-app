@@ -40,10 +40,12 @@ class _AdminMessagesPageState extends State<AdminMessagesPage> {
   Future<void> _loadUsers() async {
     try {
       final list = await _repo.listUsers();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _users = list;
         _usersLoading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _usersLoading = false);
     }
@@ -127,7 +129,7 @@ class _AdminMessagesPageState extends State<AdminMessagesPage> {
                   if (!_sendToAllOwners) ...[
                     const SizedBox(height: 20),
                     DropdownButtonFormField<String?>(
-                      value: _selectedUserId,
+                      initialValue: _selectedUserId,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'Destinataire'),
                       items: [

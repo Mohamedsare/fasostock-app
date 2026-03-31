@@ -131,10 +131,12 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   @override
   void didUpdateWidget(ProductFormDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.categories.length != oldWidget.categories.length)
+    if (widget.categories.length != oldWidget.categories.length) {
       _categories = List.from(widget.categories);
-    if (widget.brands.length != oldWidget.brands.length)
+    }
+    if (widget.brands.length != oldWidget.brands.length) {
       _brands = List.from(widget.brands);
+    }
   }
 
   @override
@@ -267,6 +269,18 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
       setState(() => _error = 'Prix de vente doit être >= 0');
       return;
     }
+    final purchasePrice = _parseDouble(_purchasePriceController.text) ?? 0;
+    if (purchasePrice < 0) {
+      setState(() => _error = 'Prix d’achat doit être >= 0');
+      return;
+    }
+    if (purchasePrice > salePrice) {
+      setState(
+        () => _error =
+            'Le prix d’achat ne peut pas dépasser le prix de vente. Réduisez le prix d’achat ou augmentez le prix de vente.',
+      );
+      return;
+    }
     final storeId = widget.currentStoreId;
     final userId = context.read<AuthProvider>().user?.id;
     setState(() {
@@ -285,7 +299,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ? null
               : _barcodeController.text.trim(),
           'unit': _unit,
-          'purchase_price': _parseDouble(_purchasePriceController.text) ?? 0,
+          'purchase_price': purchasePrice,
           'sale_price': salePrice,
           'stock_min': _parseInt(_stockMinController.text) ?? 0,
           'description': _descriptionController.text.trim().isEmpty
@@ -315,7 +329,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ? null
               : _barcodeController.text.trim(),
           unit: _unit,
-          purchasePrice: _parseDouble(_purchasePriceController.text) ?? 0,
+          purchasePrice: purchasePrice,
           salePrice: salePrice,
           stockMin: _parseInt(_stockMinController.text) ?? 0,
           description: _descriptionController.text.trim().isEmpty
@@ -460,7 +474,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
-                          value: _effectiveUnitValue(_unit),
+                          initialValue: _effectiveUnitValue(_unit),
                           decoration: const InputDecoration(
                             labelText: 'Unité',
                             border: OutlineInputBorder(),
@@ -475,7 +489,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
-                          value: _productScope,
+                          initialValue: _productScope,
                           decoration: const InputDecoration(
                             labelText: 'Portée du produit',
                             border: OutlineInputBorder(),
@@ -528,8 +542,9 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                         ),
                                     validator: (v) {
                                       final n = _parseDouble(v ?? '');
-                                      if (n == null || n < 0)
+                                      if (n == null || n < 0) {
                                         return 'Prix >= 0';
+                                      }
                                       return null;
                                     },
                                   ),
@@ -565,8 +580,9 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                         ),
                                     validator: (v) {
                                       final n = _parseDouble(v ?? '');
-                                      if (n == null || n < 0)
+                                      if (n == null || n < 0) {
                                         return 'Prix >= 0';
+                                      }
                                       return null;
                                     },
                                   ),
@@ -740,7 +756,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                       width: 64,
                       height: 64,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         width: 64,
                         height: 64,
                         color: Theme.of(
@@ -761,12 +777,13 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                       onPressed: () async {
                         try {
                           await _repo.deleteImage(img.id);
-                          if (mounted)
+                          if (mounted) {
                             setState(
                               () => _existingImages.removeWhere(
                                 (e) => e.id == img.id,
                               ),
                             );
+                          }
                         } catch (_) {}
                       },
                       style: IconButton.styleFrom(
@@ -859,7 +876,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                 ? _categoryId
                 : null;
             final dropdown = DropdownButtonFormField<String>(
-              value: categoryValue,
+              initialValue: categoryValue,
               isExpanded: true,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
@@ -945,7 +962,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                 ? _brandId
                 : null;
             final dropdown = DropdownButtonFormField<String>(
-              value: brandValue,
+              initialValue: brandValue,
               isExpanded: true,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),

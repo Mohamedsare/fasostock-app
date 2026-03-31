@@ -7,7 +7,8 @@ import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
-import 'package:sqlite3/common.dart' show SqliteException;
+
+import '../../models/inventory.dart';
 
 part 'app_database.g.dart';
 // drift codegen
@@ -562,6 +563,11 @@ class AppDatabase extends _$AppDatabase {
     return q.get();
   }
 
+  Future<List<LocalProduct>> getLocalProductsByIds(Set<String> ids) async {
+    if (ids.isEmpty) return [];
+    return (select(localProducts)..where((t) => t.id.isIn(ids))).get();
+  }
+
   /// Taille des sous-lots pour éviter SQLITE_BUSY / « cannot commit … » sur Windows
   /// (drift en isolate + gros batch) et les transactions trop longues.
   static const int _upsertProductsChunkSize = 300;
@@ -647,6 +653,31 @@ class AppDatabase extends _$AppDatabase {
         updatedAt: updatedAt,
       ),
     );
+  }
+
+  /// Ligne complète depuis le serveur (ex. Supabase Realtime) — inclut `reserved_quantity`.
+  Future<void> upsertStoreInventoryFromRemote({
+    required String storeId,
+    required String productId,
+    required int quantity,
+    required int reservedQuantity,
+    required String updatedAt,
+  }) async {
+    await into(storeInventory).insertOnConflictUpdate(
+      StoreInventoryCompanion.insert(
+        storeId: storeId,
+        productId: productId,
+        quantity: Value(quantity),
+        reservedQuantity: Value(reservedQuantity),
+        updatedAt: updatedAt,
+      ),
+    );
+  }
+
+  Future<void> deleteStoreInventoryRow(String storeId, String productId) async {
+    await (delete(storeInventory)
+          ..where((t) => t.storeId.equals(storeId) & t.productId.equals(productId)))
+        .go();
   }
 
   /// Supprime les lignes de stock boutique absentes côté serveur (évite stock fantôme après pull).
@@ -751,6 +782,10 @@ class AppDatabase extends _$AppDatabase {
           ..where((t) => t.companyId.equals(companyId))
           ..orderBy([(t) => OrderingTerm.asc(t.name)]))
         .watch();
+  }
+
+  Future<List<LocalCustomer>> getLocalCustomersByCompany(String companyId) async {
+    return (select(localCustomers)..where((t) => t.companyId.equals(companyId))).get();
   }
 
   Future<void> upsertLocalCustomers(Iterable<LocalCustomersCompanion> items) async {
@@ -1180,6 +1215,23 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
+  /// Noms / SKU pour l’historique des mouvements (jointure sur [localProducts]).
+  Future<Map<String, MovementProductRef>> getMovementProductRefsByIds(
+    Set<String> productIds,
+  ) async {
+    if (productIds.isEmpty) return {};
+    final rows = await (select(localProducts)..where((t) => t.id.isIn(productIds))).get();
+    return {
+      for (final r in rows)
+        r.id: MovementProductRef(
+          id: r.id,
+          name: r.name,
+          sku: r.sku,
+          unit: r.unit,
+        ),
+    };
+  }
+
   Future<void> upsertLocalStockMovements(Iterable<LocalStockMovementsCompanion> items) async {
     await batch((batch) {
       for (final item in items) {
@@ -1250,6 +1302,33 @@ class AppDatabase extends _$AppDatabase {
   }
 
   static const String _keyDefaultStockAlert = 'default_stock_alert_threshold';
+  static const String _keyPublicWebsiteUrl = 'public_website_url';
+
+  /// URL site public — QR ticket caisse rapide (synchronisée depuis `company_settings`).
+  Future<String?> getPublicWebsiteUrl(String companyId) async {
+    final rows = await (select(localCompanySettings)
+          ..where((t) => t.companyId.equals(companyId) & t.key.equals(_keyPublicWebsiteUrl)))
+        .get();
+    if (rows.isEmpty) return null;
+    final t = rows.first.valueText.trim();
+    return t.isEmpty ? null : t;
+  }
+
+  Future<void> upsertPublicWebsiteUrl(String companyId, String url) async {
+    await into(localCompanySettings).insertOnConflictUpdate(
+      LocalCompanySettingsCompanion.insert(
+        companyId: companyId,
+        key: _keyPublicWebsiteUrl,
+        valueText: url,
+      ),
+    );
+  }
+
+  Future<void> deletePublicWebsiteUrl(String companyId) async {
+    await (delete(localCompanySettings)
+          ..where((t) => t.companyId.equals(companyId) & t.key.equals(_keyPublicWebsiteUrl)))
+        .go();
+  }
 
   /// Seuil alerte stock par défaut (société) — stream.
   Stream<int> watchDefaultStockAlertThreshold(String companyId) {
@@ -1323,6 +1402,10 @@ class AppDatabase extends _$AppDatabase {
           ..where((t) => t.companyId.equals(companyId))
           ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
         .watch();
+  }
+
+  Future<List<LocalCompanyMember>> getLocalCompanyMembersByCompany(String companyId) async {
+    return (select(localCompanyMembers)..where((t) => t.companyId.equals(companyId))).get();
   }
 
   Future<void> upsertLocalCompanyMembers(Iterable<LocalCompanyMembersCompanion> items) async {

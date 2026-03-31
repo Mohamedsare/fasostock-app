@@ -267,6 +267,14 @@ class AppErrorHandler {
     if (_isSessionOrJwtExpired(error)) return false;
     final text = error.toString().toLowerCase();
     if (text.contains('stock insuffisant')) return false;
+    // Double annulation ou liste locale désynchronisée (cancel_sale_restore_stock).
+    if (error is PostgrestException) {
+      final pe = error;
+      if (pe.code?.toString().toUpperCase() == 'P0001' &&
+          pe.message.contains('Vente déjà annulée')) {
+        return false;
+      }
+    }
     if (text.contains("choisissez la boutique d'origine")) return false;
     if (text.contains('authretryablefetchexception')) return false;
     if (text.contains('code: 502')) return false;

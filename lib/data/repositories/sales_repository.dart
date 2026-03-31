@@ -56,6 +56,7 @@ class SalesRepository {
       salePayments: payments,
       saleMode: sale.saleMode,
       documentType: sale.documentType,
+      createdByLabel: sale.createdByLabel,
     );
   }
 
@@ -120,5 +121,45 @@ class SalesRepository {
 
   Future<void> cancel(String id) async {
     await _client.rpc('cancel_sale_restore_stock', params: {'p_sale_id': id});
+  }
+
+  /// RPC update_completed_sale_with_stock — remplace lignes et paiements, recalcule le stock.
+  Future<Sale> updateCompleted({
+    required String saleId,
+    required String? customerId,
+    required List<CreateSaleItemInput> items,
+    required List<CreateSalePaymentInput> payments,
+    double discount = 0,
+    SaleMode? saleMode,
+    DocumentType? documentType,
+  }) async {
+    await _client.rpc(
+      'update_completed_sale_with_stock',
+      params: {
+        'p_sale_id': saleId,
+        'p_customer_id': customerId,
+        'p_items': items
+            .map((i) => {
+                  'product_id': i.productId,
+                  'quantity': i.quantity,
+                  'unit_price': i.unitPrice,
+                  'discount': i.discount,
+                })
+            .toList(),
+        'p_payments': payments
+            .map((p) => {
+                  'method': p.method.value,
+                  'amount': p.amount,
+                  'reference': p.reference,
+                })
+            .toList(),
+        'p_discount': discount,
+        'p_sale_mode': saleMode?.value,
+        'p_document_type': documentType?.value,
+      },
+    );
+    final sale = await get(saleId);
+    if (sale == null) throw Exception('Vente introuvable après modification');
+    return sale;
   }
 }

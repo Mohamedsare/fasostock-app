@@ -102,7 +102,9 @@ class ReportsRepository {
     if (filters.storeId != null) q = q.eq('store_id', filters.storeId!);
     final data = await q;
     double totalAmount = 0;
-    for (final p in data as List) totalAmount += ((p as Map)['total'] as num?)?.toDouble() ?? 0;
+    for (final p in data as List) {
+      totalAmount += ((p as Map)['total'] as num?)?.toDouble() ?? 0;
+    }
     return PurchasesSummary(totalAmount: totalAmount, count: (data as List).length);
   }
 

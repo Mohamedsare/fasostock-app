@@ -274,8 +274,9 @@ class _OwnerNotificationsDialogState
     final purchasesToday = purchases
         .where((p) {
           if (p.status == PurchaseStatus.cancelled ||
-              p.status == PurchaseStatus.draft)
+              p.status == PurchaseStatus.draft) {
             return false;
+          }
           final d = DateTime.tryParse(p.createdAt);
           if (d == null) return false;
           final today = DateTime(now.year, now.month, now.day);
@@ -379,7 +380,7 @@ class _OwnerNotificationsDialogState
                 AppTheme.spaceMd,
               ),
               decoration: BoxDecoration(
-                color: primary.withOpacity(0.08),
+                color: primary.withValues(alpha: 0.08),
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(AppTheme.radiusLg),
                 ),
@@ -421,7 +422,7 @@ class _OwnerNotificationsDialogState
                               Icons.notifications_off_outlined,
                               size: 48,
                               color: theme.colorScheme.onSurfaceVariant
-                                  .withOpacity(0.6),
+                                  .withValues(alpha: 0.6),
                             ),
                             const SizedBox(height: AppTheme.spaceMd),
                             Text(
@@ -441,7 +442,7 @@ class _OwnerNotificationsDialogState
                         horizontal: AppTheme.spaceMd,
                       ),
                       itemCount: visible.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
                       itemBuilder: (context, index) {
                         final item = visible[index];
                         final trendLabel =
@@ -453,10 +454,10 @@ class _OwnerNotificationsDialogState
                           trendLabel,
                         );
                         final leadingColor = style.color;
-                        final leadingBg = style.color.withOpacity(0.12);
+                        final leadingBg = style.color.withValues(alpha: 0.12);
                         return Material(
                           color: theme.colorScheme.surfaceContainerLow
-                              .withOpacity(0.5),
+                              .withValues(alpha: 0.5),
                           borderRadius: BorderRadius.circular(
                             AppTheme.radiusMd,
                           ),

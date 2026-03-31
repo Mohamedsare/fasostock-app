@@ -337,7 +337,7 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
 
   Widget _dropdownStore(ThemeData theme) {
     return DropdownButtonFormField<String?>(
-      value: _effectiveStoreId,
+      initialValue: _effectiveStoreId,
       decoration: InputDecoration(
         labelText: 'Boutique *',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -359,7 +359,7 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
   Widget _dropdownSupplier(ThemeData theme) {
     final effectiveSupplierId = _supplierId != null && _suppliers.any((s) => s.id == _supplierId) ? _supplierId : null;
     return DropdownButtonFormField<String?>(
-      value: effectiveSupplierId,
+      initialValue: effectiveSupplierId,
       decoration: InputDecoration(
         labelText: 'Fournisseur *',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -393,7 +393,7 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
           Expanded(
             flex: 2,
             child: DropdownButtonFormField<String?>(
-              value: line.productId.isEmpty ? null : line.productId,
+              initialValue: line.productId.isEmpty ? null : line.productId,
               decoration: InputDecoration(
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),

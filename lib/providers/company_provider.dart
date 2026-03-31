@@ -79,18 +79,20 @@ class CompanyProvider extends ChangeNotifier {
     _stores = await _repo.getStoresForCompany(_currentCompanyId!);
     _currentStoreId = (_currentStoreId != null && _stores.any((s) => s.id == _currentStoreId))
         ? _currentStoreId
-        : (_stores.any((s) => s.isPrimary) ? _stores.firstWhere((s) => s.isPrimary).id : (_stores.isNotEmpty ? _stores.first.id : null));
+        : defaultSelectedStoreId(_stores);
   }
 
   void setCurrentCompanyId(String? id) {
     _currentCompanyId = id;
     _currentStoreId = null;
     _stores = [];
-    if (id != null) _repo.getStoresForCompany(id).then((list) {
+    if (id != null) {
+      _repo.getStoresForCompany(id).then((list) {
       _stores = list;
-      _currentStoreId = list.any((s) => s.isPrimary) ? list.firstWhere((s) => s.isPrimary).id : (list.isNotEmpty ? list.first.id : null);
+      _currentStoreId = defaultSelectedStoreId(list);
       notifyListeners();
     });
+    }
     notifyListeners();
   }
 
@@ -107,7 +109,7 @@ class CompanyProvider extends ChangeNotifier {
       _stores = await _repo.getStoresForCompany(_currentCompanyId!);
       _currentStoreId = (_currentStoreId != null && _stores.any((s) => s.id == _currentStoreId))
           ? _currentStoreId
-          : (_stores.any((s) => s.isPrimary) ? _stores.firstWhere((s) => s.isPrimary).id : (_stores.isNotEmpty ? _stores.first.id : null));
+          : defaultSelectedStoreId(_stores);
     } catch (e, st) {
       AppErrorHandler.log(e, st);
     }

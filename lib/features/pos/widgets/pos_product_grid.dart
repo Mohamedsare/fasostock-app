@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/product.dart';
 import '../../pos_quick/pos_quick_constants.dart';
-import '../pos_till_product_filter.dart';
 import 'pos_product_card.dart';
 
 /// Grille de produits POS avec message vide si [products] est vide.
@@ -23,9 +22,7 @@ class PosProductGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final visible = filterProductsForStoreTill(products, stockByProductId);
-
-    if (visible.isEmpty) {
+    if (products.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -60,9 +57,9 @@ class PosProductGrid extends StatelessWidget {
             crossAxisSpacing: 12,
             childAspectRatio: aspectRatio,
           ),
-          itemCount: visible.length,
+          itemCount: products.length,
           itemBuilder: (context, index) {
-            final p = visible[index];
+            final p = products[index];
             final stock = stockByProductId[p.id] ?? 0;
             return PosProductCard(
               product: p,

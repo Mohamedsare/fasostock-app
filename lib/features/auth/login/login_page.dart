@@ -215,13 +215,13 @@ class _LoginPageState extends State<LoginPage> {
       setState(() => _loadingLabel = 'Préparation de votre espace...');
     }
 
-    Future<void> _safe(Future<void> Function() fn) async {
+    Future<void> safe(Future<void> Function() fn) async {
       try {
         await fn().timeout(const Duration(milliseconds: 1800));
       } catch (_) {}
     }
 
-    await _safe(() async {
+    await safe(() async {
       if (company.companies.isEmpty || company.currentCompanyId == null) {
         await company.loadCompanies(userId);
       } else {
@@ -229,7 +229,7 @@ class _LoginPageState extends State<LoginPage> {
       }
     });
 
-    await _safe(() async {
+    await safe(() async {
       final cid = company.currentCompanyId;
       if (cid != null && cid.isNotEmpty) {
         await permissions.load(cid);
@@ -261,7 +261,7 @@ class _LoginPageState extends State<LoginPage> {
             borderRadius: BorderRadius.circular(radius),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 blurRadius: isMobile ? 12 : 24,
                 offset: const Offset(0, 8),
               ),
@@ -289,7 +289,7 @@ class _LoginPageState extends State<LoginPage> {
                 Padding(
                   padding: EdgeInsets.only(bottom: spaceS),
                   child: Text(
-                    '$_lockedEmail',
+                    _lockedEmail,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: colorScheme.primary,
                     ),
@@ -321,7 +321,8 @@ class _LoginPageState extends State<LoginPage> {
                         uri,
                         mode: LaunchMode.externalApplication,
                       );
-                    } else if (mounted) {
+                    } else {
+                      if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text('Impossible d\'ouvrir WhatsApp'),
@@ -329,14 +330,13 @@ class _LoginPageState extends State<LoginPage> {
                       );
                     }
                   } catch (e) {
-                    if (mounted) {
-                      AppErrorHandler.log(e);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(AppErrorHandler.toUserMessage(e)),
-                        ),
-                      );
-                    }
+                    if (!context.mounted) return;
+                    AppErrorHandler.log(e);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(AppErrorHandler.toUserMessage(e)),
+                      ),
+                    );
                   }
                 },
                 icon: SvgPicture.asset(
@@ -362,7 +362,8 @@ class _LoginPageState extends State<LoginPage> {
                         uri,
                         mode: LaunchMode.externalApplication,
                       );
-                    } else if (mounted) {
+                    } else {
+                      if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text(
@@ -372,14 +373,13 @@ class _LoginPageState extends State<LoginPage> {
                       );
                     }
                   } catch (e) {
-                    if (mounted) {
-                      AppErrorHandler.log(e);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(AppErrorHandler.toUserMessage(e)),
-                        ),
-                      );
-                    }
+                    if (!context.mounted) return;
+                    AppErrorHandler.log(e);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(AppErrorHandler.toUserMessage(e)),
+                      ),
+                    );
                   }
                 },
                 icon: Icon(
@@ -442,7 +442,7 @@ class _LoginPageState extends State<LoginPage> {
                         borderRadius: BorderRadius.circular(radius),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
+                            color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: isMobile ? 12 : 24,
                             offset: const Offset(0, 8),
                           ),
@@ -460,7 +460,7 @@ class _LoginPageState extends State<LoginPage> {
                                 height: logoSize,
                                 width: logoSize,
                                 fit: BoxFit.contain,
-                                errorBuilder: (_, __, ___) =>
+                                errorBuilder: (_, _, _) =>
                                     const SizedBox.shrink(),
                               ),
                             ),
@@ -511,16 +511,14 @@ class _LoginPageState extends State<LoginPage> {
                                       : AppTheme.spaceMd,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: colorScheme.errorContainer.withOpacity(
-                                    0.6,
-                                  ),
+                                  color: colorScheme.errorContainer.withValues(alpha: 0.6),
                                   borderRadius: BorderRadius.circular(
                                     isMobile
                                         ? AppTheme.radiusMdM
                                         : AppTheme.radiusMd,
                                   ),
                                   border: Border.all(
-                                    color: colorScheme.error.withOpacity(0.2),
+                                    color: colorScheme.error.withValues(alpha: 0.2),
                                     width: 1,
                                   ),
                                 ),
@@ -556,8 +554,9 @@ class _LoginPageState extends State<LoginPage> {
                               keyboardType: TextInputType.emailAddress,
                               autocorrect: false,
                               validator: (v) {
-                                if (v == null || v.isEmpty)
+                                if (v == null || v.isEmpty) {
                                   return 'Email requis';
+                                }
                                 return null;
                               },
                             ),
@@ -569,8 +568,9 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                               obscureText: true,
                               validator: (v) {
-                                if (v == null || v.isEmpty)
+                                if (v == null || v.isEmpty) {
                                   return 'Mot de passe requis';
+                                }
                                 return null;
                               },
                             ),
@@ -580,8 +580,9 @@ class _LoginPageState extends State<LoginPage> {
                                   ? null
                                   : () {
                                       if (_formKey.currentState?.validate() ??
-                                          false)
+                                          false) {
                                         _checkLockAndSubmit();
+                                      }
                                     },
                               child: _loading
                                   ? SizedBox(

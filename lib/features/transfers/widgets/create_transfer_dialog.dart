@@ -14,6 +14,7 @@ import '../../../data/models/product.dart';
 import '../../../data/repositories/transfers_repository.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/offline_providers.dart';
+import 'transfer_product_visuals.dart';
 
 class _LineRow {
   String productId = '';
@@ -315,7 +316,7 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
     final theme = Theme.of(context);
     final narrow = Breakpoints.isNarrow(MediaQuery.sizeOf(context).width);
     final asyncProducts = ref.watch(productsStreamProvider(widget.companyId));
-    final products = (asyncProducts.valueOrNull ?? [])
+    var products = (asyncProducts.valueOrNull ?? [])
         .where(
           (p) => p.isActive &&
               (widget.fromWarehouseSource
@@ -323,6 +324,10 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
                   : true),
         )
         .toList();
+    if (widget.fromWarehouseSource && widget.warehouseQuantities != null) {
+      final wh = widget.warehouseQuantities!;
+      products = products.where((p) => (wh[p.id] ?? 0) > 0).toList();
+    }
     final productsLoading = asyncProducts.isLoading;
 
     return AlertDialog(
@@ -446,7 +451,7 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
         : (_stores.isNotEmpty ? _stores.first.id : null);
 
     return DropdownButtonFormField<String>(
-      value: validValue,
+      initialValue: validValue,
       decoration: InputDecoration(
         labelText: isFrom
             ? 'Boutique d\'origine *'
@@ -504,6 +509,10 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
     final displayName = line.productName.isNotEmpty
         ? line.productName
         : 'Produit';
+    final lineProduct = products.cast<Product?>().firstWhere(
+          (x) => x?.id == line.productId,
+          orElse: () => null,
+        );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -529,14 +538,30 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
                   ),
                   suffixIcon: const Icon(Icons.arrow_drop_down_rounded),
                 ),
-                child: Text(
-                  displayName,
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: line.productId.isEmpty
-                        ? theme.colorScheme.onSurfaceVariant
-                        : theme.colorScheme.onSurface,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    if (line.productId.isNotEmpty) ...[
+                      transferProductThumbnail(
+                        theme,
+                        lineProduct != null
+                            ? firstProductImageUrl(lineProduct)
+                            : null,
+                        size: 36,
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Text(
+                        displayName,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: line.productId.isEmpty
+                              ? theme.colorScheme.onSurfaceVariant
+                              : theme.colorScheme.onSurface,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -689,11 +714,31 @@ class _ProductPickerSheetState extends State<_ProductPickerSheet> {
                       vertical: widget.compactTiles ? 12 : 8,
                     ),
                     minVerticalPadding: widget.compactTiles ? 14 : 0,
-                    leading: Icon(
-                      selected
-                          ? Icons.check_circle_rounded
-                          : Icons.inventory_2_outlined,
-                      color: selected ? theme.colorScheme.primary : null,
+                    leading: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        transferProductThumbnail(
+                          theme,
+                          firstProductImageUrl(p),
+                          size: widget.compactTiles ? 48 : 44,
+                        ),
+                        if (selected)
+                          Positioned(
+                            right: -4,
+                            bottom: -4,
+                            child: Icon(
+                              Icons.check_circle_rounded,
+                              size: 22,
+                              color: theme.colorScheme.primary,
+                              shadows: [
+                                Shadow(
+                                  color: theme.colorScheme.surface,
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                     title: Text(
                       p.name,

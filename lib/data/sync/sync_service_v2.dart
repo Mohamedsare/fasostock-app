@@ -75,6 +75,7 @@ class SyncServiceV2 {
 
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
+  bool _inventoryLightPullInFlight = false;
 
   static const String _pendingCustomerPrefix = 'pending:';
   static const int _baseRetryDelayMs = 1500;
@@ -329,12 +330,9 @@ class SyncServiceV2 {
     );
   }
 
-  /// Stock boutique + mouvements + seuils pour une boutique (Drift).
-  Future<void> _pullInventoryForStore(
-    String companyId,
-    String storeId,
-    String now,
-  ) async {
+  /// Seules les quantités `store_inventory` (léger, pour rafraîchir les écrans sans sync complète).
+  /// Utilisé en secours si Realtime ne livre pas les changements (réseau, config projet, etc.).
+  Future<void> _pullInventoryQuantitiesOnly(String storeId, String now) async {
     try {
       final stock = await _inventoryRepo.getStockByStore(storeId);
       final keepIds = stock.keys.toSet();
@@ -343,9 +341,83 @@ class SyncServiceV2 {
       }
       await _db.deleteStoreInventoryNotIn(storeId, keepIds);
     } catch (e, st) {
-      if (kDebugMode) debugPrint('[Sync] pull inventory: $e');
-      AppErrorHandler.log('SyncV2.pull inventory storeId=$storeId: $e', st);
+      if (kDebugMode) debugPrint('[Sync] pull inventory quantities only: $e');
+      AppErrorHandler.log(
+        'SyncV2.pull inventory quantities storeId=$storeId: $e',
+        st,
+      );
     }
+  }
+
+  /// Remet à jour le stock Drift pour des boutiques précises (rapide, hors file « light poll »).
+  /// À appeler après annulation vente, ajustement serveur, etc. : ne dépend pas de [sync] ni du timer.
+  Future<void> pullInventoryQuantitiesForStores(Iterable<String> storeIds) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    for (final id in storeIds) {
+      if (id.isEmpty) continue;
+      await _pullInventoryQuantitiesOnly(id, now);
+    }
+  }
+
+  /// Tirage périodique des quantités pour **toutes** les boutiques visibles (API), pas seulement le miroir Drift.
+  ///
+  /// Cause fréquente de « rien ne bouge sur le PC » : [getLocalStores] peut être incomplet ou vieux alors que
+  /// l’utilisateur est sur le POS d’une boutique ; on ne tirait jamais le `store_id` concerné depuis Supabase.
+  /// En ligne, on s’aligne sur la liste `stores` (PostgREST + RLS), comme le web ; hors ligne / erreur réseau,
+  /// repli sur les boutiques présentes localement.
+  ///
+  /// Ne **pas** bloquer sur [_isSyncing].
+  ///
+  /// [extraStoreIds] : ex. boutique courante dans l’UI (POS) — ajoutée même si absente de la réponse API transitoire.
+  Future<void> pullStoreInventoryLight({
+    required String companyId,
+    Set<String> extraStoreIds = const {},
+  }) async {
+    if (_inventoryLightPullInFlight) return;
+    _inventoryLightPullInFlight = true;
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      final ids = <String>{};
+      for (final id in extraStoreIds) {
+        if (id.isNotEmpty) ids.add(id);
+      }
+
+      try {
+        final apiStores = await _storesRepo.getStoresByCompany(companyId);
+        for (final s in apiStores) {
+          ids.add(s.id);
+        }
+      } catch (e, st) {
+        if (kDebugMode) {
+          debugPrint('[Sync] pullStoreInventoryLight getStoresByCompany: $e');
+        }
+        AppErrorHandler.log(
+          'SyncV2.pullStoreInventoryLight stores companyId=$companyId: $e',
+          st,
+        );
+        final localStores = await _db.getLocalStores(companyId);
+        for (final s in localStores) {
+          ids.add(s.id);
+        }
+      }
+
+      if (ids.isEmpty) return;
+
+      for (final sid in ids) {
+        await _pullInventoryQuantitiesOnly(sid, now);
+      }
+    } finally {
+      _inventoryLightPullInFlight = false;
+    }
+  }
+
+  /// Stock boutique + mouvements + seuils pour une boutique (Drift).
+  Future<void> _pullInventoryForStore(
+    String companyId,
+    String storeId,
+    String now,
+  ) async {
+    await _pullInventoryQuantitiesOnly(storeId, now);
     try {
       final movements = await _inventoryRepo.getMovements(
         storeId,
@@ -393,6 +465,64 @@ class SyncServiceV2 {
     }
   }
 
+  Future<void> _pullSalesIntoDrift(String companyId, String? storeId, String now) async {
+    try {
+      final sales = await _salesRepo.list(companyId, storeId: storeId);
+      for (final sale in sales) {
+        await _db.upsertLocalSale(
+          LocalSalesCompanion.insert(
+            id: sale.id,
+            companyId: sale.companyId,
+            storeId: sale.storeId,
+            customerId: Value(sale.customerId),
+            saleNumber: sale.saleNumber,
+            status: sale.status.value,
+            subtotal: Value(sale.subtotal),
+            discount: Value(sale.discount),
+            tax: Value(sale.tax),
+            total: sale.total,
+            createdBy: sale.createdBy,
+            createdAt: sale.createdAt,
+            updatedAt: sale.updatedAt,
+            saleMode: Value(sale.saleMode?.value),
+            documentType: Value(sale.documentType?.value),
+          ),
+        );
+        final items = await _salesRepo.getItems(sale.id);
+        if (items.isNotEmpty) {
+          await _db.upsertLocalSaleItems(
+            items.map(
+              (i) => LocalSaleItemsCompanion.insert(
+                id: i.id,
+                saleId: i.saleId,
+                productId: i.productId,
+                quantity: i.quantity,
+                unitPrice: i.unitPrice,
+                total: i.total,
+                createdAt: now,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('[Sync] pull sales: $e');
+      AppErrorHandler.log(
+        'SyncV2.pull sales companyId=$companyId storeId=$storeId: $e',
+        st,
+      );
+    }
+  }
+
+  /// Ventes uniquement — pour rafraîchir l’écran liste chez tous les appareils (ex. toutes les 10 s).
+  Future<void> pullSalesFromServer({
+    required String companyId,
+    String? storeId,
+  }) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _pullSalesIntoDrift(companyId, storeId, now);
+  }
+
   /// Pull from Supabase and merge into Drift (last-write-wins via server updated_at).
   /// Chaque bloc est dans un try/catch pour qu'une erreur (réseau, API) ne bloque pas les autres.
   Future<void> _pullAndMerge(String companyId, String? storeId) async {
@@ -407,6 +537,20 @@ class SyncServiceV2 {
       if (kDebugMode) debugPrint('[Sync] pull defaultStockAlertThreshold: $e');
       AppErrorHandler.log(
         'SyncV2.pull default_stock_alert_threshold companyId=$companyId: $e',
+        st,
+      );
+    }
+    try {
+      final siteUrl = await _settingsRepo.getPublicWebsiteUrl(companyId);
+      if (siteUrl == null || siteUrl.isEmpty) {
+        await _db.deletePublicWebsiteUrl(companyId);
+      } else {
+        await _db.upsertPublicWebsiteUrl(companyId, siteUrl);
+      }
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('[Sync] pull publicWebsiteUrl: $e');
+      AppErrorHandler.log(
+        'SyncV2.pull public_website_url companyId=$companyId: $e',
         st,
       );
     }
@@ -528,52 +672,7 @@ class SyncServiceV2 {
       if (kDebugMode) debugPrint('[Sync] pull stores: $e');
       AppErrorHandler.log('SyncV2.pull stores companyId=$companyId: $e', st);
     }
-    try {
-      final sales = await _salesRepo.list(companyId, storeId: storeId);
-      for (final sale in sales) {
-        await _db.upsertLocalSale(
-          LocalSalesCompanion.insert(
-            id: sale.id,
-            companyId: sale.companyId,
-            storeId: sale.storeId,
-            customerId: Value(sale.customerId),
-            saleNumber: sale.saleNumber,
-            status: sale.status.value,
-            subtotal: Value(sale.subtotal),
-            discount: Value(sale.discount),
-            tax: Value(sale.tax),
-            total: sale.total,
-            createdBy: sale.createdBy,
-            createdAt: sale.createdAt,
-            updatedAt: sale.updatedAt,
-            saleMode: Value(sale.saleMode?.value),
-            documentType: Value(sale.documentType?.value),
-          ),
-        );
-        final items = await _salesRepo.getItems(sale.id);
-        if (items.isNotEmpty) {
-          await _db.upsertLocalSaleItems(
-            items.map(
-              (i) => LocalSaleItemsCompanion.insert(
-                id: i.id,
-                saleId: i.saleId,
-                productId: i.productId,
-                quantity: i.quantity,
-                unitPrice: i.unitPrice,
-                total: i.total,
-                createdAt: now,
-              ),
-            ),
-          );
-        }
-      }
-    } catch (e, st) {
-      if (kDebugMode) debugPrint('[Sync] pull sales: $e');
-      AppErrorHandler.log(
-        'SyncV2.pull sales companyId=$companyId storeId=$storeId: $e',
-        st,
-      );
-    }
+    await _pullSalesIntoDrift(companyId, storeId, now);
     try {
       final categories = await _productsRepo.categories(companyId);
       await _db.upsertLocalCategories(

@@ -103,7 +103,7 @@ class PosCartTile extends StatelessWidget {
                     SizedBox(
                       width: 82,
                       child: DropdownButtonFormField<String>(
-                        value: kInvoiceUnits.contains(item.unit)
+                        initialValue: kInvoiceUnits.contains(item.unit)
                             ? item.unit
                             : 'pce',
                         isDense: true,

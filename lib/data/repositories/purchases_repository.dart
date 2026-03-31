@@ -55,7 +55,9 @@ class PurchasesRepository {
   Future<List<PurchaseItem>> getItems(String purchaseId) async {
     final data = await _client
         .from('purchase_items')
-        .select('id, purchase_id, product_id, quantity, unit_price, total, product:products(id, name, sku, unit)')
+        .select(
+          'id, purchase_id, product_id, quantity, unit_price, total, product:products(id, name, sku, unit, product_images(id, url, position))',
+        )
         .eq('purchase_id', purchaseId);
     final list = data as List?;
     if (list == null) return [];

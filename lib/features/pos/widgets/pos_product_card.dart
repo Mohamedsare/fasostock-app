@@ -17,7 +17,7 @@ class PosProductCard extends StatelessWidget {
   final int stock;
   final VoidCallback? onTap;
 
-  bool get disabled => stock <= 0;
+  bool get disabled => !product.isActive;
 
   @override
   Widget build(BuildContext context) {

@@ -186,10 +186,12 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
     });
     try {
       final ids = await _repo.getUserCompanyIds(u.id);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _editCompanyIds = ids;
         _loadingCompanies = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loadingCompanies = false);
     }
@@ -316,8 +318,11 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                               title: Text(c.name),
                               value: _editCompanyIds.contains(c.id),
                               onChanged: (v) => setState(() {
-                                if (v == true) _editCompanyIds.add(c.id);
-                                else _editCompanyIds.remove(c.id);
+                                if (v == true) {
+                                  _editCompanyIds.add(c.id);
+                                } else {
+                                  _editCompanyIds.remove(c.id);
+                                }
                               }),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                             );

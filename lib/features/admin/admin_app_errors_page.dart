@@ -271,7 +271,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                   final companyDd = SizedBox(
                     width: useRow ? 260 : double.infinity,
                     child: DropdownButtonFormField<String?>(
-                      value: _selectedCompanyId,
+                      initialValue: _selectedCompanyId,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'Entreprise'),
                       items: [
@@ -286,7 +286,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                   final userDd = SizedBox(
                     width: useRow ? 260 : double.infinity,
                     child: DropdownButtonFormField<String?>(
-                      value: _selectedUserId,
+                      initialValue: _selectedUserId,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'Utilisateur'),
                       items: [
@@ -309,7 +309,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                   final levelDd = SizedBox(
                     width: useRow ? 180 : double.infinity,
                     child: DropdownButtonFormField<String?>(
-                      value: _selectedLevel,
+                      initialValue: _selectedLevel,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'Niveau'),
                       items: const [
@@ -324,7 +324,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                   final sourceDd = SizedBox(
                     width: useRow ? 220 : double.infinity,
                     child: DropdownButtonFormField<String?>(
-                      value: _selectedSource,
+                      initialValue: _selectedSource,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'Source'),
                       items: const [
@@ -341,7 +341,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                   final clientKindDd = SizedBox(
                     width: useRow ? 220 : double.infinity,
                     child: DropdownButtonFormField<String?>(
-                      value: _selectedClientKind,
+                      initialValue: _selectedClientKind,
                       isExpanded: true,
                       decoration: adminInputDecoration(labelText: 'App'),
                       items: const [
@@ -510,7 +510,7 @@ class _AdminAppErrorsPageState extends State<AdminAppErrorsPage> {
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.6),
+                        color: Colors.white.withValues(alpha: 0.6),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: AdminPalette.border),
                       ),

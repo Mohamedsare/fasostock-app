@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
+import '../../../data/models/product.dart';
 import '../../../data/models/stock_transfer.dart';
 import '../../../data/models/store.dart';
 import '../../../data/repositories/transfers_repository.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../providers/offline_providers.dart';
+import 'transfer_product_visuals.dart';
 
 /// Dialog détail d’un transfert : infos + actions Expédier / Réceptionner / Annuler.
-class TransferDetailDialog extends StatefulWidget {
+class TransferDetailDialog extends ConsumerStatefulWidget {
   const TransferDetailDialog({
     super.key,
+    required this.companyId,
     required this.transferId,
     required this.stores,
     required this.storeName,
@@ -21,6 +26,8 @@ class TransferDetailDialog extends StatefulWidget {
     this.onTransferSettled,
   });
 
+  /// Société courante — résolution des noms / images produit depuis le cache.
+  final String companyId;
   final String transferId;
   final List<Store> stores;
   final String Function(String? storeId) storeName;
@@ -36,10 +43,11 @@ class TransferDetailDialog extends StatefulWidget {
   final void Function(StockTransfer transfer)? onTransferSettled;
 
   @override
-  State<TransferDetailDialog> createState() => _TransferDetailDialogState();
+  ConsumerState<TransferDetailDialog> createState() =>
+      _TransferDetailDialogState();
 }
 
-class _TransferDetailDialogState extends State<TransferDetailDialog> {
+class _TransferDetailDialogState extends ConsumerState<TransferDetailDialog> {
   final TransfersRepository _repo = TransfersRepository();
 
   StockTransfer? _transfer;
@@ -52,10 +60,36 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
     if (widget.initialTransfer != null) {
       _transfer = widget.initialTransfer;
       _loading = false;
+      final id = widget.initialTransfer!.id;
+      if (!id.startsWith('pending:')) {
+        final items = widget.initialTransfer!.items;
+        final missingNames = items == null ||
+            items.any(
+              (i) =>
+                  i.productName == null || i.productName!.trim().isEmpty,
+            );
+        if (missingNames) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _refetchTransferSilently();
+          });
+        }
+      }
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _load();
       });
+    }
+  }
+
+  /// Complète les lignes avec la jointure `product` (API), sans écran de chargement.
+  /// Utile pour l’onglet magasin : le cache Drift n’embarque pas les noms sur les items.
+  Future<void> _refetchTransferSilently() async {
+    try {
+      final t = await _repo.get(widget.transferId);
+      if (!mounted || t == null) return;
+      setState(() => _transfer = t);
+    } catch (_) {
+      // Hors ligne : le catalogue local ([productsStreamProvider]) continue d’enrichir l’UI.
     }
   }
 
@@ -264,9 +298,91 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
     TransferStatus.cancelled: 'Annulé',
   };
 
+  String _lineProductTitle(StockTransferItem item, Product? product) {
+    final fromItem = item.productName?.trim();
+    if (fromItem != null && fromItem.isNotEmpty) return fromItem;
+    final fromProduct = product?.name.trim();
+    if (fromProduct != null && fromProduct.isNotEmpty) return fromProduct;
+    final id = item.productId;
+    if (id.length <= 14) return id;
+    return 'Produit (${id.substring(0, 8)}…)';
+  }
+
+  String? _lineProductSku(StockTransferItem item, Product? product) {
+    final s = product?.sku?.trim();
+    if (s != null && s.isNotEmpty) return s;
+    return null;
+  }
+
+  Widget _lineCard(
+    ThemeData theme,
+    StockTransferItem item,
+    Product? product,
+  ) {
+    final title = _lineProductTitle(item, product);
+    final sku = _lineProductSku(item, product);
+    final imageUrl = product != null ? firstProductImageUrl(product) : null;
+    final qtyStyle = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+      height: 1.35,
+    );
+    final qtyParts = <String>[
+      '${item.quantityRequested} demandé',
+      if (item.quantityShipped > 0) '${item.quantityShipped} expédié',
+      if (item.quantityReceived > 0) '${item.quantityReceived} reçu',
+    ];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.42),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.65),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          transferProductThumbnail(theme, imageUrl, size: 52),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (sku != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    sku,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                Text(qtyParts.join(' · '), style: qtyStyle),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final productsAsync = ref.watch(productsStreamProvider(widget.companyId));
+    final productsById = {
+      for (final p in (productsAsync.valueOrNull ?? const <Product>[])) p.id: p
+    };
     final t = _transfer;
 
     final screenSize = MediaQuery.sizeOf(context);
@@ -344,35 +460,13 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
                 ),
               if (t.items != null && t.items!.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                Text('Lignes', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 8),
+                Text('Articles', style: theme.textTheme.titleSmall),
+                const SizedBox(height: 10),
                 ...t.items!.map(
-                  (item) => Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            item.productName ?? item.productId,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        Text(
-                          '${item.quantityRequested} demandé',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        if (item.quantityShipped > 0)
-                          Text(
-                            ' · ${item.quantityShipped} expédié',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        if (item.quantityReceived > 0)
-                          Text(
-                            ' · ${item.quantityReceived} reçu',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                      ],
-                    ),
+                  (item) => _lineCard(
+                    theme,
+                    item,
+                    productsById[item.productId],
                   ),
                 ),
               ],
@@ -420,11 +514,17 @@ class _TransferDetailDialogState extends State<TransferDetailDialog> {
           );
 
     return AlertDialog(
-      title: const Row(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Row(
         children: [
-          Icon(Icons.swap_horiz_rounded),
-          SizedBox(width: 10),
-          Text('Détail transfert'),
+          Icon(
+            Icons.swap_horiz_rounded,
+            color: theme.colorScheme.primary,
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text('Détail transfert'),
+          ),
         ],
       ),
       content: SizedBox(

@@ -489,7 +489,7 @@ class _EditStoreDialogState extends State<EditStoreDialog> {
                       Text('Logo et identité affichés sur la facture A4.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: _invoiceTemplate == 'elof' ? 'elof' : 'classic',
+                        initialValue: _invoiceTemplate == 'elof' ? 'elof' : 'classic',
                         isExpanded: true,
                         decoration: const InputDecoration(
                           labelText: 'Modèle de facture A4',

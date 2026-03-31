@@ -13,6 +13,7 @@ class Permissions {
   static const String productsView = 'products.view';
   static const String productsImport = 'products.import';
   static const String salesCreate = 'sales.create';
+  static const String salesUpdate = 'sales.update';
   static const String salesCancel = 'sales.cancel';
   static const String salesRefund = 'sales.refund';
   static const String salesView = 'sales.view';
@@ -25,6 +26,8 @@ class Permissions {
   static const String stockAdjust = 'stock.adjust';
   static const String stockTransfer = 'stock.transfer';
   static const String stockView = 'stock.view';
+  /// Dépôt central (magasin) : RPC + lecture inventaire/mouvements/bons — rôle Magasinier (stock_manager) par défaut.
+  static const String warehouseManage = 'warehouse.manage';
   static const String reportsViewGlobal = 'reports.view_global';
   static const String reportsViewStore = 'reports.view_store';
   static const String usersManage = 'users.manage';
@@ -53,6 +56,7 @@ class Permissions {
     productsView,
     productsImport,
     salesCreate,
+    salesUpdate,
     salesCancel,
     salesRefund,
     salesView,
@@ -65,6 +69,7 @@ class Permissions {
     stockAdjust,
     stockTransfer,
     stockView,
+    warehouseManage,
     reportsViewGlobal,
     reportsViewStore,
     usersManage,
@@ -95,6 +100,7 @@ class Permissions {
     productsView: 'Voir les produits',
     productsImport: 'Importer des produits (CSV)',
     salesCreate: 'Créer des ventes (caisse rapide)',
+    salesUpdate: 'Modifier des ventes complétées',
     salesCancel: 'Annuler des ventes',
     salesRefund: 'Rembourser des ventes',
     salesView: 'Voir l\'historique des ventes',
@@ -107,6 +113,7 @@ class Permissions {
     stockAdjust: 'Ajuster le stock',
     stockTransfer: 'Transférer le stock',
     stockView: 'Voir le stock / inventaire',
+    warehouseManage: 'Gérer le dépôt magasin (complet)',
     reportsViewGlobal: 'Voir les rapports (global)',
     reportsViewStore: 'Voir les rapports (boutique)',
     usersManage: 'Gérer les utilisateurs',

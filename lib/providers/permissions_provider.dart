@@ -53,6 +53,10 @@ class PermissionsProvider extends ChangeNotifier {
   String? get loadedCompanyId => _loadedCompanyId;
   /// Owner peut toujours accéder à la section Utilisateurs (créer, gérer), même sans users.manage.
   bool get isOwner => _roleSlug == 'owner';
+
+  /// Propriétaire ou rôle Magasinier (permission [Permissions.warehouseManage]).
+  bool get canManageWarehouse =>
+      isOwner || hasPermission(Permissions.warehouseManage);
   /// Slug du rôle courant (ex. cashier, owner) — pour restreindre la nav.
   String? get roleSlug => _roleSlug;
   /// True si l'utilisateur est caissier (menu limité : Ventes, Produits, Clients, Stock C).
@@ -61,7 +65,7 @@ class PermissionsProvider extends ChangeNotifier {
   bool get isManager => _roleSlug == 'manager';
   /// Store Manager : comme Manager mais limité à une boutique ; pas rapports globaux.
   bool get isStoreManager => _roleSlug == 'store_manager';
-  /// Magasinier : stock + produits (lecture) uniquement.
+  /// Magasinier : dépôt central ([Permissions.warehouseManage]) + flux stock / produits (voir rôle en base).
   bool get isStockManager => _roleSlug == 'stock_manager';
   /// Comptable : ventes, achats, clients, fournisseurs, rapports (lecture / export).
   bool get isAccountant => _roleSlug == 'accountant';

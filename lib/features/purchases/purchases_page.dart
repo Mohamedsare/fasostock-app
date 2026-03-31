@@ -14,6 +14,7 @@ import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../transfers/widgets/transfer_product_visuals.dart';
 import 'widgets/create_purchase_dialog.dart';
 
 const int _purchasesPageSize = 20;
@@ -25,6 +26,27 @@ const _statusLabels = {
   PurchaseStatus.received: 'Reçu',
   PurchaseStatus.cancelled: 'Annulé',
 };
+
+/// Chip statut avec contraste garanti (évite texte clair sur fond clair).
+Widget _purchaseStatusChip(BuildContext context, PurchaseStatus status) {
+  final theme = Theme.of(context);
+  final label = _statusLabels[status] ?? status.name;
+  return Chip(
+    visualDensity: VisualDensity.compact,
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    label: Text(
+      label,
+      style: theme.textTheme.labelLarge?.copyWith(
+        color: theme.colorScheme.onSurface,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+    backgroundColor: theme.colorScheme.surfaceContainerHighest,
+    side: BorderSide(color: theme.colorScheme.outlineVariant),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  );
+}
 
 /// Page Achats — lecture Drift, sync en arrière-plan. Owner (ou droits) : voir, modifier, annuler, supprimer.
 class PurchasesPage extends ConsumerStatefulWidget {
@@ -157,6 +179,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       await repo.cancel(purchase.id);
       if (!mounted) return;
       await ref.read(appDatabaseProvider).updateLocalPurchaseStatus(purchase.id, 'cancelled');
+      if (!mounted) return;
       ref.invalidate(purchasesStreamProvider((
         companyId: purchase.companyId,
         storeId: _filterStoreId,
@@ -196,6 +219,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       await repo.delete(purchase.id);
       if (!mounted) return;
       await ref.read(purchasesOfflineRepositoryProvider).deletePurchase(purchase.id);
+      if (!mounted) return;
       ref.invalidate(purchasesStreamProvider((
         companyId: purchase.companyId,
         storeId: _filterStoreId,
@@ -321,7 +345,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                 runSpacing: 8,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: _filterStoreId,
+                    initialValue: _filterStoreId,
                     decoration: const InputDecoration(
                       labelText: 'Boutique',
                       border: OutlineInputBorder(),
@@ -334,7 +358,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                     onChanged: (v) => setState(() => _filterStoreId = v),
                   ),
                   DropdownButtonFormField<String>(
-                    value: _filterSupplierId,
+                    initialValue: _filterSupplierId,
                     decoration: const InputDecoration(
                       labelText: 'Fournisseur',
                       border: OutlineInputBorder(),
@@ -347,7 +371,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                     onChanged: (v) => setState(() => _filterSupplierId = v),
                   ),
                   DropdownButtonFormField<PurchaseStatus?>(
-                    value: _filterStatus,
+                    initialValue: _filterStatus,
                     decoration: const InputDecoration(
                       labelText: 'Statut',
                       border: OutlineInputBorder(),
@@ -367,7 +391,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
               const SizedBox(height: 24),
               if (error != null) ...[
                 Card(
-                  color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+                  color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.3),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -427,22 +451,46 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                             DataCell(Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                TextButton(
+                                IconButton(
+                                  tooltip: 'Voir',
                                   onPressed: () => _openDetail(p),
-                                  child: const Text('Voir'),
+                                  icon: const Icon(Icons.visibility_outlined),
+                                  iconSize: 22,
+                                  visualDensity: VisualDensity.compact,
+                                  style: IconButton.styleFrom(
+                                    foregroundColor: Theme.of(context).colorScheme.primary,
+                                  ),
                                 ),
                                 if (p.status == PurchaseStatus.draft && _canManagePurchases(permissions)) ...[
-                                  TextButton(
+                                  IconButton(
+                                    tooltip: 'Modifier',
                                     onPressed: () => _openDetail(p),
-                                    child: const Text('Modifier'),
+                                    icon: const Icon(Icons.edit_outlined),
+                                    iconSize: 22,
+                                    visualDensity: VisualDensity.compact,
+                                    style: IconButton.styleFrom(
+                                      foregroundColor: Theme.of(context).colorScheme.primary,
+                                    ),
                                   ),
-                                  TextButton(
+                                  IconButton(
+                                    tooltip: 'Annuler l\'achat',
                                     onPressed: () => _doCancel(p),
-                                    child: const Text('Annuler'),
+                                    icon: const Icon(Icons.cancel_outlined),
+                                    iconSize: 22,
+                                    visualDensity: VisualDensity.compact,
+                                    style: IconButton.styleFrom(
+                                      foregroundColor: Theme.of(context).colorScheme.primary,
+                                    ),
                                   ),
-                                  TextButton(
+                                  IconButton(
+                                    tooltip: 'Supprimer',
                                     onPressed: () => _doDelete(p),
-                                    child: Text('Supprimer', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                                    icon: const Icon(Icons.delete_outline_rounded),
+                                    iconSize: 22,
+                                    visualDensity: VisualDensity.compact,
+                                    style: IconButton.styleFrom(
+                                      foregroundColor: Theme.of(context).colorScheme.error,
+                                    ),
                                   ),
                                 ],
                               ],
@@ -578,8 +626,8 @@ class _PurchaseDetailDialogState extends State<_PurchaseDetailDialog> {
   Widget build(BuildContext context) {
     final p = widget.purchase;
     final theme = Theme.of(context);
-    const statusLabels = _statusLabels;
     return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       title: Text('Achat ${p.reference ?? p.id}'),
       content: SingleChildScrollView(
         child: Column(
@@ -588,10 +636,20 @@ class _PurchaseDetailDialogState extends State<_PurchaseDetailDialog> {
           children: [
             Wrap(
               spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Chip(label: Text(statusLabels[p.status] ?? p.status.name)),
-                if (p.store != null) Text('Boutique: ${p.store!.name}'),
-                if (p.supplier != null) Text('Fournisseur: ${p.supplier!.name}'),
+                _purchaseStatusChip(context, p.status),
+                if (p.store != null)
+                  Text(
+                    'Boutique : ${p.store!.name}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                if (p.supplier != null)
+                  Text(
+                    'Fournisseur : ${p.supplier!.name}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -601,15 +659,73 @@ class _PurchaseDetailDialogState extends State<_PurchaseDetailDialog> {
               const SizedBox(height: 16),
               Text('Articles', style: theme.textTheme.titleSmall),
               const SizedBox(height: 8),
-              ...p.purchaseItems!.map((i) => Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+              ...p.purchaseItems!.map((i) {
+                final prod = i.product;
+                final name = prod?.name.trim();
+                final title = (name != null && name.isNotEmpty)
+                    ? name
+                    : 'Produit';
+                final sku = prod?.sku?.trim();
+                final url = prod?.imageUrl;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant
+                            .withValues(alpha: 0.65),
+                      ),
+                    ),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(child: Text('${i.quantity} × ${i.unitPrice}', overflow: TextOverflow.ellipsis)),
-                        Text(formatCurrency(i.total)),
+                        transferProductThumbnail(theme, url, size: 48),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (sku != null && sku.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  sku,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme
+                                        .colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 6),
+                              Text(
+                                '${i.quantity} × ${formatCurrency(i.unitPrice)}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          formatCurrency(i.total),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ],
                     ),
-                  )),
+                  ),
+                );
+              }),
             ],
             if (p.status == PurchaseStatus.draft && widget.canManage) ...[
               const SizedBox(height: 20),
@@ -630,12 +746,24 @@ class _PurchaseDetailDialogState extends State<_PurchaseDetailDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Fermer')),
+        IconButton(
+          tooltip: 'Fermer',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.close_rounded),
+        ),
         if (p.status == PurchaseStatus.draft && widget.canManage) ...[
-          TextButton(onPressed: widget.onCancel, child: const Text('Annuler l\'achat')),
-          TextButton(
+          IconButton(
+            tooltip: 'Annuler l\'achat',
+            onPressed: widget.onCancel,
+            icon: Icon(Icons.cancel_outlined, color: theme.colorScheme.primary),
+          ),
+          IconButton(
+            tooltip: 'Supprimer',
             onPressed: widget.onDelete,
-            child: Text('Supprimer', style: TextStyle(color: theme.colorScheme.error)),
+            icon: Icon(
+              Icons.delete_outline_rounded,
+              color: theme.colorScheme.error,
+            ),
           ),
         ],
       ],

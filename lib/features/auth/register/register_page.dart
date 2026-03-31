@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/config/business_type_slugs.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
@@ -82,6 +83,10 @@ class _RegisterPageState extends State<RegisterPage> {
       _loading = true;
     });
     try {
+      final btParam =
+          GoRouterState.of(context).uri.queryParameters['businessType']?.trim();
+      final businessTypeSlug =
+          isValidBusinessTypeSlug(btParam) ? btParam : null;
       final authService = AuthService(Supabase.instance.client);
       await authService.registerCompany(RegisterCompanyInput(
         companyName: _companyNameController.text.trim(),
@@ -93,6 +98,7 @@ class _RegisterPageState extends State<RegisterPage> {
         ownerFullName: _ownerFullNameController.text.trim(),
         firstStoreName: _firstStoreNameController.text.trim(),
         firstStorePhone: _firstStorePhoneController.text.trim(),
+        businessTypeSlug: businessTypeSlug,
       ));
       if (mounted) {
         context.go(AppRoutes.login);

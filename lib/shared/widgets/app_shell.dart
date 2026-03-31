@@ -14,6 +14,7 @@ import '../../features/notifications/owner_notifications_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/company_provider.dart';
 import '../../providers/permissions_provider.dart';
+import '../../core/utils/user_country_time.dart';
 import 'faso_stock_wordmark.dart';
 
 /// Layout principal : sidebar réductible (desktop) + bottom nav (mobile).
@@ -196,18 +197,20 @@ class _AppShellState extends State<AppShell> {
           permissions.isOwner;
       visibleNavItems = _navItems.where((e) {
         // Stock (alertes) : réservé aux caissiers / magasiniers, pas affiché pour l'owner.
-        if (e.path == AppRoutes.stockCashier)
+        if (e.path == AppRoutes.stockCashier) {
           return canInventory && !permissions.isOwner;
+        }
         if (e.path == AppRoutes.dashboard) return canDashboard;
         if (e.path == AppRoutes.products) return canProducts;
         if (e.path == AppRoutes.sales) return canSales;
         if (e.path == AppRoutes.stores) return canStores;
         // Stock (inventaire complet) : masqué pour la caissière, qui ne voit que "Stock (alertes)".
-        if (e.path == AppRoutes.inventory)
+        if (e.path == AppRoutes.inventory) {
           return canInventory && !permissions.isCashier;
+        }
         if (e.path == AppRoutes.purchases) return canPurchases;
-        // Magasin (dépôt central) : réservé au propriétaire.
-        if (e.path == AppRoutes.warehouse) return permissions.isOwner;
+        // Magasin (dépôt central) : propriétaire ou magasinier (warehouse.manage).
+        if (e.path == AppRoutes.warehouse) return permissions.canManageWarehouse;
         if (e.path == AppRoutes.customers) return canCustomers;
         if (e.path == AppRoutes.suppliers) return canSuppliers;
         if (e.path == AppRoutes.reports) return canReports;
@@ -342,7 +345,7 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  /// Aligné sur `appweb/components/layout/more-sheet.tsx` : fond neutral-800, grille 2 cols, déconnexion rouge.
+  /// Aligné sur `appweb/components/layout/more-sheet.tsx` : surface thème, grille 4 cols, déconnexion rouge.
   void _showMoreBottomSheet(
     BuildContext context,
     List<({String path, String label, IconData icon})> visibleNavItems,
@@ -356,9 +359,6 @@ class _AppShellState extends State<AppShell> {
     final moreItems = visibleNavItems
         .where((e) => !bottomPaths.contains(e.path))
         .toList();
-    const sheetBg = Color(0xFF262626);
-    const tileOn = Colors.white10;
-    const borderSubtle = Color(0x1AFFFFFF);
     const red600 = Color(0xFFDC2626);
 
     showModalBottomSheet<void>(
@@ -367,29 +367,64 @@ class _AppShellState extends State<AppShell> {
       isScrollControlled: true,
       barrierColor: const Color(0x73000000),
       builder: (ctx) {
+        final theme = Theme.of(ctx);
+        final cs = theme.colorScheme;
         final h = MediaQuery.sizeOf(ctx).height;
+        final safeBottom = MediaQuery.paddingOf(ctx).bottom;
+        final accentHeader = theme.brightness == Brightness.dark ? 0.12 : 0.08;
+
         return Padding(
           padding: EdgeInsets.only(top: MediaQuery.paddingOf(ctx).top),
           child: Align(
             alignment: Alignment.bottomCenter,
             child: ClipRRect(
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(16),
+                top: Radius.circular(22),
               ),
               child: Container(
                 width: double.infinity,
                 constraints: BoxConstraints(maxHeight: h * 0.85),
-                color: sheetBg,
+                decoration: BoxDecoration(
+                  color: cs.surface,
+                  border: Border(
+                    top: BorderSide(color: cs.outline.withValues(alpha: 0.12)),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 40,
+                      offset: const Offset(0, -8),
+                    ),
+                  ],
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SizedBox(height: 12),
-                    Container(
-                      width: 36,
-                      height: 4,
+                    DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(999),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            cs.primary.withValues(alpha: accentHeader),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                        child: Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: cs.onSurfaceVariant.withValues(
+                                alpha: 0.35,
+                              ),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                     ConstrainedBox(
@@ -406,9 +441,8 @@ class _AppShellState extends State<AppShell> {
                                 child: Center(
                                   child: Text(
                                     'Aucune autre section',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.65),
-                                      fontSize: 13,
+                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                      color: cs.onSurfaceVariant,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -416,66 +450,111 @@ class _AppShellState extends State<AppShell> {
                               )
                             : LayoutBuilder(
                                 builder: (context, constraints) {
-                                  const gap = 6.0;
+                                  const gap = 4.0;
+                                  const crossAxisCount = 4;
+                                  const tileHeight = 76.0;
                                   final w = constraints.maxWidth;
-                                  final cellW = (w - gap) / 2;
-                                  return Wrap(
-                                    spacing: gap,
-                                    runSpacing: gap,
-                                    children: moreItems.map((e) {
-                                      return SizedBox(
-                                        width: cellW,
-                                        child: Material(
-                                          color: tileOn,
+                                  final cellW =
+                                      (w - (crossAxisCount - 1) * gap) /
+                                      crossAxisCount;
+                                  final aspect = cellW / tileHeight;
+                                  return GridView.builder(
+                                    shrinkWrap: true,
+                                    physics: const NeverScrollableScrollPhysics(),
+                                    gridDelegate:
+                                        SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: crossAxisCount,
+                                      crossAxisSpacing: gap,
+                                      mainAxisSpacing: gap,
+                                      childAspectRatio: aspect,
+                                    ),
+                                    itemCount: moreItems.length,
+                                    itemBuilder: (context, index) {
+                                      final e = moreItems[index];
+                                      return Material(
+                                        color: cs.surfaceContainer,
+                                        shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(
-                                            8,
+                                            12,
                                           ),
-                                          child: InkWell(
-                                            onTap: () {
-                                              Navigator.of(ctx).pop();
-                                              context.go(e.path);
-                                            },
-                                            borderRadius: BorderRadius.circular(
-                                              8,
+                                          side: BorderSide(
+                                            color: cs.outline.withValues(
+                                              alpha: 0.12,
                                             ),
-                                            splashColor: Colors.white24,
-                                            highlightColor: Colors.white10,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 6,
-                                                    vertical: 10,
-                                                  ),
-                                              child: Column(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    e.icon,
-                                                    size: 24,
-                                                    color: Colors.white,
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  Text(
-                                                    e.label,
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 12,
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                      height: 1.25,
+                                          ),
+                                        ),
+                                        clipBehavior: Clip.antiAlias,
+                                        child: InkWell(
+                                          onTap: () {
+                                            Navigator.of(ctx).pop();
+                                            context.go(e.path);
+                                          },
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                          splashColor: cs.primary.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                          highlightColor: cs.primary
+                                              .withValues(alpha: 0.06),
+                                          child: Padding(
+                                            padding: const EdgeInsets
+                                                .symmetric(
+                                              horizontal: 2,
+                                              vertical: 6,
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.center,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Container(
+                                                  width: 32,
+                                                  height: 32,
+                                                  decoration: BoxDecoration(
+                                                    color: cs.primary
+                                                        .withValues(
+                                                      alpha: 0.14,
                                                     ),
-                                                    textAlign: TextAlign.center,
-                                                    maxLines: 2,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                      8,
+                                                    ),
+                                                    border: Border.all(
+                                                      color: cs.primary
+                                                          .withValues(
+                                                        alpha: 0.22,
+                                                      ),
+                                                    ),
                                                   ),
-                                                ],
-                                              ),
+                                                  child: Icon(
+                                                    e.icon,
+                                                    size: 16,
+                                                    color: cs.primary,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  e.label,
+                                                  style: theme
+                                                      .textTheme.labelSmall
+                                                      ?.copyWith(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.w600,
+                                                    height: 1.25,
+                                                    color: cs.onSurface,
+                                                  ),
+                                                  textAlign: TextAlign.center,
+                                                  maxLines: 2,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ),
                                       );
-                                    }).toList(),
+                                    },
                                   );
                                 },
                               ),
@@ -483,22 +562,32 @@ class _AppShellState extends State<AppShell> {
                     ),
                     Container(
                       width: double.infinity,
-                      decoration: const BoxDecoration(
-                        border: Border(top: BorderSide(color: borderSubtle)),
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerLow,
+                        border: Border(
+                          top: BorderSide(
+                            color: cs.outline.withValues(alpha: 0.12),
+                          ),
+                        ),
                       ),
-                      padding: const EdgeInsets.all(12),
+                      padding: EdgeInsets.fromLTRB(
+                        12,
+                        12,
+                        12,
+                        12 + safeBottom,
+                      ),
                       child: Material(
                         color: red600,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
                         child: InkWell(
                           onTap: () async {
                             Navigator.of(ctx).pop();
                             await auth.signOut();
                             if (context.mounted) context.go(AppRoutes.login);
                           },
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(16),
                           child: const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 12),
+                            padding: EdgeInsets.symmetric(vertical: 14),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -522,7 +611,6 @@ class _AppShellState extends State<AppShell> {
                         ),
                       ),
                     ),
-                    SizedBox(height: MediaQuery.paddingOf(ctx).bottom),
                   ],
                 ),
               ),
@@ -534,7 +622,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-/// Heure dans la topbar desktop : [DateTime.now] (fuseau horaire de l’appareil).
+/// Heure dans la topbar desktop : murale système ([DateTime.now], fuseau de l’appareil).
 class _DesktopClock extends StatefulWidget {
   const _DesktopClock();
 
@@ -564,17 +652,16 @@ class _DesktopClockState extends State<_DesktopClock> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final timeFormat = DateFormat('HH:mm:ss');
+    final timeStr = formatDeviceWallClockHms(_now);
     final dateFormat = DateFormat('EEE d MMM', 'fr_FR');
-    final timeStr = timeFormat.format(_now);
     final dateStr = dateFormat.format(_now);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLow.withOpacity(0.7),
+        color: theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: theme.colorScheme.outline.withOpacity(0.12),
+          color: theme.colorScheme.outline.withValues(alpha: 0.12),
           width: 1,
         ),
       ),
@@ -648,11 +735,11 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(
-          bottom: BorderSide(color: theme.dividerColor.withOpacity(0.12)),
+          bottom: BorderSide(color: theme.dividerColor.withValues(alpha: 0.12)),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 1),
           ),
@@ -793,7 +880,7 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final onSurface = theme.colorScheme.onSurface;
-    final borderColor = theme.dividerColor.withOpacity(0.06);
+    final borderColor = theme.dividerColor.withValues(alpha: 0.06);
     final shellIconButton = IconButton.styleFrom(
       padding: const EdgeInsets.all(8),
       minimumSize: const Size(40, 40),
@@ -802,11 +889,11 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
     );
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withOpacity(0.95),
+        color: theme.colorScheme.surface.withValues(alpha: 0.95),
         border: Border(bottom: BorderSide(color: borderColor)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 1),
           ),
@@ -840,9 +927,9 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
                         width: 36,
                         height: 36,
                         decoration: BoxDecoration(
-                          color: primary.withOpacity(0.14),
+                          color: primary.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: primary.withOpacity(0.22)),
+                          border: Border.all(color: primary.withValues(alpha: 0.22)),
                         ),
                         child: Icon(
                           Icons.inventory_2_outlined,
@@ -985,27 +1072,27 @@ class _Sidebar extends StatelessWidget {
           colors: isDark
               ? [
                   theme.colorScheme.surfaceContainerLowest,
-                  theme.colorScheme.surfaceContainerLowest.withOpacity(0.98),
+                  theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.98),
                 ]
               : [
                   theme.colorScheme.surfaceContainerLowest,
-                  theme.colorScheme.surfaceContainerLow.withOpacity(0.5),
+                  theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.5),
                 ],
         ),
         border: Border(
           right: BorderSide(
-            color: theme.dividerColor.withOpacity(isDark ? 0.15 : 0.08),
+            color: theme.dividerColor.withValues(alpha: isDark ? 0.15 : 0.08),
             width: 1,
           ),
         ),
         boxShadow: [
           BoxShadow(
-            color: primary.withOpacity(isDark ? 0.08 : 0.03),
+            color: primary.withValues(alpha: isDark ? 0.08 : 0.03),
             blurRadius: 24,
             offset: const Offset(-2, 0),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 16,
             offset: const Offset(-1, 0),
           ),
@@ -1066,7 +1153,7 @@ class _Sidebar extends StatelessWidget {
                               isAdmin ? 'Plateforme' : 'Gestion & caisse',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant
-                                    .withOpacity(0.9),
+                                    .withValues(alpha: 0.9),
                                 fontSize: 13,
                               ),
                               maxLines: 1,
@@ -1110,9 +1197,7 @@ class _Sidebar extends StatelessWidget {
                 child: Tooltip(
                   message: collapsed ? 'Agrandir le menu' : 'Réduire le menu',
                   child: Material(
-                    color: theme.colorScheme.surfaceContainerHigh.withOpacity(
-                      0.6,
-                    ),
+                    color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(AppTheme.radiusLg),
                     child: InkWell(
                       onTap: onToggleCollapse,
@@ -1201,7 +1286,7 @@ class _NavTile extends StatelessWidget {
             children: [
               Material(
                 color: isActive
-                    ? primary.withOpacity(0.12)
+                    ? primary.withValues(alpha: 0.12)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                 child: InkWell(
@@ -1247,7 +1332,7 @@ class _NavTile extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Material(
-            color: isActive ? primary.withOpacity(0.1) : Colors.transparent,
+            color: isActive ? primary.withValues(alpha: 0.1) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
             child: InkWell(
               onTap: () => context.go(path),
@@ -1264,9 +1349,9 @@ class _NavTile extends StatelessWidget {
                       height: 40,
                       decoration: BoxDecoration(
                         color: isActive
-                            ? primary.withOpacity(0.15)
+                            ? primary.withValues(alpha: 0.15)
                             : theme.colorScheme.surfaceContainerHigh
-                                  .withOpacity(0.5),
+                                  .withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                       ),
                       child: Icon(
@@ -1374,13 +1459,13 @@ class _BottomNav extends StatelessWidget {
       color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          color: surface.withOpacity(0.95),
+          color: surface.withValues(alpha: 0.95),
           border: Border(
-            top: BorderSide(color: theme.dividerColor.withOpacity(0.06)),
+            top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.06)),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               blurRadius: 32,
               offset: const Offset(0, -8),
               spreadRadius: -12,
@@ -1465,20 +1550,20 @@ class _NavDestination extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
-        splashColor: primary.withOpacity(0.12),
-        highlightColor: primary.withOpacity(0.06),
+        splashColor: primary.withValues(alpha: 0.12),
+        highlightColor: primary.withValues(alpha: 0.06),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
           constraints: const BoxConstraints(minHeight: 56),
           decoration: BoxDecoration(
-            color: isSelected ? primary.withOpacity(0.13) : null,
+            color: isSelected ? primary.withValues(alpha: 0.13) : null,
             borderRadius: BorderRadius.circular(16),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
+                      color: Colors.black.withValues(alpha: 0.04),
                       blurRadius: 2,
                       offset: const Offset(0, 1),
                     ),
@@ -1495,7 +1580,7 @@ class _NavDestination extends StatelessWidget {
                 size: isMobile ? 24 : 26,
                 color: isSelected
                     ? primary
-                    : theme.colorScheme.onSurfaceVariant.withOpacity(0.8),
+                    : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
               ),
               const SizedBox(height: 4),
               Text(
@@ -1507,7 +1592,7 @@ class _NavDestination extends StatelessWidget {
                   letterSpacing: -0.2,
                   color: isSelected
                       ? primary
-                      : theme.colorScheme.onSurfaceVariant.withOpacity(0.75),
+                      : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

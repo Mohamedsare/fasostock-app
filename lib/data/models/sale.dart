@@ -23,6 +23,7 @@ enum DocumentType {
 /// Méthode de paiement — aligné avec le web.
 enum PaymentMethod {
   cash,
+  // ignore: constant_identifier_names — aligné clé API `mobile_money`
   mobile_money,
   card,
   transfer,
@@ -97,6 +98,7 @@ class Sale {
     this.salePayments,
     this.saleMode,
     this.documentType,
+    this.createdByLabel,
   });
 
   final String id;
@@ -118,6 +120,8 @@ class Sale {
   final List<SalePayment>? salePayments;
   final SaleMode? saleMode;
   final DocumentType? documentType;
+  /// Affichage « vendeur » (prénom nom, email…) — rempli côté liste offline ; API ne l’envoie pas.
+  final String? createdByLabel;
 
   factory Sale.fromJson(Map<String, dynamic> json) {
     return Sale(
@@ -140,6 +144,7 @@ class Sale {
       salePayments: null,
       saleMode: json['sale_mode'] != null ? SaleMode.fromString(json['sale_mode'] as String) : null,
       documentType: json['document_type'] != null ? DocumentType.fromString(json['document_type'] as String) : null,
+      createdByLabel: null,
     );
   }
 
@@ -202,17 +207,42 @@ class SaleItem {
 }
 
 class ProductRef {
-  const ProductRef({required this.id, required this.name, this.sku, this.unit = 'pce'});
+  const ProductRef({
+    required this.id,
+    required this.name,
+    this.sku,
+    this.unit = 'pce',
+    this.imageUrl,
+  });
   final String id;
   final String name;
   final String? sku;
   final String unit;
+  final String? imageUrl;
+
   static ProductRef fromJson(Map<String, dynamic> json) => ProductRef(
         id: json['id'] as String,
         name: json['name'] as String,
         sku: json['sku'] as String?,
         unit: json['unit'] as String? ?? 'pce',
+        imageUrl: _firstProductImageUrl(json['product_images']),
       );
+
+  static String? _firstProductImageUrl(dynamic raw) {
+    if (raw is! List || raw.isEmpty) return null;
+    final maps = <Map<String, dynamic>>[];
+    for (final e in raw) {
+      if (e is Map) maps.add(Map<String, dynamic>.from(e));
+    }
+    if (maps.isEmpty) return null;
+    maps.sort(
+      (a, b) => ((a['position'] as num?)?.toInt() ?? 0).compareTo(
+            ((b['position'] as num?)?.toInt() ?? 0),
+          ),
+    );
+    final url = maps.first['url'];
+    return url is String && url.isNotEmpty ? url : null;
+  }
 }
 
 class SalePayment {

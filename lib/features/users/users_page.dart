@@ -41,8 +41,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   bool _isOwner(List<CompanyMember> members) => members.any((m) => m.userId == _currentUserId && m.role.slug == 'owner');
   bool _canManageUsers(List<CompanyMember> members, List<String> keys) => _hasUsersManage(keys) || _isOwner(members);
 
-  List<CompanyMember> _rightsSelectableMembers(List<CompanyMember> members) =>
-      members.where((m) => m.userId != _currentUserId && m.isActive).toList();
+  List<CompanyMember> _rightsSelectableMembers(List<CompanyMember> members) {
+    final callerOwner = _isOwner(members);
+    return members.where((m) {
+      if (m.userId == _currentUserId || !m.isActive) return false;
+      if (!callerOwner && m.role.slug == 'owner') return false;
+      return true;
+    }).toList();
+  }
 
   String? _lastCompanyId;
 
@@ -86,16 +92,20 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     }
     try {
       final keys = await _repo.getMyPermissionKeys(companyId);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _permissionKeys = keys;
         _permissionKeysLoading = false;
       });
+      }
     } catch (e, st) {
       AppErrorHandler.log(e, st);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _error = AppErrorHandler.toUserMessage(e);
         _permissionKeysLoading = false;
       });
+      }
     }
   }
 
@@ -103,17 +113,19 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final auth = context.read<AuthProvider>();
     final company = context.read<CompanyProvider>();
     final uid = auth.user?.id;
+    final companyId = company.currentCompanyId;
     if (uid != null) {
       try {
         await ref.read(syncServiceV2Provider).sync(
           userId: uid,
-          companyId: company.currentCompanyId,
+          companyId: companyId,
           storeId: company.currentStoreId,
         );
       } catch (_) {}
     }
-    final companyId = company.currentCompanyId;
-    if (companyId != null) ref.invalidate(companyMembersStreamProvider(companyId));
+    if (!mounted) return;
+    final cid = company.currentCompanyId;
+    if (cid != null) ref.invalidate(companyMembersStreamProvider(cid));
   }
 
   Future<void> _toggleActive(CompanyMember m, String companyId) async {
@@ -219,6 +231,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       await _repo.removeCompanyMember(m.id);
       if (!mounted) return;
       await ref.read(companyMembersOfflineRepositoryProvider).deleteMember(m.id);
+      if (!mounted) return;
       ref.invalidate(companyMembersStreamProvider(companyId));
       AppToast.success(context, 'Utilisateur retiré de l\'entreprise');
     } catch (e, st) {
@@ -300,7 +313,6 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final loading = membersLoading || _permissionKeysLoading;
     final error = _error ?? membersError;
     final canManage = _canManageUsers(members, _permissionKeys);
-    final isOwner = _isOwner(members);
 
     return Scaffold(
       appBar: isWide ? null : AppBar(title: const Text('Utilisateurs')),
@@ -330,7 +342,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 )
               else ...[
                 _buildMembersCard(context, isWide, members, companyId),
-                if (isOwner) ...[
+                if (_canManageUsers(members, _permissionKeys)) ...[
                   const SizedBox(height: 24),
                   _buildRightsSection(context, isWide, members),
                 ],
@@ -397,10 +409,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final theme = Theme.of(context);
     return Card(
       elevation: 0,
-      color: theme.colorScheme.errorContainer.withOpacity(0.3),
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -513,12 +525,12 @@ class _UsersPageState extends ConsumerState<UsersPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Sélectionnez un utilisateur pour voir et modifier ses droits (permissions). Les droits effectifs = rôle de base + ajouts/retraits que vous définissez ici.',
+                  'Sélectionnez un utilisateur pour affiner ses droits (magasin, stock, produits, achats, etc.). Les droits affichés sont effectifs (rôle Magasinier ou autre + surcharges). Décocher retire une permission même si le rôle la donne par défaut ; cocher l’ajoute si le rôle ne la prévoit pas. Seul le propriétaire peut modifier un autre propriétaire.',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: selectedUserIdInList,
+                  initialValue: selectedUserIdInList,
                   decoration: InputDecoration(
                     labelText: 'Utilisateur',
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -667,7 +679,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
               physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: members.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final m = members[index];
                 return _MemberTile(
@@ -777,7 +789,7 @@ class _MemberTile extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: member.isActive
-                            ? theme.colorScheme.primaryContainer.withOpacity(0.5)
+                            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5)
                             : theme.colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(6),
                       ),
@@ -870,7 +882,7 @@ class _MemberTile extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: member.isActive
-                        ? theme.colorScheme.primaryContainer.withOpacity(0.5)
+                        ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5)
                         : theme.colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(6),
                   ),

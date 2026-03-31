@@ -5,15 +5,16 @@ import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
+import '../../../core/utils/sale_pos_edit.dart';
 import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../core/utils/stock_cache_recovery.dart';
+import '../../../core/utils/user_country_time.dart';
 import '../../../core/utils/client_request_id.dart';
 import '../../../data/local/drift/app_database.dart';
 import '../../../data/models/product.dart';
@@ -28,7 +29,6 @@ import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../pos/services/receipt_thermal_print_service.dart';
-import '../pos/pos_till_product_filter.dart';
 import '../pos/widgets/receipt_ticket_dialog.dart';
 import 'pos_quick_constants.dart';
 import 'pos_quick_models.dart';
@@ -39,9 +39,11 @@ import 'widgets/pos_quick_right_zone.dart';
 
 /// POS Caisse Rapide ? interface type alimentation/sup?rette, ticket thermique, offline+sync.
 class PosQuickPage extends ConsumerStatefulWidget {
-  const PosQuickPage({super.key, required this.storeId});
+  const PosQuickPage({super.key, required this.storeId, this.editSaleId});
 
   final String storeId;
+  /// Ouvre la caisse en chargeant une vente complétée à modifier (`?editSale=`).
+  final String? editSaleId;
 
   @override
   ConsumerState<PosQuickPage> createState() => _PosQuickPageState();
@@ -70,18 +72,43 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   late final ValueNotifier<String> _clockLabel;
   StreamSubscription<bool>? _connectivitySubscription;
 
+  /// Modification vente : stock boutique affiché + quantités « rendues » par l’ancienne vente (avant enregistrement RPC).
+  String? _activeEditSaleId;
+  Map<String, int> _editStockRelease = {};
+  bool _saleEditBootstrapping = false;
+  String? _saleEditBarrierError;
+
   /// Sync toutes les 15 s tant que la caisse est ouverte ? nouveaux produits visibles tr?s vite (magasinier sur un autre poste).
   static const Duration _periodicSyncInterval = Duration(seconds: 15);
+
+  int _effectiveStock(String productId, Map<String, int> stockByProductId) {
+    final base = stockByProductId[productId] ?? 0;
+    final release = _editStockRelease[productId] ?? 0;
+    return base + release;
+  }
+
+  bool _isProductShownOnTill(Product p, Map<String, int> stockByProductId) {
+    if (!p.isActive) return false;
+    if (!p.isAvailableInBoutiqueStock) return false;
+    return _effectiveStock(p.id, stockByProductId) > 0;
+  }
 
   @override
   void initState() {
     super.initState();
+    final ep = widget.editSaleId?.trim() ?? '';
+    if (ep.isNotEmpty) _saleEditBootstrapping = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      context.read<CompanyProvider>().setCurrentStoreId(widget.storeId);
+      if (ep.isNotEmpty) await _bootstrapSaleEdit();
+    });
     _clockLabel = ValueNotifier<String>(
-      DateFormat('HH:mm').format(DateTime.now()),
+      formatDeviceWallClockHm(DateTime.now()),
     );
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      final t = DateFormat('HH:mm').format(DateTime.now());
+      final t = formatDeviceWallClockHm(DateTime.now());
       if (t != _clockLabel.value) _clockLabel.value = t;
     });
     _periodicSyncTimer = Timer.periodic(_periodicSyncInterval, (_) {
@@ -140,18 +167,17 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     }
   }
 
-  /// Filtre par recherche, cat?gorie, actifs et masque les produits en rupture (stock = 0).
+  /// Filtre recherche / catégorie ; produits boutique actifs avec stock effectif > 0.
   List<Product> _filteredProducts(
     List<Product> products,
     Map<String, int> stockByProductId,
   ) {
     final search = _searchController.text.trim().toLowerCase();
     return products.where((p) {
-      if (!p.isActive) return false;
-      if ((stockByProductId[p.id] ?? 0) <= 0)
-        return false; // Ne pas afficher les produits sans stock en caisse rapide.
-      if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId)
+      if (!_isProductShownOnTill(p, stockByProductId)) return false;
+      if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId) {
         return false;
+      }
       if (search.isEmpty) return true;
       if (p.name.toLowerCase().contains(search)) return true;
       if (p.sku?.toLowerCase().contains(search) ?? false) return true;
@@ -166,11 +192,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   int get _cartItemCount => _cart.fold(0, (n, c) => n + c.quantity);
 
   List<PosCartItem> _stockWarnings(Map<String, int> stockByProductId) => _cart
-      .where((c) => (stockByProductId[c.productId] ?? 0) < c.quantity)
+      .where((c) => _effectiveStock(c.productId, stockByProductId) < c.quantity)
       .toList();
 
   void _addToCart(Product p, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[p.id] ?? 0;
+    final stock = _effectiveStock(p.id, stockByProductId);
     setState(() {
       PosCartItem? existing;
       try {
@@ -216,7 +242,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     int delta,
     Map<String, int> stockByProductId,
   ) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _effectiveStock(productId, stockByProductId);
     int? newQty;
     setState(() {
       final beforeLen = _cart.length;
@@ -248,7 +274,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   }
 
   void _setQty(String productId, int value, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _effectiveStock(productId, stockByProductId);
     PosCartItem? current;
     try {
       current = _cart.firstWhere((c) => c.productId == productId);
@@ -299,14 +325,211 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     return [CreateSalePaymentInput(method: _paymentMethod, amount: _total)];
   }
 
+  List<CreateSaleItemInput> _cartToSaleItems() {
+    return _cart
+        .map(
+          (c) => CreateSaleItemInput(
+            productId: c.productId,
+            quantity: c.quantity,
+            unitPrice: c.unitPrice,
+            discount: (c.quantity * c.unitPrice - c.total).clamp(0.0, double.infinity),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> _bootstrapSaleEdit() async {
+    final rawId = widget.editSaleId?.trim() ?? '';
+    if (rawId.isEmpty || !mounted) return;
+    if (!context.read<PermissionsProvider>().hasPermission(Permissions.salesUpdate)) {
+      setState(() {
+        _saleEditBarrierError = 'Vous n\'avez pas la permission de modifier des ventes.';
+        _saleEditBootstrapping = false;
+      });
+      return;
+    }
+    setState(() {
+      _saleEditBootstrapping = true;
+      _saleEditBarrierError = null;
+    });
+    try {
+      final sale = await _salesRepo.get(rawId);
+      if (!mounted) return;
+      if (sale == null) {
+        setState(() {
+          _saleEditBarrierError = 'Vente introuvable.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (sale.storeId != widget.storeId) {
+        setState(() {
+          _saleEditBarrierError = 'Cette vente appartient à une autre boutique.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (sale.status != SaleStatus.completed) {
+        setState(() {
+          _saleEditBarrierError = 'Seules les ventes complétées peuvent être modifiées.';
+          _saleEditBootstrapping = false;
+        });
+        return;
+      }
+      if (saleOpensOnInvoicePosScreen(sale)) {
+        if (!mounted) return;
+        context.go('${AppRoutes.pos(sale.storeId)}?${saleEditQuery(sale.id)}');
+        return;
+      }
+      final items = sale.saleItems ?? await _salesRepo.getItems(sale.id);
+      final payments = sale.salePayments ?? await _salesRepo.getPayments(sale.id);
+      if (!mounted) return;
+      final release = <String, int>{};
+      final cart = <PosCartItem>[];
+      for (final item in items) {
+        release[item.productId] = (release[item.productId] ?? 0) + item.quantity;
+        cart.add(
+          PosCartItem(
+            productId: item.productId,
+            name: item.product?.name ?? 'Produit',
+            sku: item.product?.sku,
+            unit: item.product?.unit ?? 'pce',
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.total,
+            imageUrl: null,
+          ),
+        );
+      }
+      _clearQtyControllers();
+      setState(() {
+        _editStockRelease = release;
+        _cart = cart;
+        _activeEditSaleId = sale.id;
+        _discount = sale.discount;
+        _discountController.text = sale.discount > 0 ? '${sale.discount}' : '';
+        if (payments.isNotEmpty) {
+          _paymentMethod = payments.first.method;
+          final sum = payments.fold<double>(0, (s, p) => s + p.amount);
+          _amountReceivedTouched = true;
+          _amountReceived = sum;
+          _amountReceivedController.text = sum > 0 ? '$sum' : '';
+        }
+        _saleEditBootstrapping = false;
+      });
+      for (final c in _cart) {
+        _qtyControllers[c.productId] = TextEditingController(
+          text: c.quantity == 0 ? '' : '${c.quantity}',
+        );
+      }
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'pos_quick',
+        logContext: const {'op': 'bootstrap_sale_edit'},
+      );
+      if (!mounted) return;
+      setState(() {
+        _saleEditBarrierError = AppErrorHandler.toUserMessage(e);
+        _saleEditBootstrapping = false;
+      });
+    }
+  }
+
+  Future<void> _persistLocalAfterSaleUpdate(Sale updated) async {
+    final db = ref.read(appDatabaseProvider);
+    final now = DateTime.now().toIso8601String();
+    final items = updated.saleItems ?? await _salesRepo.getItems(updated.id);
+    await db.upsertLocalSale(
+      LocalSalesCompanion.insert(
+        id: updated.id,
+        companyId: updated.companyId,
+        storeId: updated.storeId,
+        customerId: drift.Value(updated.customerId),
+        saleNumber: updated.saleNumber,
+        status: updated.status.value,
+        subtotal: drift.Value(updated.subtotal),
+        discount: drift.Value(updated.discount),
+        tax: drift.Value(updated.tax),
+        total: updated.total,
+        createdBy: updated.createdBy,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+        saleMode: drift.Value(updated.saleMode?.value),
+        documentType: drift.Value(updated.documentType?.value),
+        synced: const drift.Value(true),
+      ),
+    );
+    await db.deleteLocalSaleItemsBySaleId(updated.id);
+    if (items.isNotEmpty) {
+      await db.upsertLocalSaleItems(
+        items.map(
+          (i) => LocalSaleItemsCompanion.insert(
+            id: i.id,
+            saleId: i.saleId,
+            productId: i.productId,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            total: i.total,
+            createdAt: now,
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _afterSaleEditSuccess(Sale sale) async {
+    // Capturer le router tout de suite : après les await le widget peut être démonté
+    // et `context.go` ne serait plus appelé → écran « Ouverture de la vente… » bloqué.
+    if (!context.mounted) return;
+    final router = GoRouter.of(context);
+    final storeId = widget.storeId;
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+
+    context.read<CompanyProvider>().setCurrentStoreId(storeId);
+    context.read<SalesPageProvider>().setFilters(storeId: storeId);
+    context.read<SalesPageProvider>().invalidate();
+    AppToast.success(context, 'Vente #${sale.saleNumber} mise à jour.');
+
+    if (companyId != null) {
+      try {
+        await ref.read(salesOfflineRepositoryProvider).upsertSale(sale);
+      } catch (e2, st2) {
+        AppErrorHandler.logWithContext(
+          e2,
+          stackTrace: st2,
+          logSource: 'pos_quick',
+          logContext: const {'op': 'cache_sale_after_update'},
+        );
+      }
+      ref.invalidate(salesStreamProvider((companyId: companyId, storeId: storeId)));
+    }
+    await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([storeId]);
+    ref.invalidate(inventoryQuantitiesStreamProvider(storeId));
+    try {
+      await _persistLocalAfterSaleUpdate(sale);
+    } catch (e3, st3) {
+      AppErrorHandler.logWithContext(
+        e3,
+        stackTrace: st3,
+        logSource: 'pos_quick',
+        logContext: const {'op': 'persist_local_after_sale_update'},
+      );
+    }
+
+    router.go(AppRoutes.sales);
+  }
+
   Future<void> _handlePayment(
     Store? store,
     Map<String, int> stockByProductId,
   ) async {
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     final userId = context.read<AuthProvider>().user?.id;
-    if (companyId == null || userId == null || store == null || !_canPay)
+    if (companyId == null || userId == null || store == null || !_canPay) {
       return;
+    }
     if (_stockWarnings(stockByProductId).isNotEmpty) {
       AppToast.error(context, 'Stock insuffisant pour certains articles.');
       return;
@@ -324,6 +547,45 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       );
       return;
     }
+
+    if (_activeEditSaleId != null) {
+      if (!ConnectivityService.instance.isOnline) {
+        AppToast.error(context, 'La modification nécessite une connexion internet.');
+        return;
+      }
+      setState(() => _creating = true);
+      try {
+        await _salesRepo.updateCompleted(
+          saleId: _activeEditSaleId!,
+          customerId: null,
+          items: _cartToSaleItems(),
+          payments: _buildPayments(),
+          discount: _discount,
+          saleMode: SaleMode.quickPos,
+          documentType: DocumentType.thermalReceipt,
+        );
+        final sale = await _salesRepo.get(_activeEditSaleId!);
+        if (sale == null) throw Exception('Vente introuvable après mise à jour');
+        await _afterSaleEditSuccess(sale);
+      } catch (e, st) {
+        if (mounted) {
+          if (shouldRecoverInventoryCachesFromRpcError(e)) {
+            recoverStoreInventoryCacheAfterRpcError(ref, widget.storeId, _refreshSync);
+          }
+          AppErrorHandler.show(
+            context,
+            e,
+            stackTrace: st,
+            logSource: 'pos_quick',
+            logContext: const {'op': 'update_sale'},
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _creating = false);
+      }
+      return;
+    }
+
     final isOnline = ConnectivityService.instance.isOnline;
     setState(() => _creating = true);
 
@@ -418,6 +680,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           context.read<AuthProvider>().profile?.fullName ??
           context.read<AuthProvider>().user?.email ??
           '—';
+      final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(companyId);
+      if (!mounted) return;
       final receipt = ReceiptTicketData(
         storeName: store.name,
         storeLogoUrl: store.logoUrl,
@@ -426,6 +690,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         saleNumber: '— (hors ligne)',
         saleId: pendingSaleId,
         cashierName: cashierName,
+        qrCompanyWebsiteUrl: qrSite,
         items: _cart
             .map(
               (c) => ReceiptItemData(
@@ -538,6 +803,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           context.read<AuthProvider>().profile?.fullName ??
           context.read<AuthProvider>().user?.email ??
           '—';
+      final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(companyId);
+      if (!mounted) return;
       final receipt = ReceiptTicketData(
         storeName: store.name,
         storeLogoUrl: store.logoUrl,
@@ -546,6 +813,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         saleNumber: sale.saleNumber,
         saleId: sale.id,
         cashierName: cashierName,
+        qrCompanyWebsiteUrl: qrSite,
         items: _cart
             .map(
               (c) => ReceiptItemData(
@@ -715,7 +983,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         body: const Center(child: CircularProgressIndicator()),
       );
     }
-    if (!permissions.hasPermission(Permissions.salesCreate)) {
+    final saleEditParam = widget.editSaleId?.trim() ?? '';
+    final isSaleEditEntry = saleEditParam.isNotEmpty;
+    if (!isSaleEditEntry && !permissions.hasPermission(Permissions.salesCreate)) {
       return Scaffold(
         appBar: AppBar(title: const Text('Caisse rapide')),
         body: Center(
@@ -746,6 +1016,82 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           ),
         ),
       );
+    }
+
+    if (isSaleEditEntry) {
+      if (!permissions.hasPermission(Permissions.salesUpdate)) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Caisse rapide')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.lock_rounded, size: 64, color: theme.colorScheme.error),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Vous n'avez pas la permission de modifier des ventes.",
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: () => context.go(AppRoutes.sales),
+                    icon: const Icon(Icons.list_rounded),
+                    label: const Text('Retour aux ventes'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      if (_saleEditBarrierError != null) {
+        return Scaffold(
+          appBar: AppBar(title: const Text('Modifier une vente')),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _saleEditBarrierError!,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: () => context.go(AppRoutes.sales),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    label: const Text('Retour aux ventes'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      if (_saleEditBootstrapping || _activeEditSaleId == null) {
+        return Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(color: theme.colorScheme.primary),
+                const SizedBox(height: 16),
+                Text(
+                  'Ouverture de la vente en caisse…',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
     }
 
     final companyId = context.read<CompanyProvider>().currentCompanyId;
@@ -854,6 +1200,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       body: Column(
         children: [
           _buildPosHeader(store!, caissierName),
+          if (_activeEditSaleId != null) _buildSaleEditModeBanner(theme),
           if (!isOnline) _buildOfflineBanner(),
           Expanded(
             child: Row(
@@ -927,6 +1274,38 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     );
   }
 
+  Widget _buildSaleEditModeBanner(ThemeData theme) {
+    return Material(
+      color: theme.colorScheme.primaryContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.edit_note_rounded, color: theme.colorScheme.onPrimaryContainer, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Modification d\'une vente (ticket). Enregistrez pour appliquer — connexion requise.',
+                  style: TextStyle(
+                    color: theme.colorScheme.onPrimaryContainer,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => context.go(AppRoutes.posQuick(widget.storeId)),
+                child: Text('Quitter', style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Banni?re discr?te quand hors ligne : les ventes sont enregistr?es localement.
   Widget _buildOfflineBanner() {
     return Material(
@@ -992,12 +1371,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         const SizedBox(width: 24),
         Text(
           'Boutique : ${store.name}',
-          style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13),
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 13),
         ),
         const SizedBox(width: 16),
         Text(
           'Caissier : $caissierName',
-          style: TextStyle(color: Colors.white.withOpacity(0.95), fontSize: 13),
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 13),
         ),
         const SizedBox(width: 16),
         ValueListenableBuilder<String>(
@@ -1065,7 +1444,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                 builder: (context, time, _) => Text(
                   '${store.name} • $time',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 11,
                   ),
                   maxLines: 1,
@@ -1258,7 +1637,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       );
       return PosQuickCartTile(
         item: c,
-        stock: stockByProductId[c.productId] ?? 0,
+        stock: _effectiveStock(c.productId, stockByProductId),
         qtyController: controller,
         onQtyDelta: (delta) => _updateQty(c.productId, delta, stockByProductId),
         onSetQty: (v) => _setQty(c.productId, v, stockByProductId),
@@ -1456,6 +1835,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               Expanded(
                 child: OutlinedButton(
                   onPressed: () {
+                    if (_activeEditSaleId != null) {
+                      context.go(AppRoutes.posQuick(widget.storeId));
+                      return;
+                    }
                     setState(() {
                       _cart = [];
                       _discount = 0;
@@ -1472,7 +1855,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     side: const BorderSide(color: PosQuickColors.bordure),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: const Text('Annuler vente'),
+                  child: Text(_activeEditSaleId != null ? 'Quitter' : 'Annuler vente'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1501,7 +1884,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                         )
                       : const Icon(Icons.print_rounded, size: 22),
                   label: Text(
-                    _creating ? 'Enregistrement...' : 'VALIDER ET IMPRIMER',
+                    _creating
+                        ? 'Enregistrement...'
+                        : (_activeEditSaleId != null
+                            ? 'ENREGISTRER LA MODIFICATION'
+                            : 'VALIDER ET IMPRIMER'),
                   ),
                 ),
               ),
@@ -1530,7 +1917,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       AppToast.error(context, 'Aucun produit avec ce code-barres.');
       return;
     }
-    if (!isProductShownOnStoreTill(product, stockByProductId)) {
+    if (!_isProductShownOnTill(product, stockByProductId)) {
       AppToast.error(context, 'Produit indisponible (stock épuisé).');
       return;
     }
@@ -1716,7 +2103,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                               '$_cartItemCount article${_cartItemCount != 1 ? 's' : ''} • ${formatCurrency(_total)}',
                               style: TextStyle(
                                 color: PosQuickColors.textePrincipal
-                                    .withOpacity(0.7),
+                                    .withValues(alpha: 0.7),
                                 fontSize: 12,
                               ),
                             ),

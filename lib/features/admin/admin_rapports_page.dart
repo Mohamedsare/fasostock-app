@@ -125,9 +125,9 @@ class _KpiCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: color.withOpacity(0.25)),
+              border: Border.all(color: color.withValues(alpha: 0.25)),
             ),
             child: Icon(icon, color: color, size: 28),
           ),
@@ -148,7 +148,7 @@ class _KpiCard extends StatelessWidget {
                 Text(
                   label,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant.withOpacity(0.85),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
                   ),
                 ),
               ],

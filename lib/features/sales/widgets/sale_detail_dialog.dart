@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
@@ -10,6 +11,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/sale.dart';
+import '../../../providers/offline_providers.dart';
 import '../../../data/repositories/sales_repository.dart';
 import '../../../data/repositories/stores_repository.dart';
 import '../../../shared/utils/format_currency.dart';
@@ -68,7 +70,7 @@ String _formatDateTime(String iso) {
 }
 
 /// Dialog détail d'une vente — articles, paiements, total (aligné SaleDetailDialog web).
-class SaleDetailDialog extends StatefulWidget {
+class SaleDetailDialog extends ConsumerStatefulWidget {
   const SaleDetailDialog({
     super.key,
     required this.saleId,
@@ -79,10 +81,10 @@ class SaleDetailDialog extends StatefulWidget {
   final VoidCallback onClose;
 
   @override
-  State<SaleDetailDialog> createState() => _SaleDetailDialogState();
+  ConsumerState<SaleDetailDialog> createState() => _SaleDetailDialogState();
 }
 
-class _SaleDetailDialogState extends State<SaleDetailDialog> {
+class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
   final SalesRepository _repo = SalesRepository();
   final StoresRepository _storesRepo = StoresRepository();
   Sale? _sale;
@@ -146,8 +148,8 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
     final logoBytes = store.logoUrl != null && store.logoUrl!.isNotEmpty
         ? await _fetchLogoBytes(store.logoUrl)
         : null;
-    final depositAmount = sale.salePayments != null && sale.salePayments!.isNotEmpty
-        ? sale.salePayments!.fold<double>(0, (s, p) => s + p.amount)
+    final paymentLines = sale.salePayments != null && sale.salePayments!.isNotEmpty
+        ? InvoiceA4PdfService.paymentLinesFromSalePayments(sale.salePayments!)
         : null;
     return InvoiceA4Data(
       store: store,
@@ -168,7 +170,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
       total: sale.total,
       customerName: sale.customer?.name,
       customerPhone: sale.customer?.phone,
-      depositAmount: depositAmount,
+      paymentLines: paymentLines,
       logoBytes: logoBytes,
     );
   }
@@ -224,6 +226,8 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
         ? '—'
         : payments.map((p) => _paymentLabels[p.method] ?? p.method.name).toSet().join(', ');
     final date = DateTime.tryParse(sale.createdAt);
+    final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(sale.companyId);
+    if (!mounted) return;
     final receipt = ReceiptTicketData(
       storeName: store?.name ?? sale.store?.name ?? '',
       storeLogoUrl: store?.logoUrl,
@@ -232,6 +236,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
       saleNumber: sale.saleNumber,
       saleId: sale.id,
       cashierName: '—',
+      qrCompanyWebsiteUrl: qrSite,
       items: sale.saleItems!
           .map((i) => ReceiptItemData(
                 name: i.product?.name ?? '—',
@@ -314,7 +319,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer.withOpacity(0.9),
+                          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(Icons.receipt_long_rounded, color: theme.colorScheme.onPrimaryContainer),
@@ -480,7 +485,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
                       FilledButton.icon(
                         onPressed: () async {
                           final data = await _buildInvoiceA4DataFromSale(_sale!);
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           if (data == null) {
                             AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
                             return;
@@ -493,7 +498,7 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
                       FilledButton.icon(
                         onPressed: () async {
                           final data = await _buildInvoiceA4DataFromSale(_sale!);
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           if (data == null) {
                             AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
                             return;
@@ -502,18 +507,16 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
                           unawaited(
                             InvoiceA4PdfService.printPdfDirect(data)
                                 .then((_) {
-                                  if (mounted) {
-                                    AppToast.success(context, 'Impression envoyée à l\'imprimante.');
-                                  }
+                                  if (!context.mounted) return;
+                                  AppToast.success(context, 'Impression envoyée à l\'imprimante.');
                                 })
                                 .catchError((Object e) {
-                                  if (mounted) {
-                                    AppErrorHandler.show(
-                                      context,
-                                      e,
-                                      fallback: 'Impossible de lancer l\'impression.',
-                                    );
-                                  }
+                                  if (!context.mounted) return;
+                                  AppErrorHandler.show(
+                                    context,
+                                    e,
+                                    fallback: 'Impossible de lancer l\'impression.',
+                                  );
                                 }),
                           );
                         },
@@ -523,16 +526,19 @@ class _SaleDetailDialogState extends State<SaleDetailDialog> {
                       FilledButton.icon(
                         onPressed: () async {
                           final data = await _buildInvoiceA4DataFromSale(_sale!);
-                          if (!mounted) return;
+                          if (!context.mounted) return;
                           if (data == null) {
                             AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
                             return;
                           }
                           try {
                             final path = await InvoiceA4PdfService.downloadPdf(data);
-                            if (mounted && path != null && path.isNotEmpty) AppToast.success(context, 'Facture enregistrée.');
+                            if (context.mounted && path != null && path.isNotEmpty) {
+                              AppToast.success(context, 'Facture enregistrée.');
+                            }
                           } catch (e) {
-                            if (mounted) AppErrorHandler.show(context, e, fallback: 'Impossible de télécharger la facture.');
+                            if (!context.mounted) return;
+                            AppErrorHandler.show(context, e, fallback: 'Impossible de télécharger la facture.');
                           }
                         },
                         icon: const Icon(Icons.download_rounded, size: 20),
@@ -592,7 +598,7 @@ class _InfoRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.5)),
       ),
       child: Row(
         children: [
@@ -600,7 +606,7 @@ class _InfoRow extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withOpacity(0.9),
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, size: 18, color: theme.colorScheme.onPrimaryContainer),
@@ -637,7 +643,7 @@ class _ArticleTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.dividerColor.withOpacity(0.5)),
+        border: Border.all(color: theme.dividerColor.withValues(alpha: 0.5)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

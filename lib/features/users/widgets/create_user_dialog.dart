@@ -150,7 +150,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.errorContainer.withOpacity(0.3),
+                      color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -219,7 +219,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                   )
                 else
                   DropdownButtonFormField<String>(
-                    value: _roleSlug.isEmpty && _roles.isNotEmpty ? _roles.first.slug : _roleSlug,
+                    initialValue: _roleSlug.isEmpty && _roles.isNotEmpty ? _roles.first.slug : _roleSlug,
                     decoration: const InputDecoration(
                       labelText: 'Rôle *',
                       border: OutlineInputBorder(),
@@ -261,7 +261,11 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                         selected: selected,
                         onSelected: (v) {
                           setState(() {
-                            if (v) _storeIds.add(s.id); else _storeIds.remove(s.id);
+                            if (v) {
+                              _storeIds.add(s.id);
+                            } else {
+                              _storeIds.remove(s.id);
+                            }
                           });
                         },
                         selectedColor: theme.colorScheme.primaryContainer,
@@ -270,7 +274,7 @@ class _CreateUserDialogState extends State<CreateUserDialog> {
                         side: BorderSide(
                           color: selected
                               ? theme.colorScheme.primary
-                              : theme.colorScheme.outline.withOpacity(0.5),
+                              : theme.colorScheme.outline.withValues(alpha: 0.5),
                           width: selected ? 2 : 1,
                         ),
                         elevation: 1,

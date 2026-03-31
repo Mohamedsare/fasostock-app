@@ -432,10 +432,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     final theme = Theme.of(context);
     return Card(
       elevation: 0,
-      color: theme.colorScheme.errorContainer.withOpacity(0.3),
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -503,7 +503,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                       FilterChip(
@@ -522,7 +522,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                       FilterChip(
@@ -541,7 +541,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                     ],
@@ -551,7 +551,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                   if (stores.length > 1) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String?>(
-                      value: company.currentStoreId != null && stores.any((s) => s.id == company.currentStoreId)
+                      initialValue: company.currentStoreId != null && stores.any((s) => s.id == company.currentStoreId)
                           ? company.currentStoreId
                           : null,
                       decoration: InputDecoration(
@@ -620,7 +620,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                                   _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                       FilterChip(
@@ -639,7 +639,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                                   _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                       FilterChip(
@@ -658,7 +658,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                                   _toDate = range.to;
                           _loadFromOffline();
                         }),
-                        selectedColor: theme.colorScheme.primary.withOpacity(0.2),
+                        selectedColor: theme.colorScheme.primary.withValues(alpha: 0.2),
                         checkmarkColor: theme.colorScheme.primary,
                       ),
                     ],
@@ -671,7 +671,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                     SizedBox(
                               width: 220,
                       child: DropdownButtonFormField<String?>(
-                        value: company.currentStoreId != null && stores.any((s) => s.id == company.currentStoreId)
+                        initialValue: company.currentStoreId != null && stores.any((s) => s.id == company.currentStoreId)
                             ? company.currentStoreId
                             : null,
                         decoration: InputDecoration(
@@ -809,7 +809,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       return SizedBox(
         width: width,
         child: DropdownButtonFormField<T?>(
-          value: value,
+          initialValue: value,
           isExpanded: true,
           decoration: decoration.copyWith(hintText: hint),
           items: [
@@ -937,7 +937,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: k.accentBorder
-            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.4), width: 2)
+            ? BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.4), width: 2)
             : BorderSide(color: theme.dividerColor),
       ),
       child: Padding(
@@ -959,7 +959,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: k.color.withOpacity(0.12),
+                    color: k.color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(k.icon, size: 20, color: k.color),
@@ -1084,7 +1084,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                         gridData: FlGridData(
                           show: true,
                           drawVerticalLine: false,
-                          getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withOpacity(0.4), strokeWidth: 1),
+                          getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withValues(alpha: 0.4), strokeWidth: 1),
                         ),
                         barTouchData: BarTouchData(
                           touchTooltipData: BarTouchTooltipData(
@@ -1131,7 +1131,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer.withOpacity(0.5),
+                    color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -1159,7 +1159,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withOpacity(0.5)),
+                headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)),
                 columns: const [
                   DataColumn(label: Text('Produit')),
                   DataColumn(label: Text('Qté vendue'), numeric: true),
@@ -1178,7 +1178,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                       DataCell(Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: i < 3 ? theme.colorScheme.primaryContainer.withOpacity(0.5) : theme.colorScheme.surfaceContainerHighest,
+                          color: i < 3 ? theme.colorScheme.primaryContainer.withValues(alpha: 0.5) : theme.colorScheme.surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -1389,7 +1389,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                   child: LineChart(
                     LineChartData(
                       titlesData: const FlTitlesData(show: false),
-                      gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withOpacity(0.4), strokeWidth: 1)),
+                      gridData: FlGridData(show: true, drawVerticalLine: false, getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withValues(alpha: 0.4), strokeWidth: 1)),
                       borderData: FlBorderData(show: false),
                       lineBarsData: [
                         LineChartBarData(
@@ -1397,7 +1397,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           color: theme.colorScheme.primary,
                           barWidth: 3,
                           dotData: const FlDotData(show: false),
-                          belowBarData: BarAreaData(show: true, color: theme.colorScheme.primary.withOpacity(0.12)),
+                          belowBarData: BarAreaData(show: true, color: theme.colorScheme.primary.withValues(alpha: 0.12)),
                           spots: s.byDayNet.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.netQuantity.toDouble())).toList(),
                         ),
                       ],
@@ -1434,14 +1434,14 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.6),
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(10)),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
             child: Icon(icon, size: 18, color: color),
           ),
           const SizedBox(width: 10),
@@ -1520,7 +1520,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     final lines = <List<String>>[];
 
     lines.add(['Rapport FasoStock']);
-    lines.add(['Période', '$_fromDate', '$_toDate']);
+    lines.add(['Période', _fromDate, _toDate]);
     if (storeName.isNotEmpty) lines.add(['Boutique', storeName]);
     lines.add([]);
     lines.add(['KPIs']);
@@ -1638,7 +1638,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           if (storeName != null) pw.Text('Boutique: $storeName'),
           pw.SizedBox(height: 12),
           pw.Text('KPIs', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-          pw.Table.fromTextArray(
+          pw.TableHelper.fromTextArray(
             headers: const ['Indicateur', 'Valeur'],
             data: [
               ['Chiffre d\'affaires', sales.salesSummary.totalAmount.toStringAsFixed(2)],
@@ -1650,7 +1650,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           ),
           pw.SizedBox(height: 12),
           pw.Text('Ventes par catégorie', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-          pw.Table.fromTextArray(
+          pw.TableHelper.fromTextArray(
             headers: const ['Catégorie', 'CA', 'Qté'],
             data: sales.salesByCategory
                 .map((c) => [c.categoryName, c.revenue.toStringAsFixed(2), '${c.quantity}'])
@@ -1658,7 +1658,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
           ),
           pw.SizedBox(height: 12),
           pw.Text('Top produits', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
-          pw.Table.fromTextArray(
+          pw.TableHelper.fromTextArray(
             headers: const ['Produit', 'Qté', 'CA', 'Marge'],
             data: sales.topProducts
                 .map((p) => [p.productName, '${p.quantitySold}', p.revenue.toStringAsFixed(2), p.margin.toStringAsFixed(2)])

@@ -122,7 +122,7 @@ Future<PredictionContext> fetchPredictionContext(
   );
 }
 
-String _buildContextText(PredictionContext ctx, String formatCurrency(dynamic)) {
+String _buildContextText(PredictionContext ctx, String Function(dynamic) formatCurrency) {
   final scope = ctx.storeName != null
       ? 'Boutique: ${ctx.storeName}'
       : 'Entreprise: ${ctx.companyName} (toutes boutiques)';
@@ -315,7 +315,7 @@ String _extractJson(String text) {
 /// Appel DeepSeek et parsing JSON structuré — aligné web getPredictionsStructured.
 Future<({PredictionStructured structured, String text})> getPredictionsStructured(
   PredictionContext context,
-  String formatCurrency(dynamic),
+  String Function(dynamic) formatCurrency,
 ) async {
   final apiKey = _getDeepSeekApiKey();
   final body = {

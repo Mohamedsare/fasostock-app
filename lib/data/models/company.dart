@@ -4,6 +4,7 @@ class Company {
     required this.id,
     required this.name,
     this.slug,
+    this.businessTypeSlug,
     this.logoUrl,
     this.isActive = true,
     this.storeQuota = 1,
@@ -13,6 +14,8 @@ class Company {
   final String id;
   final String name;
   final String? slug;
+  /// `companies.business_type_slug` — choix d’activité à l’inscription.
+  final String? businessTypeSlug;
   /// Logo entreprise (`companies.logo_url`) — affichage shell, etc.
   final String? logoUrl;
   final bool isActive;
@@ -24,6 +27,7 @@ class Company {
       id: json['id'] as String,
       name: json['name'] as String,
       slug: json['slug'] as String?,
+      businessTypeSlug: json['business_type_slug'] as String?,
       logoUrl: json['logo_url'] as String?,
       isActive: json['is_active'] as bool? ?? true,
       storeQuota: (json['store_quota'] is int)

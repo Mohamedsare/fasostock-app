@@ -379,8 +379,11 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       floatingActionButton: canCreate && customers.isNotEmpty
           ? FloatingActionButton(
               onPressed: () => _openCreateDialog(companyId),
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-              foregroundColor: const Color(0xFFFDBA74),
+              backgroundColor: const Color(0xFFF97316),
+              foregroundColor: Colors.white,
+              elevation: 4,
+              highlightElevation: 8,
+              tooltip: 'Nouveau client',
               child: const Icon(Icons.add_rounded, size: 28),
             )
           : null,
@@ -430,10 +433,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                     if (canCreate)
                       IconButton.filled(
                         onPressed: () => _openCreateDialog(companyId),
-                        icon: const Icon(Icons.add_rounded, size: 24, color: Color(0xFFFDBA74)),
+                        icon: const Icon(Icons.add_rounded, size: 24),
                         style: IconButton.styleFrom(
-                          backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                          foregroundColor: const Color(0xFFFDBA74),
+                          backgroundColor: const Color(0xFFF97316),
+                          foregroundColor: Colors.white,
                         ),
                         tooltip: 'Nouveau client',
                       ),
@@ -476,10 +479,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
               if (canCreate)
                 IconButton.filled(
                   onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 24, color: Color(0xFFFDBA74)),
+                  icon: const Icon(Icons.add_rounded, size: 24),
                   style: IconButton.styleFrom(
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    foregroundColor: const Color(0xFFFDBA74),
+                    backgroundColor: const Color(0xFFF97316),
+                    foregroundColor: Colors.white,
                   ),
                   tooltip: 'Nouveau client',
                 ),
@@ -491,10 +494,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     final theme = Theme.of(context);
     return Card(
       elevation: 0,
-      color: theme.colorScheme.errorContainer.withOpacity(0.3),
+      color: theme.colorScheme.errorContainer.withValues(alpha: 0.3),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: theme.colorScheme.error.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.error.withValues(alpha: 0.5)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -542,7 +545,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withOpacity(0.3),
+                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -572,6 +575,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                 onPressed: () => _openCreateDialog(companyId),
                 icon: const Icon(Icons.add_rounded),
                 label: const Text('Créer un client'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF97316),
+                  foregroundColor: Colors.white,
+                ),
               ),
             ],
           ],
@@ -592,7 +599,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withOpacity(0.5)),
+          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)),
           columns: const [
             DataColumn(label: Text('Nom')),
             DataColumn(label: Text('Type')),
@@ -748,7 +755,7 @@ class _CustomerCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primaryContainer.withOpacity(0.5),
+                        color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(

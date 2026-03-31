@@ -311,12 +311,24 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
   /// Met à jour le cache du provider et lance une sync en arrière-plan (ne bloque pas l’UI).
   Future<void> _applyProductChange(Product saved) async {
+    final storeId = context.read<CompanyProvider>().currentStoreId;
+    final productsPage = context.read<ProductsPageProvider>();
     final full = await _repo.get(saved.id);
     if (full == null || !mounted) return;
     await ref.read(productsOfflineRepositoryProvider).upsertProduct(full);
     if (!mounted) return;
     ref.invalidate(productsStreamProvider(full.companyId));
-    context.read<ProductsPageProvider>().setProduct(full);
+    if (storeId != null && storeId.isNotEmpty) {
+      try {
+        await ref
+            .read(syncServiceV2Provider)
+            .pullInventoryQuantitiesForStores([storeId]);
+      } catch (_) {}
+      if (mounted) {
+        ref.invalidate(inventoryQuantitiesStreamProvider(storeId));
+      }
+    }
+    productsPage.setProduct(full);
     _runSyncInBackground();
   }
 
@@ -613,7 +625,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                       ? _filterCategoryId
                       : null;
                   final categoryDropdown = DropdownButtonFormField<String>(
-                    value: categoryValue,
+                    initialValue: categoryValue,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'Catégorie', border: OutlineInputBorder(), isDense: true),
                     items: [
@@ -634,7 +646,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                       ? _filterBrandId
                       : null;
                   final brandDropdown = DropdownButtonFormField<String>(
-                    value: brandValue,
+                    initialValue: brandValue,
                     isExpanded: true,
                     decoration: const InputDecoration(labelText: 'Marque', border: OutlineInputBorder(), isDense: true),
                     items: [
@@ -809,7 +821,7 @@ class _TabChip extends StatelessWidget {
     return FilterChip(
       selected: selected,
       onSelected: (_) => onTap(),
-      selectedColor: primary.withOpacity(0.2),
+      selectedColor: primary.withValues(alpha: 0.2),
       checkmarkColor: primary,
       label: Row(
         mainAxisSize: MainAxisSize.min,
@@ -883,7 +895,7 @@ class _ProductListTile extends StatelessWidget {
                           fit: BoxFit.cover,
                           width: 48,
                           height: 48,
-                          errorBuilder: (_, __, ___) => Icon(Icons.inventory_2, color: theme.colorScheme.outline),
+                          errorBuilder: (_, _, _) => Icon(Icons.inventory_2, color: theme.colorScheme.outline),
                         ),
                       )
                     : Icon(Icons.inventory_2, color: theme.colorScheme.outline),

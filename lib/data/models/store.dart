@@ -158,6 +158,29 @@ class Store {
       };
 }
 
+/// Id de boutique à pré-sélectionner dans l’app.
+///
+/// 1. S’il existe au moins une boutique avec [isPrimary] == true : on prend la première
+///    par ordre **nom** (puis id), pour un résultat stable même si plusieurs sont marquées.
+/// 2. **Sinon** (aucune « principale » en base — possible si données anciennes ou erreur) :
+///    on prend la boutique la première par **nom**, pas un ordre API aléatoire.
+///
+/// Il n’y a pas de garantie serveur « une seule principale » dans le modèle Flutter seul ;
+/// l’import est de toujours avoir une boutique choisie dès qu’il y a des magasins.
+/// [CompanyProvider.setCurrentStoreId] reste la source de vérité après choix utilisateur.
+String? defaultSelectedStoreId(Iterable<Store> stores) {
+  final list = stores.toList();
+  if (list.isEmpty) return null;
+  list.sort((a, b) {
+    final c = a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    if (c != 0) return c;
+    return a.id.compareTo(b.id);
+  });
+  final primaries = list.where((s) => s.isPrimary).toList();
+  if (primaries.isNotEmpty) return primaries.first.id;
+  return list.first.id;
+}
+
 /// Input création boutique — même champs que CreateStoreInput (web).
 class CreateStoreInput {
   const CreateStoreInput({

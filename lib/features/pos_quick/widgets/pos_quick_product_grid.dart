@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../data/models/product.dart';
-import '../../pos/pos_till_product_filter.dart';
 import '../pos_quick_constants.dart';
 import 'pos_quick_product_card.dart';
 
@@ -22,8 +21,7 @@ class PosQuickProductGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visible = filterProductsForStoreTill(products, stockByProductId);
-    if (visible.isEmpty) {
+    if (products.isEmpty) {
       return RefreshIndicator(
         onRefresh: onRefresh,
         child: SingleChildScrollView(
@@ -59,9 +57,9 @@ class PosQuickProductGrid extends StatelessWidget {
               crossAxisSpacing: 12,
               childAspectRatio: aspectRatio,
             ),
-            itemCount: visible.length,
+            itemCount: products.length,
             itemBuilder: (context, index) {
-              final p = visible[index];
+              final p = products[index];
               final stock = stockByProductId[p.id] ?? 0;
               return PosQuickProductCard(
                 product: p,

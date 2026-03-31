@@ -114,7 +114,7 @@ class _AdminDrawer extends StatelessWidget {
           color: _AdminPalette.sidebarBg,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.25),
+              color: Colors.black.withValues(alpha: 0.25),
               blurRadius: 24,
               offset: const Offset(4, 0),
             ),
@@ -148,7 +148,7 @@ class _AdminDrawer extends StatelessWidget {
                   ],
                 ),
               ),
-              Divider(height: 1, color: _AdminPalette.sidebarTextMuted.withOpacity(0.2)),
+              Divider(height: 1, color: _AdminPalette.sidebarTextMuted.withValues(alpha: 0.2)),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 child: _NavItem(
@@ -182,9 +182,9 @@ class _AdminDrawerHeader extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _AdminPalette.sidebarActive.withOpacity(0.2),
+              color: _AdminPalette.sidebarActive.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _AdminPalette.sidebarActive.withOpacity(0.4), width: 1),
+              border: Border.all(color: _AdminPalette.sidebarActive.withValues(alpha: 0.4), width: 1),
             ),
             child: const Icon(Icons.shield_rounded, color: _AdminPalette.sidebarActive, size: 28),
           ),
@@ -248,7 +248,7 @@ class _AdminMobileAppBar extends StatelessWidget implements PreferredSizeWidget 
             margin: const EdgeInsets.only(right: 10),
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: _AdminPalette.sidebarActive.withOpacity(0.12),
+              color: _AdminPalette.sidebarActive.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.shield_rounded, color: _AdminPalette.sidebarActive, size: 20),
@@ -292,7 +292,7 @@ class _AdminSidebar extends StatelessWidget {
         color: _AdminPalette.sidebarBg,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.15),
+            color: Colors.black.withValues(alpha: 0.15),
             blurRadius: 20,
             offset: const Offset(4, 0),
           ),
@@ -324,7 +324,7 @@ class _AdminSidebar extends StatelessWidget {
                 ],
               ),
             ),
-            Divider(height: 1, color: _AdminPalette.sidebarTextMuted.withOpacity(0.2)),
+            Divider(height: 1, color: _AdminPalette.sidebarTextMuted.withValues(alpha: 0.2)),
             Padding(
               padding: EdgeInsets.symmetric(horizontal: collapsed ? 10 : 14, vertical: 8),
               child: _NavItem(
@@ -364,9 +364,9 @@ class _AdminSidebarHeader extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: _AdminPalette.sidebarActive.withOpacity(0.2),
+                  color: _AdminPalette.sidebarActive.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _AdminPalette.sidebarActive.withOpacity(0.4), width: 1),
+                  border: Border.all(color: _AdminPalette.sidebarActive.withValues(alpha: 0.4), width: 1),
                 ),
                 child: const Icon(Icons.shield_rounded, color: _AdminPalette.sidebarActive, size: 24),
               ),
@@ -495,7 +495,7 @@ class _AdminAppBar extends StatelessWidget implements PreferredSizeWidget {
         border: Border(bottom: BorderSide(color: _AdminPalette.appBarBorder, width: 1)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),

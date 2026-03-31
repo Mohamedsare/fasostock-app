@@ -1,9 +1,12 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'dart:typed_data';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:convert';
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
@@ -22,6 +25,7 @@ import '../../../shared/widgets/company_load_error_screen.dart';
 import '../../../shared/utils/share_csv.dart';
 import 'utils/sales_csv.dart';
 import 'widgets/sale_detail_dialog.dart';
+import '../../../core/utils/sale_pos_edit.dart';
 
 const _statusLabels = {
   SaleStatus.draft: 'Brouillon',
@@ -46,7 +50,7 @@ Widget _documentTypeChip(Sale s, BuildContext context) {
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: isA4
-          ? theme.colorScheme.primaryContainer.withOpacity(0.8)
+          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.8)
           : theme.colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(6),
     ),
@@ -93,17 +97,69 @@ const int _salesPageSize = 20;
 
 class _SalesPageState extends ConsumerState<SalesPage> {
   final SalesRepository _repo = SalesRepository();
+  final Set<String> _cancelSaleInFlight = {};
   bool _syncTriggeredForEmpty = false;
   int _currentPage = 0;
   String _lastFilterKey = '';
+  Timer? _salesListRefreshTimer;
+  final TextEditingController _salesSearchController = TextEditingController();
+  Timer? _searchDebounce;
+  bool _searchDebouncing = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final provider = context.read<SalesPageProvider>();
+      _salesSearchController.text = provider.filterSearch;
+      _salesSearchController.addListener(_onSalesSearchChanged);
       _loadCompaniesIfNeeded();
+      _startSalesListAutoRefresh();
     });
+  }
+
+  void _onSalesSearchChanged() {
+    if (!_searchDebouncing && mounted) setState(() => _searchDebouncing = true);
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      context.read<SalesPageProvider>().setSearchQuery(_salesSearchController.text);
+      if (mounted) setState(() => _searchDebouncing = false);
+    });
+  }
+
+  /// Même principe que le stock POS : tirage serveur périodique pour que les ventes (statuts, nouvelles lignes)
+  /// se propagent à tous les appareils connectés en ≤ 10 s, en complément du Realtime `sales`.
+  void _startSalesListAutoRefresh() {
+    _salesListRefreshTimer?.cancel();
+    void pullSalesList() {
+      if (!mounted) return;
+      final auth = context.read<AuthProvider>();
+      if (auth.user == null) return;
+      final companyId = context.read<CompanyProvider>().currentCompanyId;
+      if (companyId == null) return;
+      final provider = context.read<SalesPageProvider>();
+      final storeId = provider.filterStoreId.isEmpty ? null : provider.filterStoreId;
+      unawaited(
+        ref.read(syncServiceV2Provider).pullSalesFromServer(
+              companyId: companyId,
+              storeId: storeId,
+            ),
+      );
+    }
+
+    pullSalesList();
+    _salesListRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => pullSalesList());
+  }
+
+  @override
+  void dispose() {
+    _salesListRefreshTimer?.cancel();
+    _searchDebounce?.cancel();
+    _salesSearchController.removeListener(_onSalesSearchChanged);
+    _salesSearchController.dispose();
+    super.dispose();
   }
 
   void _loadCompaniesIfNeeded() {
@@ -150,38 +206,92 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
+  void _openEditSale(Sale sale) {
+    context.read<CompanyProvider>().setCurrentStoreId(sale.storeId);
+    final base =
+        saleOpensOnInvoicePosScreen(sale) ? AppRoutes.pos(sale.storeId) : AppRoutes.posQuick(sale.storeId);
+    context.go('$base?${saleEditQuery(sale.id)}');
+  }
+
+  /// RPC `cancel_sale_restore_stock` : P0001 quand la vente n’est plus « compléted » côté serveur (déjà annulée, etc.).
+  bool _isCancelSaleNoLongerApplicable(Object e) {
+    if (e is! PostgrestException) return false;
+    if (e.code?.toString().toUpperCase() != 'P0001') return false;
+    final m = e.message;
+    return m.contains('Vente déjà annulée') || m.toLowerCase().contains('vente deja annulee');
+  }
+
   Future<void> _cancelSale(Sale sale) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Annuler cette vente ?'),
-        content: const Text('Le stock sera rétabli. Cette action est irréversible.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
-            child: const Text('Oui, annuler'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
-    final companyId = context.read<CompanyProvider>().currentCompanyId;
-    final storeId = context.read<SalesPageProvider>().filterStoreId;
+    if (!_cancelSaleInFlight.add(sale.id)) return;
     try {
-      await _repo.cancel(sale.id);
-      if (!mounted) return;
-      await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
-      if (!mounted) return;
-      ref.invalidate(salesStreamProvider((
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Annuler cette vente ?'),
+          content: const Text('Le stock sera rétabli. Cette action est irréversible.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+              child: const Text('Oui, annuler'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+      final companyId = context.read<CompanyProvider>().currentCompanyId;
+      final storeId = context.read<SalesPageProvider>().filterStoreId;
+      final params = (
         companyId: companyId ?? '',
         storeId: storeId.isEmpty ? null : storeId,
-      )));
-      Future.microtask(() => _refresh());
-      if (mounted) AppToast.success(context, 'Vente annulée');
-    } catch (e) {
-      if (mounted) AppErrorHandler.show(context, e);
+      );
+      try {
+        await _repo.cancel(sale.id);
+        if (!mounted) return;
+        await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
+        if (!mounted) return;
+        // Indispensable : [sync] peut être no-op si une sync est déjà en cours (_isSyncing) ;
+        // le stock serveur a pourtant déjà changé après le RPC — tirage ciblé immédiat.
+        await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([sale.storeId]);
+        if (!mounted) return;
+        ref.invalidate(inventoryQuantitiesStreamProvider(sale.storeId));
+        ref.invalidate(salesStreamProvider(params));
+        Future.microtask(() => _refresh());
+        if (mounted) AppToast.success(context, 'Vente annulée');
+      } catch (e) {
+        if (_isCancelSaleNoLongerApplicable(e)) {
+          try {
+            final serverSale = await _repo.get(sale.id);
+            if (!mounted) return;
+            if (serverSale != null) {
+              await ref
+                  .read(appDatabaseProvider)
+                  .updateLocalSaleStatus(sale.id, serverSale.status.value);
+            } else {
+              await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
+            }
+            if (!mounted) return;
+            await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([sale.storeId]);
+            if (!mounted) return;
+            ref.invalidate(inventoryQuantitiesStreamProvider(sale.storeId));
+            ref.invalidate(salesStreamProvider(params));
+            Future.microtask(() => _refresh());
+            if (mounted) {
+              AppToast.info(
+                context,
+                'Cette vente était déjà dans un état non annulable sur le serveur. Liste mise à jour.',
+              );
+            }
+          } catch (_) {
+            if (mounted) AppErrorHandler.show(context, e);
+          }
+        } else {
+          if (mounted) AppErrorHandler.show(context, e);
+        }
+      }
+    } finally {
+      _cancelSaleInFlight.remove(sale.id);
     }
   }
 
@@ -199,10 +309,52 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
   List<Sale> _applyFilters(List<Sale> sales, SalesPageProvider provider) {
     var list = sales;
-    if (provider.filterStatus != null) list = list.where((s) => s.status == provider.filterStatus).toList();
-    if (provider.filterFrom.isNotEmpty) list = list.where((s) => s.createdAt.compareTo(provider.filterFrom) >= 0).toList();
-    if (provider.filterTo.isNotEmpty) list = list.where((s) => s.createdAt.compareTo('${provider.filterTo}T23:59:59.999Z') <= 0).toList();
+    if (provider.filterStatus != null) {
+      list = list.where((s) => s.status == provider.filterStatus).toList();
+    }
+    final cashierId = provider.filterCashierUserId;
+    if (cashierId != null && cashierId.isNotEmpty) {
+      list = list.where((s) => s.createdBy == cashierId).toList();
+    }
+    final q = provider.filterSearch.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      bool has(String? v) => v != null && v.toLowerCase().contains(q);
+      list = list.where((s) {
+        if (has(s.saleNumber)) return true;
+        if (has(s.createdByLabel)) return true;
+        if (has(s.customer?.name)) return true;
+        if (has(s.customer?.phone)) return true;
+        if (has(s.store?.name)) return true;
+        if (formatCurrency(s.total).toLowerCase().contains(q)) return true;
+        if (s.id.toLowerCase().contains(q)) return true;
+        if (s.createdBy.toLowerCase().contains(q)) return true;
+        return false;
+      }).toList();
+    }
+    if (provider.filterFrom.isNotEmpty) {
+      list = list.where((s) => s.createdAt.compareTo(provider.filterFrom) >= 0).toList();
+    }
+    if (provider.filterTo.isNotEmpty) {
+      list = list.where((s) => s.createdAt.compareTo('${provider.filterTo}T23:59:59.999Z') <= 0).toList();
+    }
     return list;
+  }
+
+  /// Caissiers présents dans les ventes affichées (libellé depuis le cache membres).
+  List<MapEntry<String, String>> _cashierOptionsFromSales(List<Sale> raw) {
+    final map = <String, String>{};
+    for (final s in raw) {
+      final id = s.createdBy;
+      if (id.isEmpty) continue;
+      if (map.containsKey(id)) continue;
+      final label = s.createdByLabel?.trim();
+      map[id] = label != null && label.isNotEmpty
+          ? label
+          : (id.length >= 8 ? 'Utilisateur ${id.substring(0, 8)}…' : id);
+    }
+    final entries = map.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return entries;
   }
 
   @override
@@ -213,7 +365,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final companyId = company.currentCompanyId;
     final canAccessSales = permissions.hasPermission(Permissions.salesView) ||
         permissions.hasPermission(Permissions.salesCreate) ||
-        permissions.hasPermission(Permissions.salesInvoiceA4);
+        permissions.hasPermission(Permissions.salesInvoiceA4) ||
+        permissions.hasPermission(Permissions.salesUpdate);
     if (permissions.hasLoaded && !canAccessSales) {
       return Scaffold(
         appBar: AppBar(title: const Text('Ventes')),
@@ -236,7 +389,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final filtered = _applyFilters(sales, provider);
     final totalCount = filtered.length;
     final pageCount = totalCount == 0 ? 0 : ((totalCount - 1) ~/ _salesPageSize) + 1;
-    final filterKey = '${provider.filterStoreId}|${provider.filterStatus}|${provider.filterFrom}|${provider.filterTo}';
+    final filterKey =
+        '${provider.filterStoreId}|${provider.filterStatus}|${provider.filterFrom}|${provider.filterTo}|${provider.filterSearch}|${provider.filterCashierUserId ?? ''}';
     if (filterKey != _lastFilterKey) {
       _lastFilterKey = filterKey;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -302,7 +456,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               const SizedBox(height: 24),
               _buildActions(context, currentStoreId, filtered.length, filtered),
               const SizedBox(height: 24),
-              _buildFiltersCard(context, stores, provider),
+              _buildFiltersCard(context, stores, provider, sales),
               const SizedBox(height: 24),
               if (error != null) ...[
                 Card(
@@ -333,7 +487,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               else if (filtered.isEmpty)
                 _buildEmptyState(context)
               else ...[
-                _buildSalesList(context, isWide, paginatedList),
+                _buildSalesList(context, isWide, paginatedList, permissions.hasPermission(Permissions.salesUpdate)),
                 if (pageCount > 1) ...[
                   const SizedBox(height: 16),
                   _buildPagination(context, totalCount, pageCount, effectivePage),
@@ -367,7 +521,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         icon: const Icon(Icons.download_rounded, size: 18),
         label: const Text('Enregistrer CSV'),
       ),
-      if (filledBtn != null) filledBtn,
+      ?filledBtn,
     ];
     return narrow
         ? Column(
@@ -493,9 +647,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  Widget _buildFiltersCard(BuildContext context, List<Store> stores, SalesPageProvider provider) {
+  Widget _buildFiltersCard(
+    BuildContext context,
+    List<Store> stores,
+    SalesPageProvider provider,
+    List<Sale> rawSales,
+  ) {
     final theme = Theme.of(context);
-    final companyId = context.read<CompanyProvider>().currentCompanyId;
     final isMobileFilters = MediaQuery.sizeOf(context).width < 500;
     final seenStoreIds = <String>{};
     final distinctStores = stores.where((s) => seenStoreIds.add(s.id)).toList();
@@ -503,6 +661,14 @@ class _SalesPageState extends ConsumerState<SalesPage> {
             distinctStores.any((s) => s.id == provider.filterStoreId)
         ? provider.filterStoreId
         : null;
+    final cashiers = _cashierOptionsFromSales(rawSales);
+    final cashierIds = cashiers.map((e) => e.key).toSet();
+    final cashierValue = provider.filterCashierUserId != null &&
+            provider.filterCashierUserId!.isNotEmpty &&
+            cashierIds.contains(provider.filterCashierUserId)
+        ? provider.filterCashierUserId
+        : null;
+
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -512,9 +678,57 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Filtres',
-              style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Filtres',
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (_searchDebouncing)
+                  SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _salesSearchController,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Recherche : nº vente, client, caissier, boutique, montant…',
+                prefixIcon: const Icon(Icons.search_rounded),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                suffixIcon: _salesSearchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Effacer',
+                        icon: const Icon(Icons.clear_rounded),
+                        onPressed: () {
+                          _searchDebounce?.cancel();
+                          _salesSearchController.clear();
+                          context.read<SalesPageProvider>().setSearchQuery('');
+                          if (mounted) {
+                            setState(() {
+                              _searchDebouncing = false;
+                            });
+                          }
+                        },
+                      ),
+              ),
+              onChanged: (_) {
+                if (mounted) setState(() {});
+              },
             ),
             const SizedBox(height: 16),
             Wrap(
@@ -525,8 +739,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 SizedBox(
                   width: isMobileFilters ? double.infinity : 200,
                   height: 56,
-                  child: DropdownButtonFormField<String>(
-                    value: storeValue,
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: storeValue,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -535,20 +749,51 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       labelText: 'Boutique',
                     ),
                     items: [
-                      const DropdownMenuItem(value: null, child: Text('Toutes boutiques')),
-                      ...distinctStores.map((s) => DropdownMenuItem(value: s.id, child: Text(s.name, overflow: TextOverflow.ellipsis))),
+                      const DropdownMenuItem<String?>(value: null, child: Text('Toutes boutiques')),
+                      ...distinctStores.map(
+                        (s) => DropdownMenuItem<String?>(
+                          value: s.id,
+                          child: Text(s.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
                     ],
                     onChanged: (v) {
                       provider.setFilters(storeId: v ?? '');
-                      if (companyId != null) provider.load(companyId, force: true);
                     },
+                  ),
+                ),
+                SizedBox(
+                  width: isMobileFilters ? double.infinity : 200,
+                  height: 56,
+                  child: DropdownButtonFormField<String?>(
+                    initialValue: cashierValue,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      labelText: 'Caissier',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Tous les caissiers'),
+                      ),
+                      ...cashiers.map(
+                        (e) => DropdownMenuItem<String?>(
+                          value: e.key,
+                          child: Text(e.value, overflow: TextOverflow.ellipsis),
+                        ),
+                      ),
+                    ],
+                    onChanged: provider.setCashierFilter,
                   ),
                 ),
                 SizedBox(
                   width: isMobileFilters ? double.infinity : 160,
                   height: 56,
                   child: DropdownButtonFormField<SaleStatus?>(
-                    value: provider.filterStatus,
+                    initialValue: provider.filterStatus,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -557,13 +802,15 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       labelText: 'Statut',
                     ),
                     items: [
-                      const DropdownMenuItem(value: null, child: Text('Tous')),
-                      ...SaleStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(_statusLabels[s] ?? s.name))),
+                      const DropdownMenuItem<SaleStatus?>(value: null, child: Text('Tous')),
+                      ...SaleStatus.values.map(
+                        (s) => DropdownMenuItem<SaleStatus?>(
+                          value: s,
+                          child: Text(_statusLabels[s] ?? s.name),
+                        ),
+                      ),
                     ],
-                    onChanged: (v) {
-                      provider.setFilters(status: v);
-                      if (companyId != null) provider.load(companyId, force: true);
-                    },
+                    onChanged: provider.setStatusFilter,
                   ),
                 ),
                 _DateChip(
@@ -577,8 +824,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
                     if (d != null && mounted) {
-                      provider.setFilters(from: DateFormat('yyyy-MM-dd').format(d));
-                      if (companyId != null) provider.load(companyId, force: true);
+                      provider.setFromDate(DateFormat('yyyy-MM-dd').format(d));
                     }
                   },
                 ),
@@ -593,8 +839,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       lastDate: DateTime.now().add(const Duration(days: 365)),
                     );
                     if (d != null && mounted) {
-                      provider.setFilters(to: DateFormat('yyyy-MM-dd').format(d));
-                      if (companyId != null) provider.load(companyId, force: true);
+                      provider.setToDate(DateFormat('yyyy-MM-dd').format(d));
                     }
                   },
                 ),
@@ -644,17 +889,19 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  Widget _buildSalesList(BuildContext context, bool isWide, List<Sale> sales) {
+  Widget _buildSalesList(BuildContext context, bool isWide, List<Sale> sales, bool canEditSale) {
     if (isWide) {
       return _SalesTable(
         sales: sales,
         onView: _openDetail,
+        onEdit: canEditSale ? _openEditSale : null,
         onCancel: _cancelSale,
       );
     }
     return _SalesCardList(
       sales: sales,
       onView: _openDetail,
+      onEdit: canEditSale ? _openEditSale : null,
       onCancel: _cancelSale,
     );
   }
@@ -745,7 +992,7 @@ class _ActionCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: accent && enabled
-            ? BorderSide(color: theme.colorScheme.primary.withOpacity(0.4), width: 2)
+            ? BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.4), width: 2)
             : BorderSide.none,
       ),
       child: Material(
@@ -765,7 +1012,7 @@ class _ActionCard extends StatelessWidget {
                   Container(
                     padding: EdgeInsets.all(isMobile ? 10 : 14),
                     decoration: BoxDecoration(
-                      color: (accent && enabled ? theme.colorScheme.primary : theme.colorScheme.outline).withOpacity(0.12),
+                      color: (accent && enabled ? theme.colorScheme.primary : theme.colorScheme.outline).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -853,11 +1100,13 @@ class _SalesTable extends StatelessWidget {
   const _SalesTable({
     required this.sales,
     required this.onView,
+    this.onEdit,
     required this.onCancel,
   });
 
   final List<Sale> sales;
   final void Function(String saleId) onView;
+  final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
 
   @override
@@ -870,12 +1119,13 @@ class _SalesTable extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withOpacity(0.6)),
+          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6)),
           columns: const [
             DataColumn(label: Text('Numéro')),
             DataColumn(label: Text('Type')),
             DataColumn(label: Text('Date')),
             DataColumn(label: Text('Boutique')),
+            DataColumn(label: Text('Vente par')),
             DataColumn(label: Text('Client')),
             DataColumn(label: Text('Total'), numeric: true),
             DataColumn(label: Text('Statut')),
@@ -887,14 +1137,15 @@ class _SalesTable extends StatelessWidget {
                 DataCell(Text(s.saleNumber, style: const TextStyle(fontWeight: FontWeight.w600))),
                 DataCell(_documentTypeChip(s, context)),
                 DataCell(Text(_formatDateTime(s.createdAt))),
-                DataCell(Text(s.store?.name ?? '—')),
+                DataCell(Text(s.store?.name ?? 'Boutique')),
+                DataCell(Text(s.createdByLabel ?? '—')),
                 DataCell(Text(s.customer?.name ?? '—')),
                 DataCell(Text(formatCurrency(s.total), style: const TextStyle(fontWeight: FontWeight.w600))),
                 DataCell(
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: _statusColor(s.status, context).withOpacity(0.12),
+                      color: _statusColor(s.status, context).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -915,6 +1166,12 @@ class _SalesTable extends StatelessWidget {
                       onPressed: () => onView(s.id),
                       tooltip: 'Voir le détail',
                     ),
+                    if (s.status == SaleStatus.completed && onEdit != null)
+                      IconButton(
+                        icon: Icon(Icons.edit_outlined, size: 20, color: theme.colorScheme.primary),
+                        onPressed: () => onEdit!(s),
+                        tooltip: 'Modifier la vente',
+                      ),
                     if (s.status == SaleStatus.completed)
                       IconButton(
                         icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),
@@ -936,11 +1193,13 @@ class _SalesCardList extends StatelessWidget {
   const _SalesCardList({
     required this.sales,
     required this.onView,
+    this.onEdit,
     required this.onCancel,
   });
 
   final List<Sale> sales;
   final void Function(String saleId) onView;
+  final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
 
   @override
@@ -948,6 +1207,12 @@ class _SalesCardList extends StatelessWidget {
     final theme = Theme.of(context);
     return Column(
       children: sales.map((s) {
+        final subtitleParts = <String>[
+          s.store?.name ?? 'Boutique',
+          if (s.createdByLabel != null && s.createdByLabel!.trim().isNotEmpty)
+            'Par ${s.createdByLabel!.trim()}',
+          if (s.customer?.name != null && s.customer!.name.trim().isNotEmpty) s.customer!.name,
+        ];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Card(
@@ -974,7 +1239,7 @@ class _SalesCardList extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _statusColor(s.status, context).withOpacity(0.12),
+                            color: _statusColor(s.status, context).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -993,16 +1258,15 @@ class _SalesCardList extends StatelessWidget {
                       _formatDateTime(s.createdAt),
                       style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
-                    if (s.store != null || s.customer != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          [s.store?.name, s.customer?.name].where((e) => e != null && e.isNotEmpty).join(' · '),
-                          style: theme.textTheme.bodySmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        subtitleParts.join(' · '),
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                    ),
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -1016,6 +1280,12 @@ class _SalesCardList extends StatelessWidget {
                           onPressed: () => onView(s.id),
                           tooltip: 'Voir le détail',
                         ),
+                        if (s.status == SaleStatus.completed && onEdit != null)
+                          IconButton(
+                            icon: Icon(Icons.edit_outlined, size: 20, color: theme.colorScheme.primary),
+                            onPressed: () => onEdit!(s),
+                            tooltip: 'Modifier la vente',
+                          ),
                         if (s.status == SaleStatus.completed)
                           IconButton(
                             icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),

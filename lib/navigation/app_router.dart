@@ -110,23 +110,34 @@ GoRouter createAppRouter(AuthProvider authProvider) {
       if (path.startsWith('/admin')) return AppRoutes.dashboard;
       if (path == '/') return AppRoutes.dashboard;
 
-      // Caisse rapide : réservée aux utilisateurs avec sales.create
+      // Caisse rapide : sales.create — sauf ?editSale= avec sales.update (modification depuis la liste).
       if (path.endsWith('pos-quick')) {
         try {
           final perm = context.read<PermissionsProvider>();
-          if (perm.hasLoaded && !perm.hasPermission(Permissions.salesCreate)) {
+          if (!perm.hasLoaded) return null;
+          final editSale = state.uri.queryParameters['editSale']?.trim() ?? '';
+          if (editSale.isNotEmpty &&
+              perm.hasPermission(Permissions.salesUpdate)) {
+            return null;
+          }
+          if (!perm.hasPermission(Permissions.salesCreate)) {
             return AppRoutes.stores;
           }
         } catch (_) {}
       }
-      // POS Facture A4 : réservé aux utilisateurs avec sales.invoice_a4
+      // POS Facture A4 : sales.invoice_a4 — sauf ?editSale= avec sales.update.
       if (path.contains('/stores/') &&
           path.endsWith('/pos') &&
           !path.contains('pos-quick')) {
         try {
           final perm = context.read<PermissionsProvider>();
-          if (perm.hasLoaded &&
-              !perm.hasPermission(Permissions.salesInvoiceA4)) {
+          if (!perm.hasLoaded) return null;
+          final editSale = state.uri.queryParameters['editSale']?.trim() ?? '';
+          if (editSale.isNotEmpty &&
+              perm.hasPermission(Permissions.salesUpdate)) {
+            return null;
+          }
+          if (!perm.hasPermission(Permissions.salesInvoiceA4)) {
             return AppRoutes.stores;
           }
         } catch (_) {}
@@ -192,15 +203,16 @@ GoRouter createAppRouter(AuthProvider authProvider) {
             path: '/stores/:storeId/pos',
             builder: (context, state) {
               final storeId = state.pathParameters['storeId'] ?? '';
-              return PosPage(storeId: storeId);
+              final editSaleId = state.uri.queryParameters['editSale'];
+              return PosPage(storeId: storeId, editSaleId: editSaleId);
             },
           ),
           GoRoute(
             path: '/stores/:storeId/pos-quick',
             builder: (context, state) {
               final storeId = state.pathParameters['storeId'] ?? '';
-              // ignore: undefined_function
-              return PosQuickPage(storeId: storeId);
+              final editSaleId = state.uri.queryParameters['editSale'];
+              return PosQuickPage(storeId: storeId, editSaleId: editSaleId);
             },
           ),
           GoRoute(

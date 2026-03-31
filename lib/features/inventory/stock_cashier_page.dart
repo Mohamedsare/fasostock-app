@@ -89,11 +89,12 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
             storeId: company.currentStoreId,
           );
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         AppToast.error(
           context,
           AppErrorHandler.toUserMessage(e, fallback: 'Sync échouée'),
         );
+      }
     }
   }
 
@@ -244,10 +245,12 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
     final alertesPageCount = alertes.isEmpty
         ? 1
         : (alertes.length / _pageSize).ceil();
-    if (_currentRupturePage >= rupturePageCount)
+    if (_currentRupturePage >= rupturePageCount) {
       _currentRupturePage = (rupturePageCount - 1).clamp(0, rupture.length);
-    if (_currentAlertesPage >= alertesPageCount)
+    }
+    if (_currentAlertesPage >= alertesPageCount) {
       _currentAlertesPage = (alertesPageCount - 1).clamp(0, alertes.length);
+    }
     final paginatedRupture = rupture.isEmpty
         ? <InventoryItem>[]
         : rupture
@@ -301,7 +304,7 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
                         Card(
                           color: Theme.of(
                             context,
-                          ).colorScheme.error.withOpacity(0.08),
+                          ).colorScheme.error.withValues(alpha: 0.08),
                           child: Padding(
                             padding: const EdgeInsets.all(16),
                             child: Row(
@@ -485,8 +488,9 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
     final end = (currentPageIndex + 1) * _pageSize;
     final endClamped = end > totalCount ? totalCount : end;
     final isNarrow = MediaQuery.sizeOf(context).width < 500;
-    if (totalCount <= _pageSize && totalCount > 0)
+    if (totalCount <= _pageSize && totalCount > 0) {
       return const SizedBox.shrink();
+    }
     if (totalCount == 0) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -639,7 +643,7 @@ class _ProductStockTile extends StatelessWidget {
                         fit: BoxFit.cover,
                         width: 44,
                         height: 44,
-                        errorBuilder: (_, __, ___) => Icon(
+                        errorBuilder: (_, _, _) => Icon(
                           Icons.inventory_2_outlined,
                           size: 24,
                           color: theme.colorScheme.onSurfaceVariant,

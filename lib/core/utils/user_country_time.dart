@@ -1,5 +1,13 @@
 import 'package:timezone/timezone.dart' as tz;
 
+/// Heure murale de l’appareil : [d] doit être **local** (typiquement [DateTime.now]).
+String formatDeviceWallClockHm(DateTime d) =>
+    '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+/// Comme [formatDeviceWallClockHm] avec secondes.
+String formatDeviceWallClockHms(DateTime d) =>
+    '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}:${d.second.toString().padLeft(2, '0')}';
+
 /// Résout un identifiant IANA (ex. `Africa/Ouagadougou`) à partir du texte pays
 /// saisi pour la boutique (nom, code ISO, etc.).
 ///

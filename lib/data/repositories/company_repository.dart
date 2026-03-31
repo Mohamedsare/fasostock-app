@@ -15,7 +15,7 @@ class CompanyRepository {
   final SupabaseClient _client;
 
   static const _companyFields =
-      'id, name, slug, logo_url, is_active, store_quota, ai_predictions_enabled';
+      'id, name, slug, business_type_slug, logo_url, is_active, store_quota, ai_predictions_enabled';
 
   /// Même bucket public que les logos boutique (`00006_store_logos_bucket.sql`).
   static const String _logosBucket = 'store-logos';
@@ -32,7 +32,7 @@ class CompanyRepository {
     if (companyIds.isEmpty) return [];
     final data = await _client
         .from('companies')
-        .select('id, name, slug, logo_url, is_active, store_quota, ai_predictions_enabled')
+        .select(_companyFields)
         .inFilter('id', companyIds);
     return (data as List).map((e) => Company.fromJson(Map<String, dynamic>.from(e as Map))).toList();
   }
