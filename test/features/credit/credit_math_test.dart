@@ -27,8 +27,8 @@ Sale _saleWithPayments({
 }
 
 void main() {
-  group('paidRealized / partiel POS', () {
-    test('acompte sous PaymentMethod.other seul : compte comme encaissé', () {
+  group('paidRealized / alignement append_sale_payment', () {
+    test('une ligne other seule : ignorée pour l’encaissé (placeholder crédit)', () {
       final s = _saleWithPayments(
         total: 500,
         payments: [
@@ -41,9 +41,9 @@ void main() {
           ),
         ],
       );
-      expect(paidRealized(s), closeTo(100, 0.001));
-      expect(remainingTotal(s), closeTo(400, 0.001));
-      expect(creditLineStatus(s), CreditLineStatus.partiel);
+      expect(paidRealized(s), 0);
+      expect(remainingTotal(s), closeTo(500, 0.001));
+      expect(creditLineStatus(s), CreditLineStatus.nonPaye);
     });
 
     test('crédit total une ligne other = total : n’entre pas dans l’encaissé', () {

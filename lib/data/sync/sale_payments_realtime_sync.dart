@@ -13,6 +13,10 @@ class SalePaymentsRealtimeSync {
 
   final AppDatabase _db;
   RealtimeChannel? _channel;
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _stopped = true;
+  static const int _maxReconnectBackoffSeconds = 30;
 
   static bool _isChannelPermissionError(Object? error) {
     if (error == null) return false;
@@ -23,10 +27,13 @@ class SalePaymentsRealtimeSync {
   }
 
   static const RealtimeChannelConfig _channelConfig = RealtimeChannelConfig(
-    private: true,
+    private: false,
   );
 
   Future<void> start() async {
+    _stopped = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     if (_channel != null) return;
     final client = Supabase.instance.client;
     final uid = client.auth.currentUser?.id;
@@ -53,8 +60,14 @@ class SalePaymentsRealtimeSync {
           callback: _onPayload,
         )
         .subscribe((status, [error]) {
+          final statusText = status.toString().toLowerCase();
           if (kDebugMode) {
             debugPrint('[SalePaymentsRealtime] $status ${error ?? ''}');
+          }
+          if (statusText.contains('subscribed')) {
+            _reconnectAttempt = 0;
+            _reconnectTimer?.cancel();
+            _reconnectTimer = null;
           }
           if (error != null) {
             if (_isChannelPermissionError(error)) {
@@ -75,8 +88,40 @@ class SalePaymentsRealtimeSync {
               logSource: 'sale_payments_realtime',
               logContext: {'channel_status': status.toString()},
             );
+            _scheduleReconnect('error');
+            return;
+          }
+          if (statusText.contains('closed') ||
+              statusText.contains('timedout') ||
+              statusText.contains('channelerror')) {
+            _scheduleReconnect(status.toString());
           }
         });
+  }
+
+  void _scheduleReconnect(String reason) {
+    if (_stopped) return;
+    if (_reconnectTimer != null) return;
+    final attempt = _reconnectAttempt;
+    final powSeconds = 1 << (attempt > 5 ? 5 : attempt);
+    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final jitterMs = DateTime.now().millisecond % 400;
+    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
+      _reconnectTimer = null;
+      if (_stopped) return;
+      _reconnectAttempt = _reconnectAttempt + 1;
+      final c = _channel;
+      _channel = null;
+      if (c != null) {
+        try {
+          await Supabase.instance.client.removeChannel(c);
+        } catch (_) {}
+      }
+      if (kDebugMode) {
+        debugPrint('[SalePaymentsRealtime] reconnect attempt=$_reconnectAttempt reason=$reason');
+      }
+      await start();
+    });
   }
 
   static String? _saleIdFromRecord(Map<String, dynamic>? raw) {
@@ -101,6 +146,10 @@ class SalePaymentsRealtimeSync {
   }
 
   Future<void> stop() async {
+    _stopped = true;
+    _reconnectAttempt = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     final c = _channel;
     _channel = null;
     if (c != null) {

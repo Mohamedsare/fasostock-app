@@ -21,6 +21,7 @@ const double _adminSidebarCollapsedWidth = 72;
 const _adminNavItems = [
   (path: AppRoutes.admin, label: 'Tableau', icon: Icons.dashboard_rounded),
   (path: AppRoutes.adminCompanies, label: 'Entreprises', icon: Icons.business_rounded),
+  (path: AppRoutes.adminFonctionnalites, label: 'Fonctionnalités', icon: Icons.tune_rounded),
   (path: AppRoutes.adminStores, label: 'Boutiques', icon: Icons.store_rounded),
   (path: AppRoutes.adminUsers, label: 'Utilisateurs', icon: Icons.people_rounded),
   (path: AppRoutes.adminAudit, label: 'Journal d\'audit', icon: Icons.history_rounded),

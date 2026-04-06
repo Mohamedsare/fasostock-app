@@ -7,6 +7,8 @@ class AdminCompany {
     this.isActive = true,
     this.storeQuota = 0,
     this.aiPredictionsEnabled = false,
+    this.warehouseFeatureEnabled = true,
+    this.storeQuotaIncreaseEnabled = true,
     this.createdAt,
   });
   final String id;
@@ -15,6 +17,8 @@ class AdminCompany {
   final bool isActive;
   final int storeQuota;
   final bool aiPredictionsEnabled;
+  final bool warehouseFeatureEnabled;
+  final bool storeQuotaIncreaseEnabled;
   final String? createdAt;
 
   factory AdminCompany.fromJson(Map<String, dynamic> json) {
@@ -25,6 +29,8 @@ class AdminCompany {
       isActive: json['is_active'] as bool? ?? true,
       storeQuota: (json['store_quota'] is int) ? json['store_quota'] as int : (json['store_quota'] as num?)?.toInt() ?? 0,
       aiPredictionsEnabled: json['ai_predictions_enabled'] as bool? ?? false,
+      warehouseFeatureEnabled: json['warehouse_feature_enabled'] as bool? ?? true,
+      storeQuotaIncreaseEnabled: json['store_quota_increase_enabled'] as bool? ?? true,
       createdAt: json['created_at'] as String?,
     );
   }

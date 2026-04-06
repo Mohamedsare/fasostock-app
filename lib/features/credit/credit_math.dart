@@ -2,27 +2,15 @@ import '../../data/models/sale.dart';
 
 const creditAmountEps = 0.005;
 
-/// Indique si cette ligne de paiement compte dans l’« encaissé » (crédit / partiel).
-///
-/// - Espèces, carte, etc. : toujours oui.
-/// - `other` : non si une autre ligne non-`other` existe (ex. acompte espèces + ligne
-///   « crédit » pour le reliquat). Oui uniquement pour **une seule** ligne `other` avec
-///   montant **strictement inférieur** au total (acompte saisi au POS sous « À crédit »).
-bool salePaymentContributesToPaidRealized(Sale sale, SalePayment p) {
-  final all = sale.salePayments ?? const <SalePayment>[];
-  if (p.method != PaymentMethod.other) return true;
-  final nonOther = all.where((x) => x.method != PaymentMethod.other).toList();
-  final others = all.where((x) => x.method == PaymentMethod.other).toList();
-  if (nonOther.isNotEmpty) return false;
-  if (others.length != 1 || p.id != others.first.id) return false;
-  return p.amount + creditAmountEps < sale.total;
-}
+/// Tolérance alignée sur `append_sale_payment` (comparaison `total + 0.0001`).
+const creditRpcEpsilon = 0.0001;
 
+/// Encaissements réels — aligné `append_sale_payment` et `credit-math.ts` (web) :
+/// somme des lignes `sale_payments` **sauf** `method = other` (placeholder crédit POS / facture).
 double paidRealized(Sale sale) {
-  final pays = sale.salePayments ?? const <SalePayment>[];
   var s = 0.0;
-  for (final p in pays) {
-    if (!salePaymentContributesToPaidRealized(sale, p)) continue;
+  for (final p in sale.salePayments ?? const <SalePayment>[]) {
+    if (p.method == PaymentMethod.other) continue;
     s += p.amount;
   }
   return s;
@@ -143,7 +131,7 @@ class CustomerCreditAgg {
 }
 
 String? _maxRealizedPaymentAt(Sale sale) {
-  final pays = (sale.salePayments ?? []).where((p) => salePaymentContributesToPaidRealized(sale, p)).toList();
+  final pays = (sale.salePayments ?? []).where((p) => p.method != PaymentMethod.other).toList();
   if (pays.isEmpty) return null;
   String? best;
   for (final p in pays) {

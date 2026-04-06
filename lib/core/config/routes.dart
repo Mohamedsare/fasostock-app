@@ -45,6 +45,8 @@ class AppRoutes {
 
   static const String admin = '/admin';
   static const String adminCompanies = '/admin/companies';
+  /// Fonctionnalités par entreprise (Magasin, IA, quota) — aligné `/admin/fonctionnalites` (web).
+  static const String adminFonctionnalites = '/admin/fonctionnalites';
   static const String adminStores = '/admin/stores';
   static const String adminUsers = '/admin/users';
   static const String adminAi = '/admin/ai';

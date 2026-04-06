@@ -9,6 +9,8 @@ class Company {
     this.isActive = true,
     this.storeQuota = 1,
     this.aiPredictionsEnabled = false,
+    this.warehouseFeatureEnabled = true,
+    this.storeQuotaIncreaseEnabled = true,
   });
 
   final String id;
@@ -21,6 +23,10 @@ class Company {
   final bool isActive;
   final int storeQuota;
   final bool aiPredictionsEnabled;
+  /// Module dépôt Magasin — désactivable par la plateforme (super admin).
+  final bool warehouseFeatureEnabled;
+  /// Augmentation du quota de boutiques — désactivable par la plateforme.
+  final bool storeQuotaIncreaseEnabled;
 
   factory Company.fromJson(Map<String, dynamic> json) {
     return Company(
@@ -34,6 +40,8 @@ class Company {
           ? json['store_quota'] as int
           : (json['store_quota'] as num?)?.toInt() ?? 1,
       aiPredictionsEnabled: json['ai_predictions_enabled'] as bool? ?? false,
+      warehouseFeatureEnabled: json['warehouse_feature_enabled'] as bool? ?? true,
+      storeQuotaIncreaseEnabled: json['store_quota_increase_enabled'] as bool? ?? true,
     );
   }
 }

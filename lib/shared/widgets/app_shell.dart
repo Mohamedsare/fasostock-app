@@ -160,7 +160,10 @@ class _AppShellState extends State<AppShell> {
       final canReports =
           permissions.hasPermission(Permissions.reportsViewGlobal) ||
           permissions.hasPermission(Permissions.reportsViewStore);
-      final canAi = permissions.hasPermission(Permissions.aiInsightsView);
+      final warehouseModuleOn = company.currentCompany?.warehouseFeatureEnabled ?? true;
+      final aiModuleOn = company.currentCompany?.aiPredictionsEnabled ?? false;
+      final canAi =
+          permissions.hasPermission(Permissions.aiInsightsView) && aiModuleOn;
       final canUsers =
           permissions.hasPermission(Permissions.usersManage) ||
           permissions.isOwner;
@@ -215,8 +218,10 @@ class _AppShellState extends State<AppShell> {
           return canInventory && !permissions.isCashier;
         }
         if (e.path == AppRoutes.purchases) return canPurchases;
-        // Magasin (dépôt central) : propriétaire ou magasinier (warehouse.manage).
-        if (e.path == AppRoutes.warehouse) return permissions.canManageWarehouse;
+        // Magasin (dépôt central) : droit + module non désactivé par la plateforme.
+        if (e.path == AppRoutes.warehouse) {
+          return permissions.canManageWarehouse && warehouseModuleOn;
+        }
         if (e.path == AppRoutes.customers) return canCustomers;
         if (e.path == AppRoutes.credit) return permissions.canAccessCredit;
         if (e.path == AppRoutes.suppliers) return canSuppliers;

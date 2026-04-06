@@ -599,6 +599,8 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   @override
   Widget build(BuildContext context) {
     final permissions = context.watch<PermissionsProvider>();
+    final company = context.watch<CompanyProvider>();
+    final warehouseModuleOn = company.currentCompany?.warehouseFeatureEnabled ?? true;
     if (permissions.hasLoaded && !permissions.canManageWarehouse) {
       return Scaffold(
         appBar: AppBar(
@@ -642,8 +644,50 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
         ),
       );
     }
+    if (permissions.hasLoaded && permissions.canManageWarehouse && !warehouseModuleOn) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Magasin'),
+          surfaceTintColor: Colors.transparent,
+        ),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.block_rounded,
+                    size: 56,
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Module indisponible',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Le module Magasin a été désactivé pour votre entreprise. Contactez l’administrateur de la plateforme.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.45,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
-    final company = context.watch<CompanyProvider>();
     final companyId = company.currentCompanyId ?? '';
     final invAsync = ref.watch(warehouseInventoryStreamProvider(companyId));
     final movAsync = ref.watch(warehouseMovementsStreamProvider(companyId));

@@ -15,7 +15,7 @@ class CompanyRepository {
   final SupabaseClient _client;
 
   static const _companyFields =
-      'id, name, slug, business_type_slug, logo_url, is_active, store_quota, ai_predictions_enabled';
+      'id, name, slug, business_type_slug, logo_url, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled';
 
   /// Même bucket public que les logos boutique (`00006_store_logos_bucket.sql`).
   static const String _logosBucket = 'store-logos';

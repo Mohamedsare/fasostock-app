@@ -15,13 +15,33 @@ class StoresRepository {
   static const _storeFields =
       'id, company_id, name, code, address, logo_url, phone, email, description, is_active, is_primary, pos_discount_enabled, created_at, '
       'currency, primary_color, secondary_color, invoice_prefix, footer_text, legal_info, signature_url, stamp_url, payment_terms, tax_label, tax_number, city, country, commercial_name, slogan, activity, mobile_money, invoice_short_title, invoice_signer_title, invoice_signer_name, invoice_template';
+  // Repli pour bases pas entièrement migrées (colonnes facture avancées absentes).
+  static const _storeFieldsFallback =
+      'id, company_id, name, code, address, logo_url, phone, email, description, is_active, is_primary, pos_discount_enabled, created_at, '
+      'currency, primary_color, secondary_color, invoice_prefix, footer_text, legal_info, signature_url, stamp_url, payment_terms, tax_label, tax_number, city, country, commercial_name, slogan, activity, mobile_money';
+
+  bool _isMissingColumnError(Object e) {
+    if (e is! PostgrestException) return false;
+    final msg = (e.message).toLowerCase();
+    // Postgres undefined_column = 42703.
+    return e.code == '42703' || (msg.contains('column') && msg.contains('does not exist'));
+  }
 
   Future<List<Store>> getStoresByCompany(String companyId) async {
     try {
-      final data = await _client
-          .from('stores')
-          .select(_storeFields)
-          .eq('company_id', companyId);
+      dynamic data;
+      try {
+        data = await _client
+            .from('stores')
+            .select(_storeFields)
+            .eq('company_id', companyId);
+      } catch (e) {
+        if (!_isMissingColumnError(e)) rethrow;
+        data = await _client
+            .from('stores')
+            .select(_storeFieldsFallback)
+            .eq('company_id', companyId);
+      }
       final list = data as List;
       return list.map((e) {
         try {

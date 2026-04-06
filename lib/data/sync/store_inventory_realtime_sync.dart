@@ -13,15 +13,22 @@ class StoreInventoryRealtimeSync {
 
   final AppDatabase _db;
   RealtimeChannel? _channel;
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _stopped = true;
+  static const int _maxReconnectBackoffSeconds = 30;
 
-  /// Canal **privé** requis pour que Realtime applique le JWT et les politiques RLS
-  /// sur `postgres_changes` — avec `private: false` (défaut), les changements filtrés
-  /// par boutique / société n’arrivent souvent pas aux autres appareils.
+  /// `private: false` : filtrage via RLS sur `store_inventory` + `setAuth` (doc Supabase :
+  /// l’option private ne s’applique pas aux postgres_changes ; `private: true` impose
+  /// des policies sur `realtime.messages` et peut refuser le join).
   static const RealtimeChannelConfig _channelConfig = RealtimeChannelConfig(
-    private: true,
+    private: false,
   );
 
   Future<void> start() async {
+    _stopped = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     if (_channel != null) return;
     final client = Supabase.instance.client;
     final uid = client.auth.currentUser?.id;
@@ -52,10 +59,57 @@ class StoreInventoryRealtimeSync {
           callback: _onPayload,
         )
         .subscribe((status, [error]) {
+          final statusText = status.toString().toLowerCase();
           if (kDebugMode) {
             debugPrint('[StoreInventoryRealtime] $status ${error ?? ''}');
           }
+          if (statusText.contains('subscribed')) {
+            _reconnectAttempt = 0;
+            _reconnectTimer?.cancel();
+            _reconnectTimer = null;
+          }
+          if (error != null) {
+            AppErrorHandler.logWithContext(
+              error,
+              logSource: 'store_inventory_realtime',
+              logContext: {'channel_status': status.toString()},
+            );
+            _scheduleReconnect('error');
+            return;
+          }
+          if (statusText.contains('closed') ||
+              statusText.contains('timedout') ||
+              statusText.contains('channelerror')) {
+            _scheduleReconnect(status.toString());
+          }
         });
+  }
+
+  void _scheduleReconnect(String reason) {
+    if (_stopped) return;
+    if (_reconnectTimer != null) return;
+    final attempt = _reconnectAttempt;
+    final powSeconds = 1 << (attempt > 5 ? 5 : attempt);
+    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final jitterMs = DateTime.now().millisecond % 400;
+    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
+      _reconnectTimer = null;
+      if (_stopped) return;
+      _reconnectAttempt = _reconnectAttempt + 1;
+      final c = _channel;
+      _channel = null;
+      if (c != null) {
+        try {
+          await Supabase.instance.client.removeChannel(c);
+        } catch (_) {}
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[StoreInventoryRealtime] reconnect attempt=$_reconnectAttempt reason=$reason',
+        );
+      }
+      await start();
+    });
   }
 
   Future<void> _onPayload(PostgresChangePayload payload) async {
@@ -109,6 +163,10 @@ class StoreInventoryRealtimeSync {
   }
 
   Future<void> stop() async {
+    _stopped = true;
+    _reconnectAttempt = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     final c = _channel;
     _channel = null;
     if (c != null) {

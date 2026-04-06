@@ -10,7 +10,9 @@ class AdminRepository {
   Future<List<AdminCompany>> listCompanies() async {
     final data = await _client
         .from('companies')
-        .select('id, name, slug, is_active, store_quota, ai_predictions_enabled, created_at')
+        .select(
+          'id, name, slug, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled, created_at',
+        )
         .order('created_at', ascending: false);
     return (data as List).map((e) => AdminCompany.fromJson(Map<String, dynamic>.from(e as Map))).toList();
   }
@@ -22,10 +24,30 @@ class AdminRepository {
     return (data as List).map((e) => AdminStore.fromJson(Map<String, dynamic>.from(e as Map))).toList();
   }
 
-  Future<void> updateCompany(String id, {bool? isActive, bool? aiPredictionsEnabled}) async {
+  /// Mise à jour entreprise (super admin) — aligné `adminUpdateCompany` (web).
+  Future<void> updateCompany(
+    String id, {
+    bool? isActive,
+    bool? aiPredictionsEnabled,
+    bool? warehouseFeatureEnabled,
+    bool? storeQuotaIncreaseEnabled,
+    int? storeQuota,
+  }) async {
     final patch = <String, dynamic>{};
     if (isActive != null) patch['is_active'] = isActive;
     if (aiPredictionsEnabled != null) patch['ai_predictions_enabled'] = aiPredictionsEnabled;
+    if (warehouseFeatureEnabled != null) {
+      patch['warehouse_feature_enabled'] = warehouseFeatureEnabled;
+    }
+    if (storeQuotaIncreaseEnabled != null) {
+      patch['store_quota_increase_enabled'] = storeQuotaIncreaseEnabled;
+    }
+    if (storeQuota != null) {
+      if (storeQuota < 1) {
+        throw ArgumentError('Quota de boutiques invalide (minimum 1).');
+      }
+      patch['store_quota'] = storeQuota;
+    }
     if (patch.isEmpty) return;
     await _client.from('companies').update(patch).eq('id', id);
   }

@@ -44,6 +44,7 @@ import '../features/admin/admin_messages_page.dart';
 import '../features/admin/admin_rapports_page.dart';
 import '../features/admin/admin_settings_page.dart';
 import '../features/admin/admin_ai_page.dart';
+import '../features/admin/admin_fonctionnalites_page.dart';
 
 /// Route d'attente au démarrage (évite l'écran blanc).
 const String _splashPath = '/_splash';
@@ -330,6 +331,10 @@ GoRouter createAppRouter(AuthProvider authProvider) {
               GoRoute(
                 path: 'companies',
                 builder: (context, state) => const AdminEntreprisesPage(),
+              ),
+              GoRoute(
+                path: 'fonctionnalites',
+                builder: (context, state) => const AdminFonctionnalitesPage(),
               ),
               GoRoute(
                 path: 'stores',

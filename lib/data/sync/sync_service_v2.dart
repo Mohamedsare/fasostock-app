@@ -395,10 +395,14 @@ class SyncServiceV2 {
         if (kDebugMode) {
           debugPrint('[Sync] pullStoreInventoryLight getStoresByCompany: $e');
         }
-        AppErrorHandler.log(
-          'SyncV2.pullStoreInventoryLight stores companyId=$companyId: $e',
-          st,
-        );
+        // Erreur non bloquante ici: on bascule sur le cache Drift.
+        // Évite de polluer les logs d'erreurs pour un simple fallback réseau/schéma.
+        if (e is! UserFriendlyError) {
+          AppErrorHandler.log(
+            'SyncV2.pullStoreInventoryLight stores companyId=$companyId: $e',
+            st,
+          );
+        }
         final localStores = await _db.getLocalStores(companyId);
         for (final s in localStores) {
           ids.add(s.id);

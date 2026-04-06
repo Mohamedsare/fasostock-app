@@ -992,12 +992,26 @@ class _ProductListTile extends StatelessWidget {
                         ),
                         if (stockQuantity != null) ...[
                           const SizedBox(height: 6),
-                          SizedBox(
-                            width: double.infinity,
-                            child: StockRangeIndicator(
-                              quantity: stockQuantity!,
-                              alertThreshold: stockAlertThreshold,
-                            ),
+                          Builder(
+                            builder: (context) {
+                              final screenW = MediaQuery.sizeOf(context).width;
+                              final indicator = StockRangeIndicator(
+                                quantity: stockQuantity!,
+                                alertThreshold: stockAlertThreshold,
+                              );
+                              // Mobile / tablette : barre sur toute la largeur utile (inchangé).
+                              // Desktop : plafond pour éviter une barre disproportionnée sur grands écrans.
+                              if (!Breakpoints.isDesktop(screenW)) {
+                                return SizedBox(width: double.infinity, child: indicator);
+                              }
+                              return Align(
+                                alignment: Alignment.centerLeft,
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 280),
+                                  child: indicator,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ],

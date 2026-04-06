@@ -18,9 +18,13 @@ class SalesRealtimeSync {
   final AppDatabase _db;
   final SyncServiceV2? _syncService;
   RealtimeChannel? _channel;
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _stopped = true;
+  static const int _maxReconnectBackoffSeconds = 30;
 
-  /// Canal privé Realtime : si la config Supabase n’autorise pas ce topic pour le JWT,
-  /// on ignore proprement (la sync pull reste le filet de sécurité).
+  /// Erreur résiduelle si Realtime Authorization + canal privé sans policy sur
+  /// `realtime.messages` (voir doc : `private` ne s’applique pas à postgres_changes).
   static bool _isChannelPermissionError(Object? error) {
     if (error == null) return false;
     final s = error.toString().toLowerCase();
@@ -29,11 +33,17 @@ class SalesRealtimeSync {
         s.contains('topic:');
   }
 
+  /// `private: false` : le filtrage des lignes vient du RLS sur `sales` + JWT
+  /// (`setAuth`). `private: true` déclenche l’auth canaux privés (`realtime.messages`)
+  /// et provoque « Unauthorized » sans policies dédiées.
   static const RealtimeChannelConfig _channelConfig = RealtimeChannelConfig(
-    private: true,
+    private: false,
   );
 
   Future<void> start() async {
+    _stopped = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     if (_channel != null) return;
     final client = Supabase.instance.client;
     final uid = client.auth.currentUser?.id;
@@ -62,8 +72,14 @@ class SalesRealtimeSync {
           callback: _onPayload,
         )
         .subscribe((status, [error]) {
+          final statusText = status.toString().toLowerCase();
           if (kDebugMode) {
             debugPrint('[SalesRealtime] $status ${error ?? ''}');
+          }
+          if (statusText.contains('subscribed')) {
+            _reconnectAttempt = 0;
+            _reconnectTimer?.cancel();
+            _reconnectTimer = null;
           }
           if (error != null) {
             if (_isChannelPermissionError(error)) {
@@ -85,8 +101,41 @@ class SalesRealtimeSync {
               logSource: 'sales_realtime',
               logContext: {'channel_status': status.toString()},
             );
+            _scheduleReconnect('error');
+            return;
+          }
+          if (statusText.contains('closed') ||
+              statusText.contains('timedout') ||
+              statusText.contains('channelerror')) {
+            _scheduleReconnect(status.toString());
           }
         });
+  }
+
+  void _scheduleReconnect(String reason) {
+    if (_stopped) return;
+    if (_reconnectTimer != null) return;
+    final attempt = _reconnectAttempt;
+    final powSeconds = 1 << (attempt > 5 ? 5 : attempt); // 1,2,4,8,16,32
+    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    // Petit jitter pour éviter que plusieurs channels reconnectent exactement en même temps.
+    final jitterMs = DateTime.now().millisecond % 400;
+    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
+      _reconnectTimer = null;
+      if (_stopped) return;
+      _reconnectAttempt = _reconnectAttempt + 1;
+      final c = _channel;
+      _channel = null;
+      if (c != null) {
+        try {
+          await Supabase.instance.client.removeChannel(c);
+        } catch (_) {}
+      }
+      if (kDebugMode) {
+        debugPrint('[SalesRealtime] reconnect attempt=$_reconnectAttempt reason=$reason');
+      }
+      await start();
+    });
   }
 
   Future<void> _onPayload(PostgresChangePayload payload) async {
@@ -234,6 +283,10 @@ class SalesRealtimeSync {
   }
 
   Future<void> stop() async {
+    _stopped = true;
+    _reconnectAttempt = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     final c = _channel;
     _channel = null;
     if (c != null) {

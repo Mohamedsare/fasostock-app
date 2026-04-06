@@ -201,6 +201,10 @@ class _StoresPageState extends ConsumerState<StoresPage> {
         ? AppErrorHandler.toUserMessage(asyncStores.error)
         : null;
     final quota = currentCompany?.storeQuota ?? 1;
+    final quotaIncreaseOk = currentCompany?.storeQuotaIncreaseEnabled ?? true;
+    final atQuota = stores.length >= quota && quota > 0;
+    final quotaIncreaseBlocked =
+        atQuota && !quotaIncreaseOk && permissions.hasPermission(Permissions.storesCreate);
     final canCreate = companyId != null &&
         permissions.hasPermission(Permissions.storesCreate) &&
         (stores.isEmpty || stores.length < quota);
@@ -264,6 +268,10 @@ class _StoresPageState extends ConsumerState<StoresPage> {
             children: [
               _buildHeader(context, description, canCreate, companyId),
               const SizedBox(height: 24),
+              if (quotaIncreaseBlocked) ...[
+                _buildQuotaBlockedBanner(context, quota),
+                const SizedBox(height: 16),
+              ],
               if (error != null) ...[
                 _buildErrorCard(context, error),
                 const SizedBox(height: 24),
@@ -290,6 +298,37 @@ class _StoresPageState extends ConsumerState<StoresPage> {
               child: const Icon(Icons.add_rounded),
             )
           : null,
+    );
+  }
+
+  Widget _buildQuotaBlockedBanner(BuildContext context, int quota) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF7ED),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFDBA74)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.info_outline_rounded, color: Colors.amber.shade900, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Quota de boutiques atteint ($quota). L’augmentation du nombre de boutiques autorisées '
+                'n’est pas disponible pour votre offre. Contactez l’administrateur de la plateforme.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFF78350F),
+                  height: 1.45,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

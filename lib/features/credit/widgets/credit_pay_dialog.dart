@@ -41,17 +41,91 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
 
   double get _rest => remainingTotal(widget.sale);
 
+  /// Arrondi monétaire (évite les rejets RPC dus aux flottants).
+  static double _roundMoney(double x) => (x * 100).round() / 100.0;
+  static bool _isOverpayError(Object e) => RegExp(
+        r'montant supérieur au reste à payer',
+        caseSensitive: false,
+      ).hasMatch(e.toString());
+
   Future<void> _submit() async {
-    final amount = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
-    if (amount <= 0 || amount > _rest + 0.01) return;
+    final parsed = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+    if (parsed <= 0) {
+      AppToast.error(context, 'Indiquez un montant valide.');
+      return;
+    }
     setState(() => _busy = true);
     try {
-      await widget.credit.appendSalePayment(
-        saleId: widget.sale.id,
-        method: _method,
-        amount: amount,
-        reference: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+      final fresh = await widget.credit.fetchCreditSaleDetail(
+        widget.sale.id,
+        widget.sale.companyId,
       );
+      if (fresh == null) {
+        if (mounted) {
+          AppToast.error(context, 'Impossible de charger la vente. Réessayez.');
+        }
+        return;
+      }
+      final rest = remainingTotal(fresh);
+      if (rest <= creditRpcEpsilon) {
+        if (mounted) {
+          AppToast.info(context, 'Cette créance est déjà soldée. La liste a été actualisée.');
+          widget.onSuccess?.call();
+          Navigator.of(context).pop(true);
+        }
+        return;
+      }
+
+      var amount = _roundMoney(parsed);
+      if (amount > rest + creditRpcEpsilon && amount <= rest + 1) {
+        amount = _roundMoney(rest);
+      }
+      if (amount > rest + creditRpcEpsilon) {
+        if (mounted) {
+          AppToast.error(
+            context,
+            'Le montant dépasse le reste à payer (${formatCurrency(rest)}). '
+            'La liste a été actualisée, réessayez avec le nouveau reste.',
+          );
+          widget.onSuccess?.call();
+        }
+        return;
+      }
+
+      try {
+        await widget.credit.appendSalePayment(
+          saleId: widget.sale.id,
+          method: _method,
+          amount: amount,
+          reference: _refCtrl.text.trim().isEmpty ? null : _refCtrl.text.trim(),
+        );
+      } catch (e, st) {
+        // Même stratégie que le web : si concurrence, relire puis décider.
+        if (!_isOverpayError(e)) rethrow;
+        AppErrorHandler.log(e, st);
+
+        final freshAfter = await widget.credit.fetchCreditSaleDetail(
+          widget.sale.id,
+          widget.sale.companyId,
+        );
+        final restAfter = freshAfter == null ? null : remainingTotal(freshAfter);
+        if (restAfter != null && restAfter <= creditRpcEpsilon) {
+          if (mounted) {
+            AppToast.info(context, 'Cette créance est déjà soldée. La liste a été actualisée.');
+            widget.onSuccess?.call();
+            Navigator.of(context).pop(true);
+          }
+          return;
+        }
+        if (mounted) {
+          AppToast.error(
+            context,
+            'Le solde a changé. La liste a été actualisée, réessayez avec le nouveau reste.',
+          );
+          widget.onSuccess?.call();
+        }
+        return;
+      }
       if (!mounted) return;
       AppToast.success(context, 'Paiement enregistré.');
       widget.onSuccess?.call();
@@ -128,8 +202,11 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
           onPressed: _busy
               ? null
               : () {
-                  final amount = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
-                  if (amount <= 0 || amount > rest + 0.01) return;
+                  final parsed = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+                  if (parsed <= 0) {
+                    AppToast.error(context, 'Indiquez un montant valide.');
+                    return;
+                  }
                   _submit();
                 },
           child: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Valider'),

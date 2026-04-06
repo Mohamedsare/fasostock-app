@@ -14,6 +14,10 @@ class ProductImagesRealtimeSync {
   final ProductsOfflineRepository _productsOffline;
   RealtimeChannel? _channel;
   final Map<String, Timer> _debounceByProduct = {};
+  Timer? _reconnectTimer;
+  int _reconnectAttempt = 0;
+  bool _stopped = true;
+  static const int _maxReconnectBackoffSeconds = 30;
 
   static const Duration _debounce = Duration(milliseconds: 280);
 
@@ -26,10 +30,13 @@ class ProductImagesRealtimeSync {
   }
 
   static const RealtimeChannelConfig _channelConfig = RealtimeChannelConfig(
-    private: true,
+    private: false,
   );
 
   Future<void> start() async {
+    _stopped = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     if (_channel != null) return;
     final client = Supabase.instance.client;
     final uid = client.auth.currentUser?.id;
@@ -58,8 +65,14 @@ class ProductImagesRealtimeSync {
           callback: _onPayload,
         )
         .subscribe((status, [error]) {
+          final statusText = status.toString().toLowerCase();
           if (kDebugMode) {
             debugPrint('[ProductImagesRealtime] $status ${error ?? ''}');
+          }
+          if (statusText.contains('subscribed')) {
+            _reconnectAttempt = 0;
+            _reconnectTimer?.cancel();
+            _reconnectTimer = null;
           }
           if (error != null) {
             if (_isChannelPermissionError(error)) {
@@ -80,8 +93,40 @@ class ProductImagesRealtimeSync {
               logSource: 'product_images_realtime',
               logContext: {'channel_status': status.toString()},
             );
+            _scheduleReconnect('error');
+            return;
+          }
+          if (statusText.contains('closed') ||
+              statusText.contains('timedout') ||
+              statusText.contains('channelerror')) {
+            _scheduleReconnect(status.toString());
           }
         });
+  }
+
+  void _scheduleReconnect(String reason) {
+    if (_stopped) return;
+    if (_reconnectTimer != null) return;
+    final attempt = _reconnectAttempt;
+    final powSeconds = 1 << (attempt > 5 ? 5 : attempt);
+    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final jitterMs = DateTime.now().millisecond % 400;
+    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
+      _reconnectTimer = null;
+      if (_stopped) return;
+      _reconnectAttempt = _reconnectAttempt + 1;
+      final c = _channel;
+      _channel = null;
+      if (c != null) {
+        try {
+          await Supabase.instance.client.removeChannel(c);
+        } catch (_) {}
+      }
+      if (kDebugMode) {
+        debugPrint('[ProductImagesRealtime] reconnect attempt=$_reconnectAttempt reason=$reason');
+      }
+      await start();
+    });
   }
 
   void _scheduleRefreshForProduct(String? productId) {
@@ -121,6 +166,10 @@ class ProductImagesRealtimeSync {
   }
 
   Future<void> stop() async {
+    _stopped = true;
+    _reconnectAttempt = 0;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     for (final t in _debounceByProduct.values) {
       t.cancel();
     }
