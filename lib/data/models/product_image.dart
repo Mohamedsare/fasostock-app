@@ -1,3 +1,12 @@
+/// URL vignette catalogue : image avec le plus petit [position] (aligné `order('position')` REST).
+String? primaryProductImageUrl(Iterable<ProductImage> images) {
+  final list = images.toList();
+  if (list.isEmpty) return null;
+  list.sort((a, b) => a.position.compareTo(b.position));
+  final u = list.first.url.trim();
+  return u.isEmpty ? null : u;
+}
+
 /// Image produit — table product_images.
 class ProductImage {
   const ProductImage({

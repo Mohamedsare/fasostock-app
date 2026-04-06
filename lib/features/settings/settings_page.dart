@@ -52,6 +52,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   String? _profileError;
   String? _passwordError;
   bool _uploadingCompanyLogo = false;
+  bool _invoiceTablePosLoading = false;
+  bool _invoiceTablePosEnabled = false;
+  String? _invoiceTablePosSyncedCompanyId;
 
   @override
   void initState() {
@@ -60,6 +63,73 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       if (!mounted) return;
       _syncProfile();
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncInvoiceTablePosSetting();
+  }
+
+  Future<void> _syncInvoiceTablePosSetting() async {
+    final permissions = context.read<PermissionsProvider>();
+    final company = context.read<CompanyProvider>();
+    final cid = company.currentCompanyId;
+    if (!permissions.isOwner || cid == null) {
+      if (mounted && _invoiceTablePosSyncedCompanyId != null) {
+        setState(() {
+          _invoiceTablePosSyncedCompanyId = null;
+          _invoiceTablePosEnabled = false;
+          _invoiceTablePosLoading = false;
+        });
+      }
+      return;
+    }
+    if (cid == _invoiceTablePosSyncedCompanyId) return;
+    _invoiceTablePosSyncedCompanyId = cid;
+    setState(() => _invoiceTablePosLoading = true);
+    try {
+      final v = await _repo.getInvoiceTablePosEnabled(cid);
+      if (!mounted) return;
+      if (context.read<CompanyProvider>().currentCompanyId != cid) return;
+      setState(() {
+        _invoiceTablePosEnabled = v;
+        _invoiceTablePosLoading = false;
+      });
+    } catch (e, st) {
+      AppErrorHandler.log('Settings.invoiceTablePos: $e', st);
+      if (!mounted) return;
+      setState(() => _invoiceTablePosLoading = false);
+    }
+  }
+
+  Future<void> _setInvoiceTablePosEnabled(bool value) async {
+    final company = context.read<CompanyProvider>();
+    final cid = company.currentCompanyId;
+    if (cid == null) return;
+    setState(() => _invoiceTablePosLoading = true);
+    try {
+      await _repo.setInvoiceTablePosEnabled(cid, value);
+      if (!mounted) return;
+      setState(() {
+        _invoiceTablePosEnabled = value;
+        _invoiceTablePosLoading = false;
+      });
+      if (mounted) {
+        AppToast.success(
+          context,
+          value
+              ? 'Mode facture (tableau) activé pour l’entreprise. Accordez le droit aux utilisateurs dans Utilisateurs.'
+              : 'Mode facture (tableau) désactivé.',
+        );
+      }
+    } catch (e, st) {
+      AppErrorHandler.log('Settings.setInvoiceTablePos: $e', st);
+      if (mounted) {
+        setState(() => _invoiceTablePosLoading = false);
+        AppToast.error(context, AppErrorHandler.toUserMessage(e));
+      }
+    }
   }
 
   @override
@@ -147,9 +217,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     if (!permissions.hasLoaded || auth.loading) {
-      return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Paramètres')),
-        body: const Center(child: CircularProgressIndicator()),
+      return const Scaffold(
+        appBar: null,
+        body: Center(child: CircularProgressIndicator()),
       );
     }
     if (permissions.isCashier) {
@@ -163,13 +233,30 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     }
     if (company.currentCompanyId != null && !permissions.hasPermission(Permissions.settingsManage)) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Paramètres')),
-        body: Center(child: _buildNoAccessCard(context)),
+        appBar: isWide ? AppBar(title: const Text('Paramètres')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Paramètres',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _buildNoAccessCard(context),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Paramètres')),
+      appBar: null,
       body: SingleChildScrollView(
         padding: EdgeInsets.symmetric(
           horizontal: isWide ? 32 : 20,
@@ -186,6 +273,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             const SizedBox(height: 20),
             _buildPosCartCard(context, _PosCartQuantitySection.invoiceA4),
             const SizedBox(height: 20),
+            if (permissions.isOwner && company.currentCompanyId != null) ...[
+              _buildInvoiceTablePosCard(context, company.currentCompanyId!),
+              const SizedBox(height: 20),
+            ],
             _buildProfileCard(context, auth),
             const SizedBox(height: 20),
             _buildAccountCard(context, auth),
@@ -350,12 +441,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.shopping_cart_rounded, size: 22, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
-                Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -384,6 +480,69 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               onChanged: (v) => setButtons(v),
               contentPadding: EdgeInsets.zero,
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInvoiceTablePosCard(BuildContext context, String companyId) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: theme.dividerColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.table_rows_rounded, size: 22, color: theme.colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Facture A4 — vue tableau',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Deuxième écran de caisse facture : les lignes du panier s’affichent comme sur une facture (tableau). '
+              'Le PDF A4 généré est identique au mode facture classique. '
+              'Une fois activé ici, accordez le droit « POS facture A4 (vue tableau) » aux utilisateurs concernés dans Utilisateurs.',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            if (_invoiceTablePosLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else
+              SwitchListTile(
+                title: const Text('Activer l’entrée « Facture tab. » sur les boutiques'),
+                subtitle: Text(
+                  _invoiceTablePosEnabled
+                      ? 'Les utilisateurs autorisés voient le raccourci sur chaque carte boutique.'
+                      : 'Désactivé : personne n’accède au mode tableau (même avec le droit utilisateur).',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                value: _invoiceTablePosEnabled,
+                onChanged: _invoiceTablePosLoading ? null : (v) => _setInvoiceTablePosEnabled(v),
+                contentPadding: EdgeInsets.zero,
+              ),
           ],
         ),
       ),
@@ -929,12 +1088,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.security_rounded, size: 22, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
-                Text(
-                  'Authentification à deux facteurs (2FA)',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                Expanded(
+                  child: Text(
+                    'Authentification à deux facteurs (2FA)',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -982,12 +1146,17 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.card_membership_rounded, size: 22, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
-                Text(
-                  'Abonnement',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                Expanded(
+                  child: Text(
+                    'Abonnement',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ],
             ),
@@ -1049,14 +1218,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.warning_rounded, size: 22, color: danger),
                 const SizedBox(width: 10),
-                Text(
-                  'Vider historiques entreprise',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: danger,
+                Expanded(
+                  child: Text(
+                    'Vider historiques entreprise',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: danger,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -1110,14 +1284,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Icon(Icons.warehouse_rounded, size: 18, color: danger),
                       const SizedBox(width: 8),
-                      Text(
-                        'Magasin (dépôt)',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: danger,
+                      Expanded(
+                        child: Text(
+                          'Magasin (dépôt)',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: danger,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],

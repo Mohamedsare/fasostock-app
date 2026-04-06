@@ -165,13 +165,20 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Fournisseurs')),
+        appBar: isWide ? AppBar(title: const Text('Fournisseurs')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!isWide) ...[
+                  Text(
+                    'Fournisseurs',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Icon(Icons.error_outline_rounded, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(company.loadError!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -183,13 +190,30 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Fournisseurs')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l\'administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Fournisseurs')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Fournisseurs',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l\'administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Fournisseurs')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refreshSync,
         child: SingleChildScrollView(

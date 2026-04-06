@@ -131,19 +131,43 @@ class _IntegrationsPageState extends State<IntegrationsPage> {
     context.watch<CompanyProvider>();
     if (!permissions.isOwner) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Intégrations')),
-        body: const Center(child: Text('Réservé au propriétaire de l\'entreprise.')),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Intégrations',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 16),
+                const Text('Réservé au propriétaire de l\'entreprise.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Intégrations')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              'Intégrations',
+              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Clés API, webhooks et connexions externes.',
+              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 24),
             Text(
               'Clés API',
               style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),

@@ -134,6 +134,10 @@ class SyncServiceV2 {
             await _pushWarehouseExitSale(payload);
           } else if (kind == 'warehouse_set_threshold') {
             await _pushWarehouseSetThreshold(payload);
+          } else if (kind == 'credit_append_payment') {
+            await _pushCreditAppendPayment(payload);
+          } else if (kind == 'credit_update_meta') {
+            await _pushCreditUpdateMeta(payload);
           } else {
             handled = false;
           }
@@ -486,6 +490,8 @@ class SyncServiceV2 {
             updatedAt: sale.updatedAt,
             saleMode: Value(sale.saleMode?.value),
             documentType: Value(sale.documentType?.value),
+            creditDueAt: Value(sale.creditDueAt),
+            creditInternalNote: Value(sale.creditInternalNote),
           ),
         );
         final items = await _salesRepo.getItems(sale.id);
@@ -503,6 +509,13 @@ class SyncServiceV2 {
               ),
             ),
           );
+        }
+        try {
+          final pays = await _salesRepo.getPayments(sale.id);
+          await _db.replaceLocalSalePaymentsFromModels(sale.id, pays, now);
+        } catch (e, st) {
+          if (kDebugMode) debugPrint('[Sync] pull sale_payments ${sale.id}: $e');
+          AppErrorHandler.log('SyncV2.pull sale_payments saleId=${sale.id}: $e', st);
         }
       }
     } catch (e, st) {
@@ -1050,6 +1063,46 @@ class SyncServiceV2 {
       subtotal += (qty * unitPrice) - lineDiscount;
     }
     return (subtotal - discount).clamp(0.0, double.infinity).toDouble();
+  }
+
+  Future<void> _pushCreditAppendPayment(Map<String, dynamic> payload) async {
+    final saleId = payload['sale_id'] as String?;
+    final method = payload['method'] as String?;
+    if (saleId == null || saleId.isEmpty || method == null || method.isEmpty) {
+      throw ArgumentError('credit_append_payment: sale_id et method requis');
+    }
+    final amount = (payload['amount'] is num) ? (payload['amount'] as num).toDouble() : 0;
+    if (amount <= 0) throw ArgumentError('credit_append_payment: montant invalide');
+    final client = Supabase.instance.client;
+    await client.rpc('append_sale_payment', params: {
+      'p_sale_id': saleId,
+      'p_method': method,
+      'p_amount': amount,
+      'p_reference': payload['reference'],
+    });
+    final now = DateTime.now().toUtc().toIso8601String();
+    final pays = await _salesRepo.getPayments(saleId);
+    await _db.replaceLocalSalePaymentsFromModels(saleId, pays, now);
+  }
+
+  Future<void> _pushCreditUpdateMeta(Map<String, dynamic> payload) async {
+    final saleId = payload['sale_id'] as String?;
+    if (saleId == null || saleId.isEmpty) {
+      throw ArgumentError('credit_update_meta: sale_id requis');
+    }
+    final due = payload['credit_due_at'] as String?;
+    final noteRaw = payload['credit_internal_note'];
+    final note = noteRaw is String ? noteRaw : null;
+    final trimmedNote = note == null
+        ? null
+        : (note.trim().isEmpty ? null : note.trim());
+    final client = Supabase.instance.client;
+    await client.from('sales').update({
+      'credit_due_at': due,
+      'credit_internal_note': trimmedNote,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', saleId);
+    await _db.updateLocalSaleCreditMeta(saleId, due, trimmedNote);
   }
 
   bool _isRetryDue(int pendingId, int? updatedAtEpochMs) {

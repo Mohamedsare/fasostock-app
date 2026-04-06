@@ -21,7 +21,8 @@ class PosCartItem {
   final String? sku;
   String unit;
   int quantity;
-  final double unitPrice;
+  /// Prix unitaire réellement facturé (modifiable au POS facture-tab) — source des rapports via [total].
+  double unitPrice;
   double total;
   final String? imageUrl;
 }

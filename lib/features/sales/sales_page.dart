@@ -15,6 +15,7 @@ import '../../../core/utils/app_toast.dart';
 import '../../../data/models/sale.dart';
 import '../../../data/models/store.dart';
 import '../../../data/repositories/sales_repository.dart';
+import '../../../data/repositories/settings_repository.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
@@ -60,7 +61,9 @@ Widget _documentTypeChip(Sale s, BuildContext context) {
         Icon(
           isA4 ? Icons.description_rounded : Icons.receipt_long_rounded,
           size: 14,
-          color: isA4 ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant,
+          color: isA4
+              ? theme.colorScheme.onPrimaryContainer
+              : theme.colorScheme.onSurfaceVariant,
         ),
         const SizedBox(width: 4),
         Text(
@@ -68,7 +71,9 @@ Widget _documentTypeChip(Sale s, BuildContext context) {
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isA4 ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onSurfaceVariant,
+            color: isA4
+                ? theme.colorScheme.onPrimaryContainer
+                : theme.colorScheme.onSurfaceVariant,
           ),
         ),
       ],
@@ -98,6 +103,7 @@ const int _salesPageSize = 20;
 class _SalesPageState extends ConsumerState<SalesPage> {
   final SalesRepository _repo = SalesRepository();
   final Set<String> _cancelSaleInFlight = {};
+  final Set<String> _purgeCancelledInFlight = {};
   bool _syncTriggeredForEmpty = false;
   int _currentPage = 0;
   String _lastFilterKey = '';
@@ -105,6 +111,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   final TextEditingController _salesSearchController = TextEditingController();
   Timer? _searchDebounce;
   bool _searchDebouncing = false;
+  bool _invoiceTablePosEnabled = false;
+  String? _invoiceTableLoadedForCompanyId;
 
   @override
   void initState() {
@@ -124,7 +132,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
-      context.read<SalesPageProvider>().setSearchQuery(_salesSearchController.text);
+      context.read<SalesPageProvider>().setSearchQuery(
+        _salesSearchController.text,
+      );
       if (mounted) setState(() => _searchDebouncing = false);
     });
   }
@@ -140,17 +150,21 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       final companyId = context.read<CompanyProvider>().currentCompanyId;
       if (companyId == null) return;
       final provider = context.read<SalesPageProvider>();
-      final storeId = provider.filterStoreId.isEmpty ? null : provider.filterStoreId;
+      final storeId = provider.filterStoreId.isEmpty
+          ? null
+          : provider.filterStoreId;
       unawaited(
-        ref.read(syncServiceV2Provider).pullSalesFromServer(
-              companyId: companyId,
-              storeId: storeId,
-            ),
+        ref
+            .read(syncServiceV2Provider)
+            .pullSalesFromServer(companyId: companyId, storeId: storeId),
       );
     }
 
     pullSalesList();
-    _salesListRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) => pullSalesList());
+    _salesListRefreshTimer = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => pullSalesList(),
+    );
   }
 
   @override
@@ -177,7 +191,29 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     final currentStoreId = context.read<CompanyProvider>().currentStoreId;
     final provider = context.read<SalesPageProvider>();
-    if (companyId != null) {
+    if (companyId == null) {
+      if (_invoiceTableLoadedForCompanyId != null) {
+        setState(() {
+          _invoiceTableLoadedForCompanyId = null;
+          _invoiceTablePosEnabled = false;
+        });
+      }
+    } else {
+      if (companyId != _invoiceTableLoadedForCompanyId) {
+        _invoiceTableLoadedForCompanyId = companyId;
+        final cached = SettingsRepository.peekInvoiceTablePosEnabled(companyId);
+        if (cached != null) {
+          final showTable = cached;
+          setState(() => _invoiceTablePosEnabled = showTable);
+        }
+        SettingsRepository().getInvoiceTablePosEnabled(companyId).then((v) {
+          if (!mounted) return;
+          if (context.read<CompanyProvider>().currentCompanyId != companyId) {
+            return;
+          }
+          setState(() => _invoiceTablePosEnabled = v);
+        });
+      }
       if (provider.filterStoreId.isEmpty && currentStoreId != null) {
         provider.setFilters(storeId: currentStoreId);
       }
@@ -191,7 +227,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final userId = auth.user?.id;
     if (userId != null) {
       try {
-        await ref.read(syncServiceV2Provider).sync(userId: userId, companyId: company.currentCompanyId, storeId: company.currentStoreId);
+        await ref
+            .read(syncServiceV2Provider)
+            .sync(
+              userId: userId,
+              companyId: company.currentCompanyId,
+              storeId: company.currentStoreId,
+            );
       } catch (_) {}
     }
   }
@@ -208,8 +250,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
   void _openEditSale(Sale sale) {
     context.read<CompanyProvider>().setCurrentStoreId(sale.storeId);
-    final base =
-        saleOpensOnInvoicePosScreen(sale) ? AppRoutes.pos(sale.storeId) : AppRoutes.posQuick(sale.storeId);
+    final base = saleOpensOnInvoicePosScreen(sale)
+        ? AppRoutes.pos(sale.storeId)
+        : AppRoutes.posQuick(sale.storeId);
     context.go('$base?${saleEditQuery(sale.id)}');
   }
 
@@ -218,7 +261,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     if (e is! PostgrestException) return false;
     if (e.code?.toString().toUpperCase() != 'P0001') return false;
     final m = e.message;
-    return m.contains('Vente déjà annulée') || m.toLowerCase().contains('vente deja annulee');
+    return m.contains('Vente déjà annulée') ||
+        m.toLowerCase().contains('vente deja annulee');
   }
 
   Future<void> _cancelSale(Sale sale) async {
@@ -228,12 +272,19 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         context: context,
         builder: (ctx) => AlertDialog(
           title: const Text('Annuler cette vente ?'),
-          content: const Text('Le stock sera rétabli. Cette action est irréversible.'),
+          content: const Text(
+            'Le stock sera rétabli. Cette action est irréversible.',
+          ),
           actions: [
-            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Non')),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Non'),
+            ),
             FilledButton(
               onPressed: () => Navigator.of(ctx).pop(true),
-              style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error,
+              ),
               child: const Text('Oui, annuler'),
             ),
           ],
@@ -249,11 +300,15 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       try {
         await _repo.cancel(sale.id);
         if (!mounted) return;
-        await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
+        await ref
+            .read(appDatabaseProvider)
+            .updateLocalSaleStatus(sale.id, 'cancelled');
         if (!mounted) return;
         // Indispensable : [sync] peut être no-op si une sync est déjà en cours (_isSyncing) ;
         // le stock serveur a pourtant déjà changé après le RPC — tirage ciblé immédiat.
-        await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([sale.storeId]);
+        await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([
+          sale.storeId,
+        ]);
         if (!mounted) return;
         ref.invalidate(inventoryQuantitiesStreamProvider(sale.storeId));
         ref.invalidate(salesStreamProvider(params));
@@ -269,10 +324,14 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   .read(appDatabaseProvider)
                   .updateLocalSaleStatus(sale.id, serverSale.status.value);
             } else {
-              await ref.read(appDatabaseProvider).updateLocalSaleStatus(sale.id, 'cancelled');
+              await ref
+                  .read(appDatabaseProvider)
+                  .updateLocalSaleStatus(sale.id, 'cancelled');
             }
             if (!mounted) return;
-            await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([sale.storeId]);
+            await ref
+                .read(syncServiceV2Provider)
+                .pullInventoryQuantitiesForStores([sale.storeId]);
             if (!mounted) return;
             ref.invalidate(inventoryQuantitiesStreamProvider(sale.storeId));
             ref.invalidate(salesStreamProvider(params));
@@ -292,6 +351,60 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       }
     } finally {
       _cancelSaleInFlight.remove(sale.id);
+    }
+  }
+
+  Future<void> _purgeCancelledSale(Sale sale) async {
+    if (sale.status != SaleStatus.cancelled) return;
+    if (!_purgeCancelledInFlight.add(sale.id)) return;
+    try {
+      final companyId = context.read<CompanyProvider>().currentCompanyId;
+      if (companyId == null || companyId.isEmpty || !mounted) return;
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Retirer cette vente de l\'historique ?'),
+          content: Text(
+            'La vente ${sale.saleNumber} est déjà annulée. Cette suppression est irréversible.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Non'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(ctx).colorScheme.error,
+              ),
+              child: const Text('Oui, supprimer'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+      await _repo.purgeCancelledAsOwner(
+        companyId: companyId,
+        saleNumber: sale.saleNumber,
+      );
+      if (!mounted) return;
+      final db = ref.read(appDatabaseProvider);
+      await db.deleteLocalSaleItemsBySaleId(sale.id);
+      await db.deleteLocalSale(sale.id);
+      if (!mounted) return;
+      final provider = context.read<SalesPageProvider>();
+      final storeIdForStream = provider.filterStoreId.isEmpty
+          ? null
+          : provider.filterStoreId;
+      ref.invalidate(
+        salesStreamProvider((companyId: companyId, storeId: storeIdForStream)),
+      );
+      Future.microtask(() => _refresh());
+      if (mounted) AppToast.success(context, 'Vente retirée de l\'historique.');
+    } catch (e) {
+      if (mounted) AppErrorHandler.show(context, e);
+    } finally {
+      _purgeCancelledInFlight.remove(sale.id);
     }
   }
 
@@ -332,10 +445,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       }).toList();
     }
     if (provider.filterFrom.isNotEmpty) {
-      list = list.where((s) => s.createdAt.compareTo(provider.filterFrom) >= 0).toList();
+      list = list
+          .where((s) => s.createdAt.compareTo(provider.filterFrom) >= 0)
+          .toList();
     }
     if (provider.filterTo.isNotEmpty) {
-      list = list.where((s) => s.createdAt.compareTo('${provider.filterTo}T23:59:59.999Z') <= 0).toList();
+      list = list
+          .where(
+            (s) =>
+                s.createdAt.compareTo('${provider.filterTo}T23:59:59.999Z') <=
+                0,
+          )
+          .toList();
     }
     return list;
   }
@@ -363,7 +484,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final permissions = context.watch<PermissionsProvider>();
     final provider = context.watch<SalesPageProvider>();
     final companyId = company.currentCompanyId;
-    final canAccessSales = permissions.hasPermission(Permissions.salesView) ||
+    final canAccessSales =
+        permissions.hasPermission(Permissions.salesView) ||
         permissions.hasPermission(Permissions.salesCreate) ||
         permissions.hasPermission(Permissions.salesInvoiceA4) ||
         permissions.hasPermission(Permissions.salesUpdate);
@@ -374,21 +496,38 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_rounded, size: 64, color: Theme.of(context).colorScheme.error),
+              Icon(
+                Icons.lock_rounded,
+                size: 64,
+                color: Theme.of(context).colorScheme.error,
+              ),
               const SizedBox(height: 16),
-              Text("Vous n'avez pas accès à cette page.", textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyLarge),
+              Text(
+                "Vous n'avez pas accès à cette page.",
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
             ],
           ),
         ),
       );
     }
 
-    final storeIdForStream = provider.filterStoreId.isEmpty ? null : provider.filterStoreId;
-    final asyncSales = ref.watch(salesStreamProvider((companyId: companyId ?? '', storeId: storeIdForStream)));
+    final storeIdForStream = provider.filterStoreId.isEmpty
+        ? null
+        : provider.filterStoreId;
+    final asyncSales = ref.watch(
+      salesStreamProvider((
+        companyId: companyId ?? '',
+        storeId: storeIdForStream,
+      )),
+    );
     final sales = asyncSales.valueOrNull ?? [];
     final filtered = _applyFilters(sales, provider);
     final totalCount = filtered.length;
-    final pageCount = totalCount == 0 ? 0 : ((totalCount - 1) ~/ _salesPageSize) + 1;
+    final pageCount = totalCount == 0
+        ? 0
+        : ((totalCount - 1) ~/ _salesPageSize) + 1;
     final filterKey =
         '${provider.filterStoreId}|${provider.filterStatus}|${provider.filterFrom}|${provider.filterTo}|${provider.filterSearch}|${provider.filterCashierUserId ?? ''}';
     if (filterKey != _lastFilterKey) {
@@ -397,13 +536,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         if (mounted) setState(() => _currentPage = 0);
       });
     }
-    final effectivePage = pageCount > 0 && _currentPage >= pageCount ? pageCount - 1 : _currentPage;
+    final effectivePage = pageCount > 0 && _currentPage >= pageCount
+        ? pageCount - 1
+        : _currentPage;
     if (effectivePage != _currentPage) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _currentPage = effectivePage);
       });
     }
-    final paginatedList = filtered.skip(effectivePage * _salesPageSize).take(_salesPageSize).toList();
+    final paginatedList = filtered
+        .skip(effectivePage * _salesPageSize)
+        .take(_salesPageSize)
+        .toList();
     final loading = asyncSales.isLoading;
     final error = asyncSales.hasError && asyncSales.error != null
         ? AppErrorHandler.toUserMessage(asyncSales.error)
@@ -413,7 +557,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final stores = company.stores;
     Store? currentStore;
     try {
-      currentStore = currentStoreId != null ? stores.firstWhere((s) => s.id == currentStoreId) : null;
+      currentStore = currentStoreId != null
+          ? stores.firstWhere((s) => s.id == currentStoreId)
+          : null;
     } catch (_) {}
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
@@ -424,31 +570,54 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       return CompanyLoadErrorScreen(
         message: company.loadError!,
         title: 'Ventes',
-        appBar: isWide ? null : AppBar(title: const Text('Ventes')),
       );
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Ventes')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l’administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Ventes')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Ventes',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l’administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
     if (sales.isEmpty && !loading && error == null && !_syncTriggeredForEmpty) {
       _syncTriggeredForEmpty = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _refresh(); });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refresh();
+      });
     }
     if (sales.isNotEmpty) _syncTriggeredForEmpty = false;
 
-    final description = currentStore != null ? 'Ventes — ${currentStore.name}' : 'Sélectionnez une boutique';
+    final description = currentStore != null
+        ? 'Ventes — ${currentStore.name}'
+        : 'Sélectionnez une boutique';
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Ventes')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.symmetric(horizontal: isWide ? 32 : 20, vertical: isWide ? 28 : 20),
+          padding: EdgeInsets.symmetric(
+            horizontal: isWide ? 32 : 20,
+            vertical: isWide ? 28 : 20,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -466,7 +635,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        Text(
+                          error,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         TextButton.icon(
                           onPressed: _refresh,
@@ -487,10 +661,21 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               else if (filtered.isEmpty)
                 _buildEmptyState(context)
               else ...[
-                _buildSalesList(context, isWide, paginatedList, permissions.hasPermission(Permissions.salesUpdate)),
+                _buildSalesList(
+                  context,
+                  isWide,
+                  paginatedList,
+                  permissions.hasPermission(Permissions.salesUpdate),
+                  permissions.isOwner ? _purgeCancelledSale : null,
+                ),
                 if (pageCount > 1) ...[
                   const SizedBox(height: 16),
-                  _buildPagination(context, totalCount, pageCount, effectivePage),
+                  _buildPagination(
+                    context,
+                    totalCount,
+                    pageCount,
+                    effectivePage,
+                  ),
                 ],
               ],
             ],
@@ -500,12 +685,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  Widget _buildHeader(BuildContext context, String description, int salesCount, List<Sale> salesForExport) {
+  Widget _buildHeader(
+    BuildContext context,
+    String description,
+    int salesCount,
+    List<Sale> salesForExport,
+  ) {
     final theme = Theme.of(context);
     final narrow = MediaQuery.sizeOf(context).width < 560;
     final permissions = context.read<PermissionsProvider>();
     final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
-    final filledBtn = canCreateSale && context.read<CompanyProvider>().currentStoreId != null
+    final filledBtn =
+        canCreateSale && context.read<CompanyProvider>().currentStoreId != null
         ? FilledButton.icon(
             onPressed: () {
               final id = context.read<CompanyProvider>().currentStoreId;
@@ -581,10 +772,20 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           );
   }
 
-  Widget _buildActions(BuildContext context, String? currentStoreId, int salesCount, List<Sale> salesForExport) {
+  Widget _buildActions(
+    BuildContext context,
+    String? currentStoreId,
+    int salesCount,
+    List<Sale> salesForExport,
+  ) {
     final permissions = context.read<PermissionsProvider>();
     final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
     final canInvoiceA4 = permissions.hasPermission(Permissions.salesInvoiceA4);
+    final canPosInvoice = canInvoiceA4 || canCreateSale;
+    final canFactureTab =
+        _invoiceTablePosEnabled &&
+        permissions.hasPermission(Permissions.salesInvoiceA4Table) &&
+        canPosInvoice;
     final width = MediaQuery.sizeOf(context).width;
     final isMobile = width < 600;
     const double gap = 12.0;
@@ -611,6 +812,17 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               ? () => context.go(AppRoutes.pos(currentStoreId))
               : null,
         ),
+      if (canFactureTab)
+        _ActionCard(
+          icon: Icons.table_chart_rounded,
+          title: 'Facture A4 (tableau)',
+          subtitle: 'Bandeau + tableau',
+          accent: true,
+          enabled: currentStoreId != null,
+          onTap: currentStoreId != null
+              ? () => context.go(AppRoutes.factureTab(currentStoreId))
+              : null,
+        ),
       _ActionCard(
         icon: Icons.shopping_cart_rounded,
         title: 'Historique des ventes',
@@ -633,17 +845,23 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       );
     }
 
-    final spacing = width < 500 ? gap : 20.0;
-    return Row(
-      children: [
-        Expanded(child: cards[0]),
-        if (canInvoiceA4) ...[
-          SizedBox(width: spacing),
-          Expanded(child: cards[1]),
-        ],
-        SizedBox(width: spacing),
-        Expanded(child: cards.last),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        final spacing = width < 900 ? gap : 20.0;
+        final n = cards.length;
+        var cols = n;
+        if (n >= 4 && maxW < 1100) cols = 2;
+        if (n == 3 && maxW < 640) cols = 1;
+        final cardW = (maxW - spacing * (cols - 1)) / cols;
+        return Wrap(
+          spacing: spacing,
+          runSpacing: gap,
+          children: [
+            for (final card in cards) SizedBox(width: cardW, child: card),
+          ],
+        );
+      },
     );
   }
 
@@ -657,13 +875,15 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final isMobileFilters = MediaQuery.sizeOf(context).width < 500;
     final seenStoreIds = <String>{};
     final distinctStores = stores.where((s) => seenStoreIds.add(s.id)).toList();
-    final storeValue = provider.filterStoreId.isNotEmpty &&
+    final storeValue =
+        provider.filterStoreId.isNotEmpty &&
             distinctStores.any((s) => s.id == provider.filterStoreId)
         ? provider.filterStoreId
         : null;
     final cashiers = _cashierOptionsFromSales(rawSales);
     final cashierIds = cashiers.map((e) => e.key).toSet();
-    final cashierValue = provider.filterCashierUserId != null &&
+    final cashierValue =
+        provider.filterCashierUserId != null &&
             provider.filterCashierUserId!.isNotEmpty &&
             cashierIds.contains(provider.filterCashierUserId)
         ? provider.filterCashierUserId
@@ -704,11 +924,17 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               controller: _salesSearchController,
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(
-                hintText: 'Recherche : nº vente, client, caissier, boutique, montant…',
+                hintText:
+                    'Recherche : nº vente, client, caissier, boutique, montant…',
                 prefixIcon: const Icon(Icons.search_rounded),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 suffixIcon: _salesSearchController.text.isEmpty
                     ? null
                     : IconButton(
@@ -744,12 +970,20 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       labelText: 'Boutique',
                     ),
                     items: [
-                      const DropdownMenuItem<String?>(value: null, child: Text('Toutes boutiques')),
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Toutes boutiques'),
+                      ),
                       ...distinctStores.map(
                         (s) => DropdownMenuItem<String?>(
                           value: s.id,
@@ -770,8 +1004,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       labelText: 'Caissier',
                     ),
                     items: [
@@ -797,12 +1036,20 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                       labelText: 'Statut',
                     ),
                     items: [
-                      const DropdownMenuItem<SaleStatus?>(value: null, child: Text('Tous')),
+                      const DropdownMenuItem<SaleStatus?>(
+                        value: null,
+                        child: Text('Tous'),
+                      ),
                       ...SaleStatus.values.map(
                         (s) => DropdownMenuItem<SaleStatus?>(
                           value: s,
@@ -860,16 +1107,24 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
         child: Column(
           children: [
-            Icon(Icons.shopping_cart_outlined, size: 56, color: theme.colorScheme.outline),
+            Icon(
+              Icons.shopping_cart_outlined,
+              size: 56,
+              color: theme.colorScheme.outline,
+            ),
             const SizedBox(height: 16),
             Text(
               'Aucune vente',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               'Créez une vente depuis le POS en sélectionnant une boutique.',
-              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               textAlign: TextAlign.center,
             ),
             if (context.read<CompanyProvider>().currentStoreId != null) ...[
@@ -889,13 +1144,20 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  Widget _buildSalesList(BuildContext context, bool isWide, List<Sale> sales, bool canEditSale) {
+  Widget _buildSalesList(
+    BuildContext context,
+    bool isWide,
+    List<Sale> sales,
+    bool canEditSale,
+    Future<void> Function(Sale)? onPurgeCancelled,
+  ) {
     if (isWide) {
       return _SalesTable(
         sales: sales,
         onView: _openDetail,
         onEdit: canEditSale ? _openEditSale : null,
         onCancel: _cancelSale,
+        onPurgeCancelled: onPurgeCancelled,
       );
     }
     return _SalesCardList(
@@ -903,20 +1165,27 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       onView: _openDetail,
       onEdit: canEditSale ? _openEditSale : null,
       onCancel: _cancelSale,
+      onPurgeCancelled: onPurgeCancelled,
     );
   }
 
-  Widget _buildPagination(BuildContext context, int totalCount, int pageCount, int currentPageIndex) {
+  Widget _buildPagination(
+    BuildContext context,
+    int totalCount,
+    int pageCount,
+    int currentPageIndex,
+  ) {
     final theme = Theme.of(context);
     final start = currentPageIndex * _salesPageSize + 1;
     final end = (currentPageIndex + 1) * _salesPageSize;
     final endClamped = end > totalCount ? totalCount : end;
     final isNarrow = MediaQuery.sizeOf(context).width < 500;
+    final padH = isNarrow ? 10.0 : 16.0;
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: padH, vertical: 12),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -925,38 +1194,80 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 padding: const EdgeInsets.only(right: 16),
                 child: Text(
                   '$start – $endClamped sur $totalCount',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             IconButton.filled(
-              onPressed: currentPageIndex > 0 ? () => setState(() => _currentPage--) : null,
+              onPressed: currentPageIndex > 0
+                  ? () => setState(() => _currentPage--)
+                  : null,
               icon: const Icon(Icons.chevron_left_rounded, size: 26),
               style: IconButton.styleFrom(
-                backgroundColor: currentPageIndex > 0 ? theme.colorScheme.primary : null,
-                foregroundColor: currentPageIndex > 0 ? theme.colorScheme.onPrimary : null,
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: currentPageIndex > 0
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: currentPageIndex > 0
+                    ? theme.colorScheme.onPrimary
+                    : null,
               ),
             ),
-            const SizedBox(width: 12),
-            Text(
-              'Page ${currentPageIndex + 1} / $pageCount',
-              style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(width: 12),
-            IconButton.filled(
-              onPressed: currentPageIndex < pageCount - 1 ? () => setState(() => _currentPage++) : null,
-              icon: const Icon(Icons.chevron_right_rounded, size: 26),
-              style: IconButton.styleFrom(
-                backgroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.primary : null,
-                foregroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.onPrimary : null,
-              ),
-            ),
-            if (isNarrow) ...[
-              const SizedBox(width: 12),
+            SizedBox(width: isNarrow ? 6 : 12),
+            if (isNarrow)
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Page ${currentPageIndex + 1} / $pageCount',
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$start – $endClamped / $totalCount',
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else ...[
               Text(
-                '$start – $endClamped / $totalCount',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                'Page ${currentPageIndex + 1} / $pageCount',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
+            SizedBox(width: isNarrow ? 6 : 12),
+            IconButton.filled(
+              onPressed: currentPageIndex < pageCount - 1
+                  ? () => setState(() => _currentPage++)
+                  : null,
+              icon: const Icon(Icons.chevron_right_rounded, size: 26),
+              style: IconButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                backgroundColor: currentPageIndex < pageCount - 1
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: currentPageIndex < pageCount - 1
+                    ? theme.colorScheme.onPrimary
+                    : null,
+              ),
+            ),
           ],
         ),
       ),
@@ -992,7 +1303,10 @@ class _ActionCard extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: accent && enabled
-            ? BorderSide(color: theme.colorScheme.primary.withValues(alpha: 0.4), width: 2)
+            ? BorderSide(
+                color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                width: 2,
+              )
             : BorderSide.none,
       ),
       child: Material(
@@ -1012,13 +1326,19 @@ class _ActionCard extends StatelessWidget {
                   Container(
                     padding: EdgeInsets.all(isMobile ? 10 : 14),
                     decoration: BoxDecoration(
-                      color: (accent && enabled ? theme.colorScheme.primary : theme.colorScheme.outline).withValues(alpha: 0.12),
+                      color:
+                          (accent && enabled
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.outline)
+                              .withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       icon,
                       size: isMobile ? 28 : 32,
-                      color: accent && enabled ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                      color: accent && enabled
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
                   SizedBox(height: isMobile ? 10 : 14),
@@ -1026,7 +1346,9 @@ class _ActionCard extends StatelessWidget {
                     title,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
-                      color: enabled ? theme.colorScheme.onSurface : theme.colorScheme.onSurfaceVariant,
+                      color: enabled
+                          ? theme.colorScheme.onSurface
+                          : theme.colorScheme.onSurfaceVariant,
                     ),
                     textAlign: TextAlign.center,
                     maxLines: 2,
@@ -1035,7 +1357,9 @@ class _ActionCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -1051,7 +1375,11 @@ class _ActionCard extends StatelessWidget {
 }
 
 class _DateChip extends StatelessWidget {
-  const _DateChip({required this.label, required this.value, required this.onTap});
+  const _DateChip({
+    required this.label,
+    required this.value,
+    required this.onTap,
+  });
 
   final String label;
   final String value;
@@ -1072,11 +1400,23 @@ class _DateChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text(
+              label,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
             const SizedBox(width: 8),
-            Icon(Icons.calendar_today_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.calendar_today_rounded,
+              size: 18,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 8),
-            Text(value.isEmpty ? '—' : value, style: theme.textTheme.bodyMedium),
+            Text(
+              value.isEmpty ? '—' : value,
+              style: theme.textTheme.bodyMedium,
+            ),
           ],
         ),
       ),
@@ -1102,12 +1442,14 @@ class _SalesTable extends StatelessWidget {
     required this.onView,
     this.onEdit,
     required this.onCancel,
+    this.onPurgeCancelled,
   });
 
   final List<Sale> sales;
   final void Function(String saleId) onView;
   final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
+  final Future<void> Function(Sale sale)? onPurgeCancelled;
 
   @override
   Widget build(BuildContext context) {
@@ -1119,7 +1461,9 @@ class _SalesTable extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6)),
+          headingRowColor: WidgetStateProperty.all(
+            theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+          ),
           columns: const [
             DataColumn(label: Text('Numéro')),
             DataColumn(label: Text('Type')),
@@ -1134,18 +1478,34 @@ class _SalesTable extends StatelessWidget {
           rows: sales.map((s) {
             return DataRow(
               cells: [
-                DataCell(Text(s.saleNumber, style: const TextStyle(fontWeight: FontWeight.w600))),
+                DataCell(
+                  Text(
+                    s.saleNumber,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
                 DataCell(_documentTypeChip(s, context)),
                 DataCell(Text(_formatDateTime(s.createdAt))),
                 DataCell(Text(s.store?.name ?? 'Boutique')),
                 DataCell(Text(s.createdByLabel ?? '—')),
                 DataCell(Text(s.customer?.name ?? '—')),
-                DataCell(Text(formatCurrency(s.total), style: const TextStyle(fontWeight: FontWeight.w600))),
+                DataCell(
+                  Text(
+                    formatCurrency(s.total),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
                 DataCell(
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
-                      color: _statusColor(s.status, context).withValues(alpha: 0.12),
+                      color: _statusColor(
+                        s.status,
+                        context,
+                      ).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -1158,28 +1518,49 @@ class _SalesTable extends StatelessWidget {
                     ),
                   ),
                 ),
-                DataCell(Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.visibility_rounded, size: 20),
-                      onPressed: () => onView(s.id),
-                      tooltip: 'Voir le détail',
-                    ),
-                    if (s.status == SaleStatus.completed && onEdit != null)
+                DataCell(
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       IconButton(
-                        icon: Icon(Icons.edit_outlined, size: 20, color: theme.colorScheme.primary),
-                        onPressed: () => onEdit!(s),
-                        tooltip: 'Modifier la vente',
+                        icon: const Icon(Icons.visibility_rounded, size: 20),
+                        onPressed: () => onView(s.id),
+                        tooltip: 'Voir le détail',
                       ),
-                    if (s.status == SaleStatus.completed)
-                      IconButton(
-                        icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),
-                        onPressed: () => onCancel(s),
-                        tooltip: 'Annuler la vente',
-                      ),
-                  ],
-                )),
+                      if (s.status == SaleStatus.completed && onEdit != null)
+                        IconButton(
+                          icon: Icon(
+                            Icons.edit_outlined,
+                            size: 20,
+                            color: theme.colorScheme.primary,
+                          ),
+                          onPressed: () => onEdit!(s),
+                          tooltip: 'Modifier la vente',
+                        ),
+                      if (s.status == SaleStatus.completed)
+                        IconButton(
+                          icon: Icon(
+                            Icons.cancel_outlined,
+                            size: 20,
+                            color: theme.colorScheme.error,
+                          ),
+                          onPressed: () => onCancel(s),
+                          tooltip: 'Annuler la vente',
+                        ),
+                      if (s.status == SaleStatus.cancelled &&
+                          onPurgeCancelled != null)
+                        IconButton(
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 20,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          onPressed: () => onPurgeCancelled!(s),
+                          tooltip: 'Purger (propriétaire)',
+                        ),
+                    ],
+                  ),
+                ),
               ],
             );
           }).toList(),
@@ -1195,12 +1576,14 @@ class _SalesCardList extends StatelessWidget {
     required this.onView,
     this.onEdit,
     required this.onCancel,
+    this.onPurgeCancelled,
   });
 
   final List<Sale> sales;
   final void Function(String saleId) onView;
   final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
+  final Future<void> Function(Sale sale)? onPurgeCancelled;
 
   @override
   Widget build(BuildContext context) {
@@ -1211,13 +1594,16 @@ class _SalesCardList extends StatelessWidget {
           s.store?.name ?? 'Boutique',
           if (s.createdByLabel != null && s.createdByLabel!.trim().isNotEmpty)
             'Par ${s.createdByLabel!.trim()}',
-          if (s.customer?.name != null && s.customer!.name.trim().isNotEmpty) s.customer!.name,
+          if (s.customer?.name != null && s.customer!.name.trim().isNotEmpty)
+            s.customer!.name,
         ];
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Card(
             elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
             child: InkWell(
               onTap: () => onView(s.id),
               borderRadius: BorderRadius.circular(12),
@@ -1231,15 +1617,25 @@ class _SalesCardList extends StatelessWidget {
                         Expanded(
                           child: Text(
                             s.saleNumber,
-                            style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         _documentTypeChip(s, context),
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
-                            color: _statusColor(s.status, context).withValues(alpha: 0.12),
+                            color: _statusColor(
+                              s.status,
+                              context,
+                            ).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1256,7 +1652,9 @@ class _SalesCardList extends StatelessWidget {
                     const SizedBox(height: 8),
                     Text(
                       _formatDateTime(s.createdAt),
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
@@ -1269,29 +1667,83 @@ class _SalesCardList extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Text(
-                          formatCurrency(s.total),
-                          style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          icon: const Icon(Icons.open_in_new_rounded, size: 20),
-                          onPressed: () => onView(s.id),
-                          tooltip: 'Voir le détail',
-                        ),
-                        if (s.status == SaleStatus.completed && onEdit != null)
-                          IconButton(
-                            icon: Icon(Icons.edit_outlined, size: 20, color: theme.colorScheme.primary),
-                            onPressed: () => onEdit!(s),
-                            tooltip: 'Modifier la vente',
+                        Expanded(
+                          child: Text(
+                            formatCurrency(s.total),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        if (s.status == SaleStatus.completed)
-                          IconButton(
-                            icon: Icon(Icons.cancel_outlined, size: 20, color: theme.colorScheme.error),
-                            onPressed: () => onCancel(s),
-                            tooltip: 'Annuler la vente',
-                          ),
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                              onPressed: () => onView(s.id),
+                              tooltip: 'Voir le détail',
+                              style: IconButton.styleFrom(
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.all(6),
+                                minimumSize: const Size(36, 36),
+                              ),
+                            ),
+                            if (s.status == SaleStatus.completed && onEdit != null)
+                              IconButton(
+                                icon: Icon(
+                                  Icons.edit_outlined,
+                                  size: 20,
+                                  color: theme.colorScheme.primary,
+                                ),
+                                onPressed: () => onEdit!(s),
+                                tooltip: 'Modifier la vente',
+                                style: IconButton.styleFrom(
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.all(6),
+                                  minimumSize: const Size(36, 36),
+                                ),
+                              ),
+                            if (s.status == SaleStatus.completed)
+                              IconButton(
+                                icon: Icon(
+                                  Icons.cancel_outlined,
+                                  size: 20,
+                                  color: theme.colorScheme.error,
+                                ),
+                                onPressed: () => onCancel(s),
+                                tooltip: 'Annuler la vente',
+                                style: IconButton.styleFrom(
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.all(6),
+                                  minimumSize: const Size(36, 36),
+                                ),
+                              ),
+                            if (s.status == SaleStatus.cancelled &&
+                                onPurgeCancelled != null)
+                              IconButton(
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 20,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                onPressed: () => onPurgeCancelled!(s),
+                                tooltip: 'Purger (propriétaire)',
+                                style: IconButton.styleFrom(
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.all(6),
+                                  minimumSize: const Size(36, 36),
+                                ),
+                              ),
+                          ],
+                        ),
                       ],
                     ),
                   ],

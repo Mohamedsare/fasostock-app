@@ -606,18 +606,42 @@ class _LoginPageState extends State<LoginPage> {
                             ],
                             SizedBox(height: spaceL),
                             Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                TextButton(
-                                  onPressed: () =>
-                                      context.push(AppRoutes.forgotPassword),
-                                  child: const Text('Mot de passe oublié ?'),
+                                Expanded(
+                                  child: TextButton(
+                                    onPressed: () =>
+                                        context.push(AppRoutes.forgotPassword),
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Mot de passe oublié ?',
+                                      textAlign: TextAlign.center,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                 ),
-                                SizedBox(width: spaceL),
-                                TextButton(
-                                  onPressed: () =>
-                                      context.push(AppRoutes.register),
-                                  child: const Text('Créer un compte'),
+                                Expanded(
+                                  child: TextButton(
+                                    onPressed: () =>
+                                        context.push(AppRoutes.register),
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 4,
+                                        vertical: 8,
+                                      ),
+                                    ),
+                                    child: const Text(
+                                      'Créer un compte',
+                                      textAlign: TextAlign.center,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),

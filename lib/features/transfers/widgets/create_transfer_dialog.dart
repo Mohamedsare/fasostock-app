@@ -416,26 +416,60 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Annuler'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: (_saving || !_canSubmit) ? null : _submit,
-                    child: _saving
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Enregistrer (brouillon)'),
-                  ),
-                ],
-              ),
+              if (narrow)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    FilledButton(
+                      onPressed: (_saving || !_canSubmit) ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      child: _saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text(
+                              'Enregistrer (brouillon)',
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                            ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Annuler'),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Annuler'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: (_saving || !_canSubmit) ? null : _submit,
+                      child: _saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Enregistrer (brouillon)'),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

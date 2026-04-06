@@ -281,13 +281,20 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Utilisateurs')),
+        appBar: isWide ? AppBar(title: const Text('Utilisateurs')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!isWide) ...[
+                  Text(
+                    'Utilisateurs',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Icon(Icons.error_outline_rounded, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(company.loadError!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -299,8 +306,25 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Utilisateurs')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l\'administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Utilisateurs')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Utilisateurs',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l\'administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -315,7 +339,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final canManage = _canManageUsers(members, _permissionKeys);
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Utilisateurs')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refreshSync,
         child: SingleChildScrollView(

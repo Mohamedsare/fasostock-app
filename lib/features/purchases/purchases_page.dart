@@ -307,7 +307,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
     }
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Achats')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refreshSync,
         child: SingleChildScrollView(

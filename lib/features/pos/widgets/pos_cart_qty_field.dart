@@ -12,13 +12,13 @@ class PosCartQtyField extends StatefulWidget {
     super.key,
     required this.controller,
     required this.currentQuantity,
-    required this.surfaceColor,
     required this.onCommit,
+    this.surfaceColor,
   });
 
   final TextEditingController controller;
   final int currentQuantity;
-  final Color surfaceColor;
+  final Color? surfaceColor;
   final void Function(int value) onCommit;
 
   @override
@@ -60,10 +60,15 @@ class _PosCartQtyFieldState extends State<PosCartQtyField> {
       if (!mounted) return;
       // Tant que ce champ a le focus (ou est le focus primaire), ne pas réinjecter la quantité panier.
       if (_fieldIsFocusedForSync()) return;
-      final want =
-          widget.currentQuantity == 0 ? '' : '${widget.currentQuantity}';
-      if (widget.controller.text != want) {
-        widget.controller.text = want;
+      final want = widget.currentQuantity == 0
+          ? ''
+          : '${widget.currentQuantity}';
+      try {
+        if (widget.controller.text != want) {
+          widget.controller.text = want;
+        }
+      } catch (_) {
+        // Contrôleur disposé par le parent (ex. fermeture dialogue) avant ce frame.
       }
     });
   }
@@ -103,23 +108,22 @@ class _PosCartQtyFieldState extends State<PosCartQtyField> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final baseDeco = PosInputTheme.denseField(context);
     return TextField(
       focusNode: _focusNode,
       controller: widget.controller,
       keyboardType: TextInputType.text,
       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
       textAlign: TextAlign.center,
-      style: const TextStyle(
-        color: PosQuickColors.textePrincipal,
+      style: theme.textTheme.titleMedium?.copyWith(
+        color: cs.onSurface,
         fontWeight: FontWeight.w700,
         fontSize: 15,
       ),
-      decoration: InputDecoration(
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        filled: true,
-        fillColor: widget.surfaceColor,
+      decoration: baseDeco.copyWith(
+        fillColor: widget.surfaceColor ?? baseDeco.fillColor,
       ),
       onChanged: (_) => _onTypingPaused(),
       onEditingComplete: _flush,

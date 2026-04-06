@@ -27,7 +27,7 @@ void main() {
     test('api messages are translated', () {
       expect(
         ErrorMessages.translate('new row violates row-level security policy'),
-        "Vous n'avez pas les droits pour effectuer cette action.",
+        "Vous n'avez pas l'autorisation d'effectuer cette action.",
       );
       expect(
         ErrorMessages.translate('JWT expired'),
@@ -35,7 +35,7 @@ void main() {
       );
       expect(
         ErrorMessages.translate('Permission denied'),
-        'Accès refusé.',
+        "Accès refusé : vous n'avez pas l'autorisation.",
       );
     });
 

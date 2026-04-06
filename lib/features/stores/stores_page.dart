@@ -7,6 +7,7 @@ import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/store.dart';
+import '../../../data/repositories/settings_repository.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
@@ -25,6 +26,8 @@ class StoresPage extends ConsumerStatefulWidget {
 
 class _StoresPageState extends ConsumerState<StoresPage> {
   bool _syncTriggeredForEmpty = false;
+  bool _invoiceTablePosEnabled = false;
+  String? _invoiceTableLoadedForCompanyId;
 
   @override
   void initState() {
@@ -32,6 +35,33 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _loadCompaniesIfNeeded();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cid = context.read<CompanyProvider>().currentCompanyId;
+    if (cid == null) {
+      if (_invoiceTableLoadedForCompanyId != null) {
+        setState(() {
+          _invoiceTableLoadedForCompanyId = null;
+          _invoiceTablePosEnabled = false;
+        });
+      }
+      return;
+    }
+    if (cid == _invoiceTableLoadedForCompanyId) return;
+    _invoiceTableLoadedForCompanyId = cid;
+    final cached = SettingsRepository.peekInvoiceTablePosEnabled(cid);
+    if (cached != null) {
+      final showTable = cached;
+      setState(() => _invoiceTablePosEnabled = showTable);
+    }
+    SettingsRepository().getInvoiceTablePosEnabled(cid).then((v) {
+      if (!mounted) return;
+      if (context.read<CompanyProvider>().currentCompanyId != cid) return;
+      setState(() => _invoiceTablePosEnabled = v);
     });
   }
 
@@ -183,13 +213,29 @@ class _StoresPageState extends ConsumerState<StoresPage> {
       return CompanyLoadErrorScreen(
         message: company.loadError!,
         title: 'Boutiques',
-        appBar: isWide ? null : AppBar(title: const Text('Boutiques')),
       );
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Boutiques')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l’administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Boutiques')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Boutiques',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l’administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -204,7 +250,7 @@ class _StoresPageState extends ConsumerState<StoresPage> {
         : 'Sélectionnez une entreprise';
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Boutiques')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: SingleChildScrollView(
@@ -397,6 +443,9 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     final canPosQuick = permissions.hasPermission(Permissions.salesCreate);
     final canPosInvoice = permissions.hasPermission(Permissions.salesInvoiceA4) ||
         permissions.hasPermission(Permissions.salesCreate);
+    final canFactureTable = _invoiceTablePosEnabled &&
+        permissions.hasPermission(Permissions.salesInvoiceA4Table) &&
+        canPosInvoice;
     final crossCount = isWide ? 3 : (MediaQuery.sizeOf(context).width > 600 ? 2 : 1);
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -414,6 +463,8 @@ class _StoresPageState extends ConsumerState<StoresPage> {
                 onEdit: () => _openEditDialog(store),
                 onPosQuick: canPosQuick ? () => context.go(AppRoutes.posQuick(store.id)) : null,
                 onPosInvoice: canPosInvoice ? () => context.go(AppRoutes.pos(store.id)) : null,
+                onPosInvoiceTable:
+                    canFactureTable ? () => context.go(AppRoutes.factureTab(store.id)) : null,
               ),
             );
           }).toList(),
@@ -429,12 +480,14 @@ class _StoreCard extends StatelessWidget {
     required this.onEdit,
     this.onPosQuick,
     this.onPosInvoice,
+    this.onPosInvoiceTable,
   });
 
   final Store store;
   final VoidCallback onEdit;
   final VoidCallback? onPosQuick;
   final VoidCallback? onPosInvoice;
+  final VoidCallback? onPosInvoiceTable;
 
   Widget _buildContent(BuildContext context, ThemeData theme) {
     return Padding(
@@ -656,6 +709,36 @@ class _StoreCard extends StatelessWidget {
                                     color: theme.colorScheme.primary,
                                   ),
                                   maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Container(width: 1, color: theme.dividerColor),
+                    ],
+                    if (onPosInvoiceTable != null) ...[
+                      Expanded(
+                        child: InkWell(
+                          onTap: onPosInvoiceTable,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.table_rows_rounded, size: 20, color: theme.colorScheme.primary),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Facture tab.',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: theme.colorScheme.primary,
+                                    fontSize: 10,
+                                  ),
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.center,
                                 ),

@@ -7,6 +7,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/connectivity/connectivity_service.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
+import '../../data/sync/product_images_realtime_sync.dart';
+import '../../data/sync/products_realtime_sync.dart';
+import '../../data/sync/sale_payments_realtime_sync.dart';
 import '../../data/sync/sales_realtime_sync.dart';
 import '../../data/sync/store_inventory_realtime_sync.dart';
 import '../../providers/auth_provider.dart';
@@ -46,6 +49,9 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   int _lastSyncErrors = 0;
   StoreInventoryRealtimeSync? _storeInventoryRealtime;
   SalesRealtimeSync? _salesRealtime;
+  SalePaymentsRealtimeSync? _salePaymentsRealtime;
+  ProductsRealtimeSync? _productsRealtime;
+  ProductImagesRealtimeSync? _productImagesRealtime;
   bool _postgresRealtimeActive = false;
   bool? _lastWantPostgresRealtime;
   /// Dernière entreprise pour laquelle on a déclenché un pull stock immédiat (changement de société).
@@ -233,7 +239,7 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     });
   }
 
-  /// Stock (`store_inventory`) + ventes (`sales`) : même garde (en ligne + session).
+  /// Stock (`store_inventory`), ventes (`sales`), paiements, catalogue (`products`) : en ligne + session.
   /// Offline / sync périodique inchangés : pas de WS hors ligne ; le pull reste le filet.
   void _setPostgresRealtimeActive(bool active) {
     if (active == _postgresRealtimeActive) return;
@@ -242,13 +248,27 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
       final db = ref.read(appDatabaseProvider);
       _storeInventoryRealtime ??= StoreInventoryRealtimeSync(db);
       _salesRealtime ??= SalesRealtimeSync(db, syncService: ref.read(syncServiceV2Provider));
+      _salePaymentsRealtime ??= SalePaymentsRealtimeSync(db);
+      _productsRealtime ??=
+          ProductsRealtimeSync(ref.read(productsOfflineRepositoryProvider));
+      _productImagesRealtime ??=
+          ProductImagesRealtimeSync(ref.read(productsOfflineRepositoryProvider));
       unawaited(_storeInventoryRealtime!.start());
       unawaited(_salesRealtime!.start());
+      unawaited(_salePaymentsRealtime!.start());
+      unawaited(_productsRealtime!.start());
+      unawaited(_productImagesRealtime!.start());
     } else {
       unawaited(_storeInventoryRealtime?.stop() ?? Future<void>.value());
       unawaited(_salesRealtime?.stop() ?? Future<void>.value());
+      unawaited(_salePaymentsRealtime?.stop() ?? Future<void>.value());
+      unawaited(_productsRealtime?.stop() ?? Future<void>.value());
+      unawaited(_productImagesRealtime?.stop() ?? Future<void>.value());
       _storeInventoryRealtime = null;
       _salesRealtime = null;
+      _salePaymentsRealtime = null;
+      _productsRealtime = null;
+      _productImagesRealtime = null;
     }
   }
 
@@ -259,8 +279,14 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     _stopPeriodicSync();
     unawaited(_storeInventoryRealtime?.stop() ?? Future<void>.value());
     unawaited(_salesRealtime?.stop() ?? Future<void>.value());
+    unawaited(_salePaymentsRealtime?.stop() ?? Future<void>.value());
+    unawaited(_productsRealtime?.stop() ?? Future<void>.value());
+    unawaited(_productImagesRealtime?.stop() ?? Future<void>.value());
     _storeInventoryRealtime = null;
     _salesRealtime = null;
+    _salePaymentsRealtime = null;
+    _productsRealtime = null;
+    _productImagesRealtime = null;
     super.dispose();
   }
 

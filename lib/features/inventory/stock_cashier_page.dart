@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../../../core/breakpoints.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
@@ -128,18 +129,16 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
     final companyId = company.currentCompanyId;
     final storeId = company.currentStoreId;
     final storeName = company.currentStore?.name;
-    final isWide = MediaQuery.sizeOf(context).width >= 600;
 
     if (company.loadError != null && company.companies.isEmpty) {
       return CompanyLoadErrorScreen(
         message: company.loadError!,
         title: 'Stock',
-        appBar: isWide ? null : AppBar(title: const Text('Stock')),
       );
     }
     if (storeId == null || companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Stock')),
+        appBar: null,
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -239,6 +238,9 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
       return i.quantity < min;
     }).toList();
 
+    final isMobileStock =
+        MediaQuery.sizeOf(context).width < Breakpoints.tablet;
+
     final rupturePageCount = rupture.isEmpty
         ? 1
         : (rupture.length / _pageSize).ceil();
@@ -253,26 +255,30 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
     }
     final paginatedRupture = rupture.isEmpty
         ? <InventoryItem>[]
-        : rupture
-              .skip(_currentRupturePage * _pageSize)
-              .take(_pageSize)
-              .toList();
+        : (isMobileStock
+              ? rupture
+              : rupture
+                    .skip(_currentRupturePage * _pageSize)
+                    .take(_pageSize)
+                    .toList());
     final paginatedAlertes = alertes.isEmpty
         ? <InventoryItem>[]
-        : alertes
-              .skip(_currentAlertesPage * _pageSize)
-              .take(_pageSize)
-              .toList();
+        : (isMobileStock
+              ? alertes
+              : alertes
+                    .skip(_currentAlertesPage * _pageSize)
+                    .take(_pageSize)
+                    .toList());
 
     if (loading && allItems.isEmpty) {
-      return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Stock')),
-        body: const Center(child: CircularProgressIndicator()),
+      return const Scaffold(
+        appBar: null,
+        body: Center(child: CircularProgressIndicator()),
       );
     }
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Stock')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _runSyncThenRefresh,
         child: SafeArea(
@@ -394,22 +400,23 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
                     ),
                   ),
                 ),
-                SliverToBoxAdapter(
-                  child: _buildPagination(
-                    context,
-                    rupture.length,
-                    rupturePageCount,
-                    _currentRupturePage,
-                    () => setState(
-                      () => _currentRupturePage = (_currentRupturePage - 1)
-                          .clamp(0, rupturePageCount - 1),
-                    ),
-                    () => setState(
-                      () => _currentRupturePage = (_currentRupturePage + 1)
-                          .clamp(0, rupturePageCount - 1),
+                if (!isMobileStock)
+                  SliverToBoxAdapter(
+                    child: _buildPagination(
+                      context,
+                      rupture.length,
+                      rupturePageCount,
+                      _currentRupturePage,
+                      () => setState(
+                        () => _currentRupturePage = (_currentRupturePage - 1)
+                            .clamp(0, rupturePageCount - 1),
+                      ),
+                      () => setState(
+                        () => _currentRupturePage = (_currentRupturePage + 1)
+                            .clamp(0, rupturePageCount - 1),
+                      ),
                     ),
                   ),
-                ),
               ],
               const SliverToBoxAdapter(child: SizedBox(height: 24)),
               SliverToBoxAdapter(
@@ -450,22 +457,23 @@ class _StockCashierPageState extends ConsumerState<StockCashierPage> {
                     ),
                   ),
                 ),
-                SliverToBoxAdapter(
-                  child: _buildPagination(
-                    context,
-                    alertes.length,
-                    alertesPageCount,
-                    _currentAlertesPage,
-                    () => setState(
-                      () => _currentAlertesPage = (_currentAlertesPage - 1)
-                          .clamp(0, alertesPageCount - 1),
-                    ),
-                    () => setState(
-                      () => _currentAlertesPage = (_currentAlertesPage + 1)
-                          .clamp(0, alertesPageCount - 1),
+                if (!isMobileStock)
+                  SliverToBoxAdapter(
+                    child: _buildPagination(
+                      context,
+                      alertes.length,
+                      alertesPageCount,
+                      _currentAlertesPage,
+                      () => setState(
+                        () => _currentAlertesPage = (_currentAlertesPage - 1)
+                            .clamp(0, alertesPageCount - 1),
+                      ),
+                      () => setState(
+                        () => _currentAlertesPage = (_currentAlertesPage + 1)
+                            .clamp(0, alertesPageCount - 1),
+                      ),
                     ),
                   ),
-                ),
               ],
               const SliverToBoxAdapter(child: SizedBox(height: 40)),
             ],

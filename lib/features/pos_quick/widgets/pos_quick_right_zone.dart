@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../pos_quick_constants.dart';
-
 /// Zone droite caisse rapide : titre panier, liste des lignes, footer (récap + paiement).
 class PosQuickRightZone extends StatelessWidget {
   const PosQuickRightZone({
@@ -17,8 +15,10 @@ class PosQuickRightZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     return Container(
-      color: PosQuickColors.fondSecondaire,
+      color: cs.surfaceContainerLow,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -26,12 +26,20 @@ class PosQuickRightZone extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Text(
               'Panier · $cartItemCount article${cartItemCount != 1 ? 's' : ''}',
-              style: const TextStyle(color: PosQuickColors.textePrincipal, fontWeight: FontWeight.w700, fontSize: 16),
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: cs.onSurface,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           Expanded(
             child: cartTiles.isEmpty
-                ? const Center(child: Text('Panier vide', style: TextStyle(color: PosQuickColors.textePrincipal)))
+                ? Center(
+                    child: Text(
+                      'Panier vide',
+                      style: TextStyle(color: cs.onSurfaceVariant),
+                    ),
+                  )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     itemCount: cartTiles.length,

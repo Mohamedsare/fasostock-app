@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 import '../../models/inventory.dart';
+import '../../models/sale.dart';
 
 part 'app_database.g.dart';
 // drift codegen
@@ -75,6 +76,9 @@ class LocalSales extends Table {
   TextColumn get saleMode => text().nullable()();
   /// thermal_receipt | a4_invoice — source de vérité pour l'affichage type document.
   TextColumn get documentType => text().nullable()();
+  /// Aligné Supabase `credit_due_at` (ISO).
+  TextColumn get creditDueAt => text().nullable()();
+  TextColumn get creditInternalNote => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -88,6 +92,19 @@ class LocalSaleItems extends Table {
   RealColumn get unitPrice => real()();
   RealColumn get total => real()();
   TextColumn get createdAt => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@TableIndex(name: 'idx_local_sale_payments_sale_id', columns: {#saleId})
+class LocalSalePayments extends Table {
+  TextColumn get id => text()();
+  TextColumn get saleId => text().references(LocalSales, #id, onDelete: KeyAction.cascade)();
+  TextColumn get method => text()();
+  RealColumn get amount => real()();
+  TextColumn get reference => text().nullable()();
+  TextColumn get createdAt => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -369,6 +386,7 @@ class PendingActions extends Table {
   StoreInventory,
   LocalSales,
   LocalSaleItems,
+  LocalSalePayments,
   LocalCustomers,
   LocalSuppliers,
   LocalStores,
@@ -392,7 +410,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
 
   /// Évite les erreurs « duplicate column name » si le fichier SQLite a été partiellement migré
   /// ou si `user_version` ne reflète pas le schéma réel.
@@ -543,6 +561,20 @@ class AppDatabase extends _$AppDatabase {
           'CREATE INDEX IF NOT EXISTS idx_local_wh_dispatch_company ON local_warehouse_dispatch_invoices(company_id)',
         );
       }
+      if (from < 22) {
+        if (!await _sqliteColumnExists('local_sales', 'credit_due_at')) {
+          await customStatement('ALTER TABLE local_sales ADD COLUMN credit_due_at TEXT');
+        }
+        if (!await _sqliteColumnExists('local_sales', 'credit_internal_note')) {
+          await customStatement('ALTER TABLE local_sales ADD COLUMN credit_internal_note TEXT');
+        }
+        if (!await _sqliteTableExists('local_sale_payments')) {
+          await migrator.createTable(localSalePayments);
+        }
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_local_sale_payments_sale_id ON local_sale_payments(sale_id)',
+        );
+      }
     },
   );
 
@@ -629,6 +661,16 @@ class AppDatabase extends _$AppDatabase {
   Future<void> updateLocalProductIsActive(String productId, bool isActive) async {
     await (update(localProducts)..where((t) => t.id.equals(productId)))
         .write(LocalProductsCompanion(isActive: Value(isActive)));
+  }
+
+  /// Vignette catalogue (`local_products.image_url`) — ex. après Realtime sur `product_images`.
+  Future<void> updateLocalProductImageUrl(String productId, String? imageUrl) async {
+    await (update(localProducts)..where((t) => t.id.equals(productId))).write(
+      LocalProductsCompanion(
+        imageUrl: Value(imageUrl),
+        updatedAt: Value(DateTime.now().toUtc().toIso8601String()),
+      ),
+    );
   }
 
   /// Store inventory: read/upsert by store.
@@ -821,15 +863,50 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  /// Émet à chaque changement des ventes ou achats pour la société — utilisé par le dashboard pour rafraîchir les KPIs en temps réel (sans casser offline+sync).
+  /// Émet à chaque changement local (Drift) qui impacte les KPIs du tableau de bord.
+  ///
+  /// Couvre : ventes + lignes de vente, achats + lignes d’achat, stock boutique,
+  /// produits (prix / marge / périmètre), catégories (répartition), seuils d’alerte,
+  /// paramètres société (seuil défaut). Les mises à jour **Postgres Realtime** et **sync**
+  /// passent par ces tables → le dashboard reste offline-first avec rafraîchissement quasi temps réel.
   Stream<void> watchDashboardDataTrigger(String companyId) {
     final c = StreamController<void>.broadcast(sync: true);
-    late StreamSubscription<dynamic> sub1, sub2;
-    sub1 = watchLocalSales(companyId).listen((_) => c.add(null));
-    sub2 = watchLocalPurchases(companyId).listen((_) => c.add(null));
+    final subscriptions = <StreamSubscription<dynamic>>[];
+
+    void emit([Object? _]) => c.add(null);
+
+    subscriptions.add(watchLocalSales(companyId).listen(emit));
+    subscriptions.add(watchLocalPurchases(companyId).listen(emit));
+    subscriptions.add(watchLocalPurchaseItemsForCompany(companyId).listen(emit));
+    subscriptions.add(watchLocalProducts(companyId).listen(emit));
+    subscriptions.add(watchLocalCategories(companyId).listen(emit));
+
+    final saleItemsForCompany = select(localSaleItems).join([
+      innerJoin(localSales, localSaleItems.saleId.equalsExp(localSales.id)),
+    ])..where(localSales.companyId.equals(companyId));
+    subscriptions.add(saleItemsForCompany.watch().listen(emit));
+
+    final inventoryForCompany = select(storeInventory).join([
+      innerJoin(localStores, storeInventory.storeId.equalsExp(localStores.id)),
+    ])..where(localStores.companyId.equals(companyId));
+    subscriptions.add(inventoryForCompany.watch().listen(emit));
+
+    final stockMinForCompany = select(localStockMinOverrides).join([
+      innerJoin(
+        localStores,
+        localStockMinOverrides.storeId.equalsExp(localStores.id),
+      ),
+    ])..where(localStores.companyId.equals(companyId));
+    subscriptions.add(stockMinForCompany.watch().listen(emit));
+
+    final companySettingsQuery = select(localCompanySettings)
+      ..where((t) => t.companyId.equals(companyId));
+    subscriptions.add(companySettingsQuery.watch().listen(emit));
+
     c.onCancel = () async {
-      await sub1.cancel();
-      await sub2.cancel();
+      for (final sub in subscriptions) {
+        await sub.cancel();
+      }
     };
     return c.stream;
   }
@@ -862,6 +939,72 @@ class AppDatabase extends _$AppDatabase {
   Future<List<LocalSaleItem>> getLocalSaleItemsForSales(List<String> saleIds) async {
     if (saleIds.isEmpty) return [];
     return (select(localSaleItems)..where((t) => t.saleId.isIn(saleIds))).get();
+  }
+
+  Future<LocalSale?> getLocalSaleById(String saleId) async {
+    return (select(localSales)..where((t) => t.id.equals(saleId))).getSingleOrNull();
+  }
+
+  /// Liste ventes (filtre société / boutique) — même ordre que [watchLocalSales].
+  Future<List<LocalSale>> listLocalSalesForCompany(String companyId, {String? storeId}) async {
+    var q = select(localSales)
+      ..where((t) {
+        var e = t.companyId.equals(companyId);
+        if (storeId != null && storeId.isNotEmpty) e = e & t.storeId.equals(storeId);
+        return e;
+      })
+      ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]);
+    return q.get();
+  }
+
+  /// Émet à chaque changement de paiements (pour que le crédit / encaissements se mettent à jour hors table ventes).
+  Stream<List<LocalSalePayment>> watchAllLocalSalePayments() {
+    return select(localSalePayments).watch();
+  }
+
+  Future<List<LocalSalePayment>> getLocalSalePaymentsForSales(List<String> saleIds) async {
+    if (saleIds.isEmpty) return [];
+    return (select(localSalePayments)..where((t) => t.saleId.isIn(saleIds))).get();
+  }
+
+  Future<void> upsertLocalSalePayments(Iterable<LocalSalePaymentsCompanion> items) async {
+    await batch((batch) {
+      for (final item in items) {
+        batch.insert(localSalePayments, item, mode: InsertMode.insertOrReplace);
+      }
+    });
+  }
+
+  Future<void> deleteLocalSalePaymentsBySaleId(String saleId) async {
+    await (delete(localSalePayments)..where((t) => t.saleId.equals(saleId))).go();
+  }
+
+  Future<void> replaceLocalSalePaymentsFromModels(String saleId, List<SalePayment> payments, String fallbackNow) async {
+    await deleteLocalSalePaymentsBySaleId(saleId);
+    if (payments.isEmpty) return;
+    await upsertLocalSalePayments(
+      payments.map(
+        (p) => LocalSalePaymentsCompanion.insert(
+          id: p.id,
+          saleId: p.saleId.isNotEmpty ? p.saleId : saleId,
+          method: p.method.value,
+          amount: p.amount,
+          reference: Value(p.reference),
+          createdAt: Value(p.createdAt ?? fallbackNow),
+        ),
+      ),
+    );
+  }
+
+  Future<void> updateLocalSaleCreditMeta(String saleId, String? creditDueAtIso, String? creditInternalNote) async {
+    final now = DateTime.now().toUtc().toIso8601String();
+    await (update(localSales)..where((t) => t.id.equals(saleId))).write(
+      LocalSalesCompanion(
+        creditDueAt: Value(creditDueAtIso),
+        creditInternalNote: Value(creditInternalNote),
+        updatedAt: Value(now),
+      ),
+    );
   }
 
   Future<void> upsertLocalSale(LocalSalesCompanion sale) async {
@@ -901,6 +1044,7 @@ class AppDatabase extends _$AppDatabase {
         .get();
     if (salesToDelete.isEmpty) return 0;
     final ids = salesToDelete.map((s) => s.id).toList();
+    await (delete(localSalePayments)..where((t) => t.saleId.isIn(ids))).go();
     await (delete(localSaleItems)..where((t) => t.saleId.isIn(ids))).go();
     await (delete(localSales)..where((t) => t.id.isIn(ids))).go();
     return ids.length;

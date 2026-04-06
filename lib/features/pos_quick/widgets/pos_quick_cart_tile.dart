@@ -31,21 +31,24 @@ class PosQuickCartTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final lowStock = stock >= 0 && item.quantity > stock;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: PosQuickColors.fondPrincipal,
+        color: cs.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: lowStock ? Colors.red.shade300 : PosQuickColors.bordure,
+          color: lowStock
+              ? theme.colorScheme.error
+              : cs.outline.withValues(alpha: 0.45),
         ),
       ),
       child: Row(
         children: [
-          _thumbnail(item),
+          _thumbnail(context, item),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -54,8 +57,8 @@ class PosQuickCartTile extends StatelessWidget {
               children: [
                 Text(
                   item.name,
-                  style: const TextStyle(
-                    color: PosQuickColors.textePrincipal,
+                  style: TextStyle(
+                    color: cs.onSurface,
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -75,8 +78,8 @@ class PosQuickCartTile extends StatelessWidget {
                         style: IconButton.styleFrom(
                           padding: const EdgeInsets.all(6),
                           minimumSize: const Size(36, 36),
-                          backgroundColor: PosQuickColors.fondSecondaire,
-                          foregroundColor: PosQuickColors.textePrincipal,
+                          backgroundColor: cs.surfaceContainerHighest,
+                          foregroundColor: cs.onSurface,
                         ),
                       ),
                     if (showQuantityInput)
@@ -94,10 +97,10 @@ class PosQuickCartTile extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: Text(
                           '${item.quantity}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
-                            color: PosQuickColors.textePrincipal,
+                            color: cs.onSurface,
                           ),
                         ),
                       ),
@@ -149,8 +152,10 @@ class PosQuickCartTile extends StatelessWidget {
     );
   }
 
-  static Widget _thumbnail(PosCartItem c) {
+  static Widget _thumbnail(BuildContext context, PosCartItem c) {
     final url = c.imageUrl;
+    final iconColor =
+        Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.8);
     return SizedBox(
       width: 44,
       height: 44,
@@ -164,14 +169,14 @@ class PosQuickCartTile extends StatelessWidget {
                 height: 44,
                 errorBuilder: (context, error, stackTrace) => Icon(
                   Icons.inventory_2_outlined,
-                  color: PosQuickColors.orangePrincipal.withValues(alpha: 0.7),
+                  color: iconColor,
                   size: 24,
                 ),
               ),
             )
           : Icon(
               Icons.inventory_2_outlined,
-              color: PosQuickColors.orangePrincipal.withValues(alpha: 0.7),
+              color: iconColor,
               size: 24,
             ),
     );

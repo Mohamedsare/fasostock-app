@@ -29,12 +29,14 @@ class ErrorMessages {
   };
 
   static const _apiMessages = <String, String>{
-    'new row violates row-level security policy': "Vous n'avez pas les droits pour effectuer cette action.",
+    'new row violates row-level security policy':
+        "Vous n'avez pas l'autorisation d'effectuer cette action.",
     'duplicate key value violates unique constraint': 'Cette valeur existe déjà.',
     'foreign key violation': 'Référence invalide.',
     'JWT expired': 'Session expirée. Reconnectez-vous.',
     'Invalid JWT': 'Session expirée. Reconnectez-vous.',
-    'Permission denied': 'Accès refusé.',
+    'Permission denied': "Accès refusé : vous n'avez pas l'autorisation.",
+    'unauthorized': 'Session expirée. Reconnectez-vous.',
     'Le rôle super admin ne peut pas être attribué': 'Ce type d\'utilisateur ne peut pas être créé ici.',
     'Rôle invalide ou inconnu': 'Type d\'utilisateur inconnu. Réessayez.',
     'Session absente': 'Session expirée. Déconnectez-vous puis reconnectez-vous.',

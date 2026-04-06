@@ -19,7 +19,8 @@ import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../data/repositories/reports_repository.dart';
 
-/// Tableau de bord — offline-first : lecture Drift, sync en arrière-plan, rafraîchissement après sync.
+/// Tableau de bord — offline-first : lecture Drift ; sync + Postgres Realtime alimentent les tables locales ;
+/// [dashboardDataChangeTriggerStreamProvider] relit les KPIs quasi temps réel (debounce).
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
 
@@ -122,7 +123,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   /// Charge les KPIs depuis le stock local Drift (offline-first).
-  /// [silent] : true lors d'un rafraîchissement déclenché par le stream (pas de spinner, les chiffres se mettent à jour à l'écran).
+  ///
+  /// **Flux filtres → données**
+  /// - Période : [getDefaultDateRange] sur `_period` ; boutique : `currentStoreId` si `_scope == 'store'`. Mêmes bornes pour les deux appels repo.
+  /// - [DashboardOfflineRepository.getDashboardData] : KPI, histogramme, courbe CA/jour, top produits ; « Stats du jour » utilisent `_selectedDay` (les graphiques principaux restent sur la période).
+  /// - [ReportsOfflineRepository.getSalesKpis] sans filtre métier → camembert catégories. Ticket moyen = `salesSummary` du dashboard (une seule source avec les autres cartes).
+  ///
+  /// [silent] : rafraîchissement stream / sync sans plein écran chargement.
   Future<void> _loadDataFromOffline({bool silent = false}) async {
     final company = context.read<CompanyProvider>();
     final companyId = company.currentCompanyId;
@@ -158,10 +165,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       );
 
       if (mounted) {
+        final ticketAvg = result.salesSummary.count > 0
+            ? result.salesSummary.totalAmount / result.salesSummary.count
+            : 0.0;
         setState(() {
           _data = _DashboardData(
             salesSummary: result.salesSummary,
-            ticketAverage: salesKpis.ticketAverage,
+            ticketAverage: ticketAvg,
             salesByDay: result.salesByDay,
             topProducts: result.topProducts,
             salesByCategory: salesKpis.salesByCategory,
@@ -171,7 +181,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             daySalesSummary: result.daySalesSummary,
             dayPurchasesSummary: result.dayPurchasesSummary,
           );
-          if (!silent) _loading = false;
+          // Toujours repasser à false : un refresh silencieux peut finir avant le 1er chargement ;
+          // sinon `if (!silent)` laisserait le spinner bloqué et aucun graphique ne s’affiche.
+          _loading = false;
         });
       }
     } catch (e) {
@@ -187,6 +199,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.sizeOf(context).width >= 900;
     final permissions = context.watch<PermissionsProvider>();
     if (permissions.hasLoaded && !permissions.hasPermission(Permissions.dashboardView)) {
       final requiredLabel = Permissions.labels[Permissions.dashboardView] ?? 'Voir le tableau de bord';
@@ -223,24 +236,34 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       }();
 
       return Scaffold(
-        appBar: AppBar(title: const Text('Tableau de bord')),
+        appBar: isWide ? AppBar(title: const Text('Tableau de bord')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 620),
-              child: Card(
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: Theme.of(context).dividerColor),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Tableau de bord',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 620),
+                  child: Card(
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: Theme.of(context).dividerColor),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
                       Icon(Icons.lock_person_rounded, size: 56, color: Theme.of(context).colorScheme.error),
                       const SizedBox(height: 14),
                       Text(
@@ -286,13 +309,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ),
                 ),
               ),
+                ),
+              ],
             ),
           ),
         ),
       );
     }
     final company = context.watch<CompanyProvider>();
-    final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     // Charger les données dès qu'une entreprise est disponible (ex. chargée ailleurs).
     if (company.currentCompanyId != null && _data == null && !_loading && _error == null) {
@@ -306,13 +330,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Tableau de bord')),
+        appBar: isWide ? AppBar(title: const Text('Tableau de bord')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!isWide) ...[
+                  Text(
+                    'Tableau de bord',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Icon(Icons.error_outline_rounded, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(company.loadError!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -324,8 +355,25 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
     if (company.currentCompanyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Tableau de bord')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l’administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Tableau de bord')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Tableau de bord',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l’administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -342,7 +390,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         : 'Vue Boutique — $storeName';
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Tableau de bord')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: () async {
           await company.refreshCompanies(context.read<AuthProvider>().user?.id);
@@ -361,17 +409,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               SizedBox(height: isWide ? 20 : 12),
               _buildFiltersCard(context, company),
               SizedBox(height: isWide ? 20 : 12),
-              if (_loading)
-                Padding(
-                  padding: EdgeInsets.symmetric(vertical: isWide ? 48 : 32),
-                  child: const Center(child: CircularProgressIndicator()),
-                )
-              else if (_error != null)
+              if (_error != null)
                 Card(
                   child: Padding(
                     padding: EdgeInsets.all(isWide ? 20 : 14),
                     child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
                   ),
+                )
+              else if (_loading || _data == null)
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: isWide ? 48 : 32),
+                  child: const Center(child: CircularProgressIndicator()),
                 )
               else ...[
                 _buildDayStatsCard(context),
@@ -883,10 +931,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(Icons.bar_chart_rounded, size: 22, color: theme.colorScheme.primary),
                 const SizedBox(width: 10),
-                Text('Chiffre d\'affaires par jour', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+                Expanded(
+                  child: Text(
+                    'Chiffre d\'affaires par jour',
+                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -901,7 +957,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 child: BarChart(
                   BarChartData(
                     alignment: BarChartAlignment.spaceAround,
-                    maxY: d.salesByDay.map((e) => e.total).reduce((a, b) => a > b ? a : b) * 1.15,
+                    maxY: (d.salesByDay.map((e) => e.total).reduce((a, b) => a > b ? a : b) * 1.15)
+                        .clamp(1.0, double.infinity),
                     barGroups: d.salesByDay.asMap().entries.map((e) => BarChartGroupData(
                       x: e.key,
                       barRods: [
@@ -1011,8 +1068,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     )),
                   ),
                 ),
-                title: Text(p.productName, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium),
-                trailing: Text(formatCurrency(p.revenue), style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                title: Text(
+                  p.productName,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                  style: theme.textTheme.bodyMedium,
+                ),
+                trailing: Text(
+                  formatCurrency(p.revenue),
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
               );
             }),
           const Divider(height: 1),
@@ -1168,6 +1234,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 'Ventes par catégorie',
                 style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
             if (categories.isEmpty || totalCat <= 0)
@@ -1376,9 +1443,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final toParsed = DateTime.tryParse(range.to);
     final fromStr = fromParsed != null ? _formatShortDate(fromParsed) : range.from;
     final toStr = toParsed != null ? _formatShortDate(toParsed) : range.to;
-    return Center(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Text(
         'Période : $fromStr — $toStr',
+        textAlign: TextAlign.center,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
       ),
     );

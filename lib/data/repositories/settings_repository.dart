@@ -9,9 +9,68 @@ class SettingsRepository {
 
   final SupabaseClient _client;
 
+  /// Dernière valeur connue par entreprise — évite un flash « carte absente » au retour
+  /// sur Ventes / Boutiques pendant le fetch réseau.
+  static final Map<String, bool> _invoiceTablePosEnabledByCompany = {};
+
+  static bool? peekInvoiceTablePosEnabled(String companyId) =>
+      _invoiceTablePosEnabledByCompany[companyId];
+
   static const _keyDefaultStockAlert = 'default_stock_alert_threshold';
   static const _keyPublicWebsiteUrl = 'public_website_url';
+  static const _keyInvoiceTablePosEnabled = 'invoice_table_pos_enabled';
   static const _defaultStockAlertValue = 5;
+
+  /// Propriétaire : active l’entrée « Facture (tableau) » sur les boutiques (droit utilisateur distinct).
+  Future<bool> getInvoiceTablePosEnabled(String companyId) async {
+    final data = await _client
+        .from('company_settings')
+        .select('value')
+        .eq('company_id', companyId)
+        .eq('key', _keyInvoiceTablePosEnabled)
+        .maybeSingle();
+    bool result;
+    if (data == null) {
+      result = false;
+    } else {
+      final raw = (data as Map)['value'];
+      if (raw is bool) {
+        result = raw;
+      } else if (raw is String) {
+        final s = raw.trim().toLowerCase();
+        result = s == 'true' || s == '1' || s == 'yes';
+      } else if (raw is num) {
+        result = raw != 0;
+      } else {
+        result = false;
+      }
+    }
+    _invoiceTablePosEnabledByCompany[companyId] = result;
+    return result;
+  }
+
+  Future<void> setInvoiceTablePosEnabled(String companyId, bool enabled) async {
+    final existing = await _client
+        .from('company_settings')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('key', _keyInvoiceTablePosEnabled)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from('company_settings')
+          .update({'value': enabled})
+          .eq('company_id', companyId)
+          .eq('key', _keyInvoiceTablePosEnabled);
+    } else {
+      await _client.from('company_settings').insert({
+        'company_id': companyId,
+        'key': _keyInvoiceTablePosEnabled,
+        'value': enabled,
+      });
+    }
+    _invoiceTablePosEnabledByCompany[companyId] = enabled;
+  }
 
   Future<int> getDefaultStockAlertThreshold(String companyId) async {
     final data = await _client

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import '../../../core/breakpoints.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/utils/sale_pos_edit.dart';
@@ -42,6 +43,7 @@ class PosQuickPage extends ConsumerStatefulWidget {
   const PosQuickPage({super.key, required this.storeId, this.editSaleId});
 
   final String storeId;
+
   /// Ouvre la caisse en chargeant une vente complétée à modifier (`?editSale=`).
   final String? editSaleId;
 
@@ -332,7 +334,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             productId: c.productId,
             quantity: c.quantity,
             unitPrice: c.unitPrice,
-            discount: (c.quantity * c.unitPrice - c.total).clamp(0.0, double.infinity),
+            discount: (c.quantity * c.unitPrice - c.total).clamp(
+              0.0,
+              double.infinity,
+            ),
           ),
         )
         .toList();
@@ -341,9 +346,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   Future<void> _bootstrapSaleEdit() async {
     final rawId = widget.editSaleId?.trim() ?? '';
     if (rawId.isEmpty || !mounted) return;
-    if (!context.read<PermissionsProvider>().hasPermission(Permissions.salesUpdate)) {
+    if (!context.read<PermissionsProvider>().hasPermission(
+      Permissions.salesUpdate,
+    )) {
       setState(() {
-        _saleEditBarrierError = 'Vous n\'avez pas la permission de modifier des ventes.';
+        _saleEditBarrierError =
+            'Vous n\'avez pas la permission de modifier des ventes.';
         _saleEditBootstrapping = false;
       });
       return;
@@ -364,14 +372,16 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       }
       if (sale.storeId != widget.storeId) {
         setState(() {
-          _saleEditBarrierError = 'Cette vente appartient à une autre boutique.';
+          _saleEditBarrierError =
+              'Cette vente appartient à une autre boutique.';
           _saleEditBootstrapping = false;
         });
         return;
       }
       if (sale.status != SaleStatus.completed) {
         setState(() {
-          _saleEditBarrierError = 'Seules les ventes complétées peuvent être modifiées.';
+          _saleEditBarrierError =
+              'Seules les ventes complétées peuvent être modifiées.';
           _saleEditBootstrapping = false;
         });
         return;
@@ -382,12 +392,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         return;
       }
       final items = sale.saleItems ?? await _salesRepo.getItems(sale.id);
-      final payments = sale.salePayments ?? await _salesRepo.getPayments(sale.id);
+      final payments =
+          sale.salePayments ?? await _salesRepo.getPayments(sale.id);
       if (!mounted) return;
       final release = <String, int>{};
       final cart = <PosCartItem>[];
       for (final item in items) {
-        release[item.productId] = (release[item.productId] ?? 0) + item.quantity;
+        release[item.productId] =
+            (release[item.productId] ?? 0) + item.quantity;
         cart.add(
           PosCartItem(
             productId: item.productId,
@@ -503,9 +515,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           logContext: const {'op': 'cache_sale_after_update'},
         );
       }
-      ref.invalidate(salesStreamProvider((companyId: companyId, storeId: storeId)));
+      ref.invalidate(
+        salesStreamProvider((companyId: companyId, storeId: storeId)),
+      );
     }
-    await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([storeId]);
+    await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([
+      storeId,
+    ]);
     ref.invalidate(inventoryQuantitiesStreamProvider(storeId));
     try {
       await _persistLocalAfterSaleUpdate(sale);
@@ -550,7 +566,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
 
     if (_activeEditSaleId != null) {
       if (!ConnectivityService.instance.isOnline) {
-        AppToast.error(context, 'La modification nécessite une connexion internet.');
+        AppToast.error(
+          context,
+          'La modification nécessite une connexion internet.',
+        );
         return;
       }
       setState(() => _creating = true);
@@ -565,12 +584,17 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           documentType: DocumentType.thermalReceipt,
         );
         final sale = await _salesRepo.get(_activeEditSaleId!);
-        if (sale == null) throw Exception('Vente introuvable après mise à jour');
+        if (sale == null)
+          throw Exception('Vente introuvable après mise à jour');
         await _afterSaleEditSuccess(sale);
       } catch (e, st) {
         if (mounted) {
           if (shouldRecoverInventoryCachesFromRpcError(e)) {
-            recoverStoreInventoryCacheAfterRpcError(ref, widget.storeId, _refreshSync);
+            recoverStoreInventoryCacheAfterRpcError(
+              ref,
+              widget.storeId,
+              _refreshSync,
+            );
           }
           AppErrorHandler.show(
             context,
@@ -680,7 +704,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           context.read<AuthProvider>().profile?.fullName ??
           context.read<AuthProvider>().user?.email ??
           '—';
-      final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(companyId);
+      final qrSite = await ref
+          .read(appDatabaseProvider)
+          .getPublicWebsiteUrl(companyId);
       if (!mounted) return;
       final receipt = ReceiptTicketData(
         storeName: store.name,
@@ -803,7 +829,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           context.read<AuthProvider>().profile?.fullName ??
           context.read<AuthProvider>().user?.email ??
           '—';
-      final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(companyId);
+      final qrSite = await ref
+          .read(appDatabaseProvider)
+          .getPublicWebsiteUrl(companyId);
       if (!mounted) return;
       final receipt = ReceiptTicketData(
         storeName: store.name,
@@ -985,7 +1013,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     }
     final saleEditParam = widget.editSaleId?.trim() ?? '';
     final isSaleEditEntry = saleEditParam.isNotEmpty;
-    if (!isSaleEditEntry && !permissions.hasPermission(Permissions.salesCreate)) {
+    if (!isSaleEditEntry &&
+        !permissions.hasPermission(Permissions.salesCreate)) {
       return Scaffold(
         appBar: AppBar(title: const Text('Caisse rapide')),
         body: Center(
@@ -1028,7 +1057,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.lock_rounded, size: 64, color: theme.colorScheme.error),
+                  Icon(
+                    Icons.lock_rounded,
+                    size: 64,
+                    color: theme.colorScheme.error,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     "Vous n'avez pas la permission de modifier des ventes.",
@@ -1196,11 +1229,16 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final posCart = context.watch<PosCartSettingsProvider>();
 
     final isOnline = ConnectivityService.instance.isOnline;
+    final hidePosOrangeBar =
+        MediaQuery.sizeOf(context).width < Breakpoints.tablet;
     return Scaffold(
-      body: Column(
-        children: [
-          _buildPosHeader(store!, caissierName),
-          if (_activeEditSaleId != null) _buildSaleEditModeBanner(theme),
+      body: SafeArea(
+        bottom: false,
+        top: hidePosOrangeBar,
+        child: Column(
+          children: [
+            if (!hidePosOrangeBar) _buildPosHeader(store!, caissierName),
+            if (_activeEditSaleId != null) _buildSaleEditModeBanner(theme),
           if (!isOnline) _buildOfflineBanner(),
           Expanded(
             child: Row(
@@ -1270,6 +1308,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               showQuantityButtons: posCart.quickShowQuantityButtons,
             ),
         ],
+        ),
       ),
     );
   }
@@ -1283,7 +1322,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.edit_note_rounded, color: theme.colorScheme.onPrimaryContainer, size: 22),
+              Icon(
+                Icons.edit_note_rounded,
+                color: theme.colorScheme.onPrimaryContainer,
+                size: 22,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -1297,7 +1340,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               ),
               TextButton(
                 onPressed: () => context.go(AppRoutes.posQuick(widget.storeId)),
-                child: Text('Quitter', style: TextStyle(color: theme.colorScheme.onPrimaryContainer)),
+                child: Text(
+                  'Quitter',
+                  style: TextStyle(color: theme.colorScheme.onPrimaryContainer),
+                ),
               ),
             ],
           ),
@@ -1371,12 +1417,18 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         const SizedBox(width: 24),
         Text(
           'Boutique : ${store.name}',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 13),
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+          ),
         ),
         const SizedBox(width: 16),
         Text(
           'Caissier : $caissierName',
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.95), fontSize: 13),
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.95),
+            fontSize: 13,
+          ),
         ),
         const SizedBox(width: 16),
         ValueListenableBuilder<String>(
@@ -1652,6 +1704,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     Store? store,
     Map<String, int> stockByProductId,
   ) {
+    final cs = Theme.of(context).colorScheme;
     final showDiscount = store?.posDiscountEnabled ?? false;
     final isCash = _paymentMethod == PaymentMethod.cash;
     return Column(
@@ -1662,9 +1715,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           margin: const EdgeInsets.symmetric(horizontal: 12),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: PosQuickColors.fondPrincipal,
+            color: cs.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: PosQuickColors.bordure),
+            border: Border.all(color: cs.outline.withValues(alpha: 0.45)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1672,14 +1725,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Sous-total',
-                    style: TextStyle(color: PosQuickColors.textePrincipal),
+                    style: TextStyle(color: cs.onSurface),
                   ),
                   Text(
                     formatCurrency(_subtotal),
-                    style: const TextStyle(
-                      color: PosQuickColors.textePrincipal,
+                    style: TextStyle(
+                      color: cs.onSurface,
                     ),
                   ),
                 ],
@@ -1689,14 +1742,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
+                    Text(
                       'Remise',
-                      style: TextStyle(color: PosQuickColors.textePrincipal),
+                      style: TextStyle(color: cs.onSurface),
                     ),
                     Text(
                       formatCurrency(_discount),
-                      style: const TextStyle(
-                        color: PosQuickColors.textePrincipal,
+                      style: TextStyle(
+                        color: cs.onSurface,
                       ),
                     ),
                   ],
@@ -1706,10 +1759,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'TOTAL',
                     style: TextStyle(
-                      color: PosQuickColors.textePrincipal,
+                      color: cs.onSurface,
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
                     ),
@@ -1750,18 +1803,16 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
+              style: TextStyle(color: cs.onSurface),
               onChanged: (v) {
                 final n = double.tryParse(v.replaceAll(',', '.')) ?? 0;
                 setState(() => _discount = n.clamp(0, double.infinity));
               },
-              decoration: InputDecoration(
+              decoration: PosInputTheme.roundedField(
+                context,
+                radius: 10,
                 labelText: 'Remise',
                 hintText: '0',
-                filled: true,
-                fillColor: PosQuickColors.fondPrincipal,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 10,
@@ -1777,6 +1828,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
+              style: TextStyle(color: cs.onSurface),
               onChanged: (v) {
                 setState(() {
                   _amountReceivedTouched = true;
@@ -1787,14 +1839,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                       );
                 });
               },
-              decoration: InputDecoration(
+              decoration: PosInputTheme.roundedField(
+                context,
+                radius: 10,
                 labelText: 'Montant reçu',
                 hintText: _total > 0 ? formatCurrency(_total) : '0',
-                filled: true,
-                fillColor: PosQuickColors.fondPrincipal,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 10,
@@ -1808,9 +1857,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Monnaie à rendre',
-                    style: TextStyle(color: PosQuickColors.textePrincipal),
+                    style: TextStyle(color: cs.onSurface),
                   ),
                   Text(
                     _amountReceived >= _total
@@ -1850,12 +1899,16 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     _clearQtyControllers();
                   },
                   style: OutlinedButton.styleFrom(
-                    backgroundColor: PosQuickColors.fondSecondaire,
-                    foregroundColor: PosQuickColors.textePrincipal,
-                    side: const BorderSide(color: PosQuickColors.bordure),
+                    backgroundColor: cs.surfaceContainerHighest,
+                    foregroundColor: cs.onSurface,
+                    side: BorderSide(
+                      color: cs.outline.withValues(alpha: 0.45),
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: Text(_activeEditSaleId != null ? 'Quitter' : 'Annuler vente'),
+                  child: Text(
+                    _activeEditSaleId != null ? 'Quitter' : 'Annuler vente',
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1887,8 +1940,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     _creating
                         ? 'Enregistrement...'
                         : (_activeEditSaleId != null
-                            ? 'ENREGISTRER LA MODIFICATION'
-                            : 'VALIDER ET IMPRIMER'),
+                              ? 'ENREGISTRER LA MODIFICATION'
+                              : 'VALIDER ET IMPRIMER'),
                   ),
                 ),
               ),
@@ -1928,15 +1981,16 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
 
   Widget _paymentButton(String label, PaymentMethod method) {
     final selected = _paymentMethod == method;
+    final cs = Theme.of(context).colorScheme;
     return FilledButton(
       onPressed: () => setState(() => _paymentMethod = method),
       style: FilledButton.styleFrom(
         backgroundColor: selected
             ? PosQuickColors.orangePrincipal
-            : PosQuickColors.fondSecondaire,
+            : cs.surfaceContainerHighest,
         foregroundColor: selected
             ? Colors.white
-            : PosQuickColors.textePrincipal,
+            : cs.onSurface,
         padding: const EdgeInsets.symmetric(vertical: 12),
       ),
       child: Text(
@@ -1957,67 +2011,70 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
-        ),
-        child: Container(
-          height: MediaQuery.sizeOf(sheetContext).height * 0.9,
-          decoration: const BoxDecoration(
-            color: PosQuickColors.fondSecondaire,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      builder: (sheetContext) {
+        final sheetCs = Theme.of(sheetContext).colorScheme;
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.shopping_cart_rounded,
-                          color: PosQuickColors.orangePrincipal,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: PosQuickColors.textePrincipal,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: Container(
+            height: MediaQuery.sizeOf(sheetContext).height * 0.9,
+            decoration: BoxDecoration(
+              color: sheetCs.surfaceContainerLow,
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      if (_cart.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 32),
-                          child: Center(
-                            child: Text(
-                              'Panier vide',
-                              style: TextStyle(
-                                color: PosQuickColors.textePrincipal,
-                              ),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.shopping_cart_rounded,
+                            color: PosQuickColors.orangePrincipal,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: sheetCs.onSurface,
+                              fontSize: 16,
                             ),
                           ),
-                        )
+                        ],
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_cart.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 32),
+                            child: Center(
+                              child: Text(
+                                'Panier vide',
+                                style: TextStyle(
+                                  color: sheetCs.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          )
                       else ...[
                         ..._buildQuickCartTiles(
                           stockByProductId,
@@ -2034,13 +2091,14 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                       // Même bandeau que le bureau : moyens de paiement, remise, espèces, valider.
                       _buildRightZoneFooter(store, stockByProductId),
                     ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -2051,6 +2109,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     required bool showQuantityInput,
     required bool showQuantityButtons,
   }) {
+    final cs = theme.colorScheme;
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -2058,9 +2117,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         16,
         12 + MediaQuery.paddingOf(context).bottom,
       ),
-      decoration: const BoxDecoration(
-        color: PosQuickColors.fondPrincipal,
-        border: Border(top: BorderSide(color: PosQuickColors.bordure)),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(
+          top: BorderSide(color: cs.outline.withValues(alpha: 0.4)),
+        ),
       ),
       child: Row(
         children: [
@@ -2081,33 +2142,38 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.shopping_cart_rounded,
                           color: PosQuickColors.orangePrincipal,
                           size: 26,
                         ),
                         const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Text(
-                              'Panier',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: PosQuickColors.textePrincipal,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Panier',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.onSurface,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                            Text(
-                              '$_cartItemCount article${_cartItemCount != 1 ? 's' : ''} • ${formatCurrency(_total)}',
-                              style: TextStyle(
-                                color: PosQuickColors.textePrincipal
-                                    .withValues(alpha: 0.7),
-                                fontSize: 12,
+                              Text(
+                                '$_cartItemCount article${_cartItemCount != 1 ? 's' : ''} • ${formatCurrency(_total)}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ],
                     ),

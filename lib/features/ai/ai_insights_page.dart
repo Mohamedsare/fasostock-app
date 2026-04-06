@@ -280,7 +280,7 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
     VoidCallback? onGenerate,
   }) {
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: Text(title)),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: () async {
           _resetState();

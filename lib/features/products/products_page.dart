@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
+import '../../../core/breakpoints.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
@@ -376,22 +377,39 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         : provider.error;
 
     if (company.loading && company.companies.isEmpty) {
-      return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Produits')),
-        body: const Center(child: CircularProgressIndicator()),
+      return const Scaffold(
+        appBar: null,
+        body: Center(child: CircularProgressIndicator()),
       );
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return CompanyLoadErrorScreen(
         message: company.loadError!,
         title: 'Produits',
-        appBar: isWide ? null : AppBar(title: const Text('Produits')),
       );
     }
     if (companyId == null) {
+      final wide900 = MediaQuery.sizeOf(context).width >= 900;
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Produits')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l’administrateur.')),
+        appBar: wide900 ? AppBar(title: const Text('Produits')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!wide900) ...[
+                  Text(
+                    'Produits',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l’administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -408,7 +426,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     return Stack(
       children: [
         Scaffold(
-          appBar: isWide ? null : AppBar(title: const Text('Produits')),
+          appBar: null,
           body: RefreshIndicator(
             onRefresh: _refresh,
             child: CustomScrollView(
@@ -561,6 +579,8 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
   List<Widget> _buildProductsTab(BuildContext context, ProductsPageProvider provider, List<Product> products, Map<String, int> stockByStore, List<Category> categories, List<Brand> brands, bool productsLoading, String? productsError, String? companyId, String? storeId, bool isWide, bool canUpdateProduct, bool canDeleteProduct, bool canCreateProduct) {
     if (companyId == null) return [const SliverFillRemaining(child: Center(child: Text('Choisissez une entreprise')))];
+    final isMobileProducts =
+        MediaQuery.sizeOf(context).width < Breakpoints.tablet;
     final filtered = _filteredProducts(products);
     final totalCount = filtered.length;
     final pageCount = totalCount == 0 ? 0 : ((totalCount - 1) ~/ _productsPageSize) + 1;
@@ -577,7 +597,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         if (mounted) setState(() => _currentProductsPage = effectivePage);
       });
     }
-    final paginatedList = filtered.skip(effectivePage * _productsPageSize).take(_productsPageSize).toList();
+    final paginatedList = isMobileProducts
+        ? filtered
+        : filtered
+            .skip(effectivePage * _productsPageSize)
+            .take(_productsPageSize)
+            .toList();
     final canModifyProducts = canUpdateProduct || canDeleteProduct || canCreateProduct;
     return [
       SliverToBoxAdapter(
@@ -587,21 +612,49 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (canModifyProducts)
-                Row(
-                  children: [
-                    OutlinedButton.icon(
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final csvBtnStyle = OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    );
+                    final exportBtn = OutlinedButton.icon(
                       onPressed: filtered.isEmpty ? null : () => _exportCsv(filtered),
                       icon: const Icon(Icons.download, size: 18),
                       label: const Text('Enregistrer CSV'),
-                    ),
-                    const SizedBox(width: 8),
-                    if (canCreateProduct)
-                      OutlinedButton.icon(
-                        onPressed: _openImportCsv,
-                        icon: const Icon(Icons.upload, size: 18),
-                        label: const Text('Importer CSV'),
-                      ),
-                  ],
+                      style: csvBtnStyle,
+                    );
+                    final importBtn = OutlinedButton.icon(
+                      onPressed: _openImportCsv,
+                      icon: const Icon(Icons.upload, size: 18),
+                      label: const Text('Importer CSV'),
+                      style: csvBtnStyle,
+                    );
+                    // Même ligne : risque de débordement ~quelques px si le Wrap sous-alloue la 2e ligne.
+                    if (constraints.maxWidth < 520) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          exportBtn,
+                          if (canCreateProduct) ...[
+                            const SizedBox(height: 8),
+                            importBtn,
+                          ],
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: exportBtn),
+                        if (canCreateProduct) ...[
+                          const SizedBox(width: 8),
+                          Expanded(child: importBtn),
+                        ],
+                      ],
+                    );
+                  },
                 ),
               const SizedBox(height: 12),
               TextField(
@@ -735,7 +788,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             ),
           ),
         ),
-        if (pageCount > 1)
+        if (!isMobileProducts && pageCount > 1)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
@@ -872,6 +925,13 @@ class _ProductListTile extends StatelessWidget {
     final firstImage = product.productImages?.isNotEmpty == true ? product.productImages!.first.url : null;
     final subtitleText = '${product.sku ?? '—'} · ${formatCurrency(product.salePrice)} · ${product.category?.name ?? '—'} · ${product.brand?.name ?? '—'}';
 
+    final tileActions = IconButton.styleFrom(
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.all(4),
+      minimumSize: const Size(36, 36),
+    );
+
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
@@ -903,66 +963,76 @@ class _ProductListTile extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    product.name,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      decoration: product.isActive ? null : TextDecoration.lineThrough,
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          product.name,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            decoration: product.isActive ? null : TextDecoration.lineThrough,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitleText,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (stockQuantity != null) ...[
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            width: double.infinity,
+                            child: StockRangeIndicator(
+                              quantity: stockQuantity!,
+                              alertThreshold: stockAlertThreshold,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitleText,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                  if (canEdit || canDelete)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (canEdit) ...[
+                          IconButton(
+                            icon: const Icon(Icons.edit_outlined, size: 20),
+                            onPressed: onEdit,
+                            tooltip: 'Modifier',
+                            style: tileActions,
+                          ),
+                          IconButton(
+                            icon: Icon(product.isActive ? Icons.toggle_on : Icons.toggle_off, size: 26),
+                            onPressed: onToggleActive,
+                            tooltip: product.isActive ? 'Désactiver' : 'Activer',
+                            style: tileActions,
+                          ),
+                        ],
+                        if (canDelete)
+                          IconButton(
+                            icon: Icon(Icons.delete_outline, size: 20, color: theme.colorScheme.error),
+                            onPressed: onDelete,
+                            tooltip: 'Supprimer',
+                            style: tileActions,
+                          ),
+                      ],
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (stockQuantity != null) ...[
-                    const SizedBox(height: 6),
-                    StockRangeIndicator(quantity: stockQuantity!, alertThreshold: stockAlertThreshold),
-                  ],
                 ],
               ),
             ),
-            if (canEdit || canDelete) ...[
-              const SizedBox(width: 4),
-              Wrap(
-                spacing: 0,
-                runSpacing: 0,
-                alignment: WrapAlignment.end,
-                children: [
-                  if (canEdit) ...[
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined, size: 22),
-                      onPressed: onEdit,
-                      tooltip: 'Modifier',
-                      style: IconButton.styleFrom(padding: const EdgeInsets.all(8), minimumSize: const Size(40, 40)),
-                    ),
-                    IconButton(
-                      icon: Icon(product.isActive ? Icons.toggle_on : Icons.toggle_off, size: 28),
-                      onPressed: onToggleActive,
-                      tooltip: product.isActive ? 'Désactiver' : 'Activer',
-                      style: IconButton.styleFrom(padding: const EdgeInsets.all(6), minimumSize: const Size(40, 40)),
-                    ),
-                  ],
-                  if (canDelete)
-                    IconButton(
-                      icon: Icon(Icons.delete_outline, size: 22, color: theme.colorScheme.error),
-                      onPressed: onDelete,
-                      tooltip: 'Supprimer',
-                      style: IconButton.styleFrom(padding: const EdgeInsets.all(8), minimumSize: const Size(40, 40)),
-                    ),
-                ],
-              ),
-            ],
           ],
         ),
       ),

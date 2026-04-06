@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show max;
+import 'dart:math' show max, min;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -32,6 +32,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   bool _sidebarCollapsed = false;
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
   static const _navItems = [
     (
       path: AppRoutes.dashboard,
@@ -67,6 +68,11 @@ class _AppShellState extends State<AppShell> {
       icon: Icons.swap_horiz_rounded,
     ),
     (path: AppRoutes.customers, label: 'Clients', icon: Icons.person_rounded),
+    (
+      path: AppRoutes.credit,
+      label: 'Crédit',
+      icon: Icons.account_balance_wallet_rounded,
+    ),
     (
       path: AppRoutes.suppliers,
       label: 'Fournisseurs',
@@ -212,6 +218,7 @@ class _AppShellState extends State<AppShell> {
         // Magasin (dépôt central) : propriétaire ou magasinier (warehouse.manage).
         if (e.path == AppRoutes.warehouse) return permissions.canManageWarehouse;
         if (e.path == AppRoutes.customers) return canCustomers;
+        if (e.path == AppRoutes.credit) return permissions.canAccessCredit;
         if (e.path == AppRoutes.suppliers) return canSuppliers;
         if (e.path == AppRoutes.reports) return canReports;
         if (e.path == AppRoutes.ai) return canAi;
@@ -273,57 +280,104 @@ class _AppShellState extends State<AppShell> {
                           },
                         ),
                       Expanded(
-                        child: Center(
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: Breakpoints.effectiveMaxContentWidth(
-                                MediaQuery.sizeOf(context).width,
+                        child: Builder(
+                          builder: (context) {
+                            final path = GoRouterState.of(context).uri.path;
+                            final factureTabFullWidth =
+                                path.contains('/facture-tab');
+                            final shellW = MediaQuery.sizeOf(context).width;
+                            final maxW = factureTabFullWidth
+                                ? double.infinity
+                                : Breakpoints.effectiveMaxContentWidth(
+                                    shellW,
+                                  );
+                            final padX = factureTabFullWidth && isWide
+                                ? 10.0
+                                : (isWide
+                                      ? AppTheme.spaceXl
+                                      : AppTheme.spaceLg);
+                            final padYTop = factureTabFullWidth && isWide
+                                ? 6.0
+                                : (isWide
+                                      ? AppTheme.spaceXl
+                                      : AppTheme.spaceMd);
+                            final padYBottom = factureTabFullWidth && isWide
+                                ? 10.0
+                                : (isWide
+                                      ? AppTheme.spaceXl
+                                      : AppTheme.spaceLg);
+                            return Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: maxW),
+                                child: Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    padX,
+                                    padYTop,
+                                    padX,
+                                    padYBottom,
+                                  ),
+                                  child: widget.child,
+                                ),
                               ),
-                            ),
-                            child: Padding(
-                              padding: EdgeInsets.fromLTRB(
-                                isWide ? AppTheme.spaceXl : AppTheme.spaceLg,
-                                isWide ? AppTheme.spaceXl : AppTheme.spaceMd,
-                                isWide ? AppTheme.spaceXl : AppTheme.spaceLg,
-                                isWide ? AppTheme.spaceXl : AppTheme.spaceLg,
-                              ),
-                              child: widget.child,
-                            ),
-                          ),
+                            );
+                          },
                         ),
                       ),
                     ],
                   )
                 : Scaffold(
+                    key: _mobileScaffoldKey,
+                    drawer: visibleNavItems.isEmpty
+                        ? null
+                        : _MobileNavigationDrawer(
+                            navItems: visibleNavItems,
+                            company: company,
+                            userEmail: auth.user?.email,
+                          ),
                     appBar: _MobileAppBar(
                       preferredHeight: 58,
-                      onMenuPressed: () =>
-                          _showMoreBottomSheet(context, visibleNavItems, auth),
+                      onMenuPressed: visibleNavItems.isEmpty
+                          ? null
+                          : () =>
+                                _mobileScaffoldKey.currentState?.openDrawer(),
                     ),
                     body: LayoutBuilder(
-                      builder: (_, constraints) {
+                      builder: (bodyContext, constraints) {
                         final w = MediaQuery.sizeOf(context).width;
                         final isMobile = Breakpoints.isMobile(w);
-                        /* Aligné appweb `FsPage` : px-3 (12px) sur mobile */
-                        final horizontal = isMobile
-                            ? 12.0
-                            : (w < Breakpoints.tablet
-                                  ? AppTheme.spaceLg
-                                  : AppTheme.spaceXl);
-                        final vertical = isMobile
-                            ? AppTheme.spaceMdM
-                            : AppTheme.spaceMd;
-                        return SafeArea(
-                          left: true,
-                          right: true,
-                          top: false,
-                          bottom: false,
-                          child: Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: horizontal,
-                              vertical: vertical,
+                        final path = GoRouterState.of(context).uri.path;
+                        final factureTabRoute = path.contains('/facture-tab');
+                        /* POS facture-tab : pleine largeur (comme shell desktop) pour le tableau. */
+                        /* Aligné appweb `FsPage` : px-3 (12px) sur mobile — sauf facture-tab. */
+                        final horizontal = factureTabRoute
+                            ? 0.0
+                            : (isMobile
+                                  ? 12.0
+                                  : (w < Breakpoints.tablet
+                                        ? AppTheme.spaceLg
+                                        : AppTheme.spaceXl));
+                        final vertical = factureTabRoute
+                            ? 4.0
+                            : (isMobile
+                                  ? AppTheme.spaceMdM
+                                  : AppTheme.spaceMd);
+                        /* La barre du shell est déjà sous la status bar : sans ça, chaque AppBar
+                           interne avec primary=true réservait *deux fois* la marge → bande blanche. */
+                        return MediaQuery.removePadding(
+                          context: bodyContext,
+                          removeTop: true,
+                          child: SafeArea(
+                            left: true,
+                            right: true,
+                            top: false,
+                            bottom: false,
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: horizontal,
+                                vertical: vertical,
+                              ),
+                              child: widget.child,
                             ),
-                            child: widget.child,
                           ),
                         );
                       },
@@ -333,7 +387,7 @@ class _AppShellState extends State<AppShell> {
                       company: company,
                       navItems: visibleNavItems,
                       onMoreTap: () =>
-                          _showMoreBottomSheet(context, visibleNavItems, auth),
+                          _showMoreBottomSheet(context, visibleNavItems),
                       isMobile: Breakpoints.isMobile(
                         MediaQuery.sizeOf(context).width,
                       ),
@@ -345,11 +399,10 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  /// Aligné sur `appweb/components/layout/more-sheet.tsx` : surface thème, grille 4 cols, déconnexion rouge.
+  /// Aligné sur `appweb/components/layout/more-sheet.tsx` : surface thème, grille 4 cols.
   void _showMoreBottomSheet(
     BuildContext context,
     List<({String path, String label, IconData icon})> visibleNavItems,
-    AuthProvider auth,
   ) {
     const bottomPaths = [
       AppRoutes.dashboard,
@@ -359,7 +412,6 @@ class _AppShellState extends State<AppShell> {
     final moreItems = visibleNavItems
         .where((e) => !bottomPaths.contains(e.path))
         .toList();
-    const red600 = Color(0xFFDC2626);
 
     showModalBottomSheet<void>(
       context: context,
@@ -432,7 +484,7 @@ class _AppShellState extends State<AppShell> {
                         maxHeight: (h * 0.7).clamp(200.0, 520.0),
                       ),
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                        padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + safeBottom),
                         child: moreItems.isEmpty
                             ? Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -558,57 +610,6 @@ class _AppShellState extends State<AppShell> {
                                   );
                                 },
                               ),
-                      ),
-                    ),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerLow,
-                        border: Border(
-                          top: BorderSide(
-                            color: cs.outline.withValues(alpha: 0.12),
-                          ),
-                        ),
-                      ),
-                      padding: EdgeInsets.fromLTRB(
-                        12,
-                        12,
-                        12,
-                        12 + safeBottom,
-                      ),
-                      child: Material(
-                        color: red600,
-                        borderRadius: BorderRadius.circular(16),
-                        child: InkWell(
-                          onTap: () async {
-                            Navigator.of(ctx).pop();
-                            await auth.signOut();
-                            if (context.mounted) context.go(AppRoutes.login);
-                          },
-                          borderRadius: BorderRadius.circular(16),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 14),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.logout_rounded,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Déconnexion',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                       ),
                     ),
                   ],
@@ -865,11 +866,64 @@ class _AppBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-/// App bar mobile — alignée `app-shell.tsx` (web) : logo + menu → MoreSheet, déconnexion ; pas de drawer ni sélecteur entreprise.
-class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const _MobileAppBar({required this.onMenuPressed, this.preferredHeight = 58});
+/// Logo barre mobile — `companies.logo_url` si présent (comme appweb), sinon pastille + icône inventaire.
+Widget _mobileToolbarBrandFallback(Color primary) {
+  return Container(
+    width: 36,
+    height: 36,
+    decoration: BoxDecoration(
+      color: primary.withValues(alpha: 0.14),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: primary.withValues(alpha: 0.22)),
+    ),
+    child: Icon(Icons.inventory_2_outlined, size: 18, color: primary),
+  );
+}
 
-  final VoidCallback onMenuPressed;
+class _MobileToolbarBrandGlyph extends StatelessWidget {
+  const _MobileToolbarBrandGlyph({
+    required this.logoUrl,
+    required this.primary,
+  });
+
+  final String? logoUrl;
+  final Color primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = logoUrl?.trim();
+    if (u == null || u.isEmpty) {
+      return _mobileToolbarBrandFallback(primary);
+    }
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: Image.network(
+        u,
+        fit: BoxFit.contain,
+        alignment: Alignment.center,
+        errorBuilder: (_, _, _) => _mobileToolbarBrandFallback(primary),
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return Center(
+            child: SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: primary),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// App bar mobile — alignée `app-shell.tsx` (web) : logo + menu → drawer navigation plein, déconnexion.
+class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
+  const _MobileAppBar({this.onMenuPressed, this.preferredHeight = 58});
+
+  /// `null` masque le bouton menu (ex. aucune entrée de navigation).
+  final VoidCallback? onMenuPressed;
   final double preferredHeight;
 
   @override
@@ -923,19 +977,10 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: primary.withValues(alpha: 0.14),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: primary.withValues(alpha: 0.22)),
-                        ),
-                        child: Icon(
-                          Icons.inventory_2_outlined,
-                          size: 18,
-                          color: primary,
-                        ),
+                      _MobileToolbarBrandGlyph(
+                        logoUrl:
+                            context.watch<CompanyProvider>().currentCompany?.logoUrl,
+                        primary: primary,
                       ),
                       const SizedBox(width: 8),
                       FasoStockWordmark(
@@ -949,13 +994,15 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: Icon(Icons.menu_rounded, size: 20, color: onSurface),
-                onPressed: onMenuPressed,
-                tooltip: 'Menu et autres sections',
-                style: shellIconButton,
-              ),
+              if (onMenuPressed != null) ...[
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(Icons.menu_rounded, size: 20, color: onSurface),
+                  onPressed: onMenuPressed,
+                  tooltip: 'Ouvrir le menu de navigation',
+                  style: shellIconButton,
+                ),
+              ],
             ],
           ),
         ),
@@ -973,6 +1020,316 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
               },
               tooltip: 'Déconnexion',
               style: shellIconButton,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _navDrawerEmailInitials(String email) {
+  final local = email.split('@').first.trim();
+  if (local.isEmpty) return '?';
+  final parts = local.split(RegExp(r'[._-]+')).where((p) => p.isNotEmpty).toList();
+  if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+  if (local.length >= 2) return local.substring(0, 2).toUpperCase();
+  return local[0].toUpperCase();
+}
+
+/// Tiroir mobile — aligné appweb : largeur max 260px, toutes les entrées, pilule « Menu » pour fermer.
+class _MobileNavigationDrawer extends StatelessWidget {
+  const _MobileNavigationDrawer({
+    required this.navItems,
+    required this.company,
+    this.userEmail,
+  });
+
+  final List<({String path, String label, IconData icon})> navItems;
+  final CompanyProvider company;
+  final String? userEmail;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final drawerW = min(260.0, MediaQuery.sizeOf(context).width);
+
+    void closeDrawer() {
+      Navigator.of(context).pop();
+    }
+
+    return Drawer(
+      width: drawerW,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [
+                    theme.colorScheme.surfaceContainerLowest,
+                    theme.colorScheme.surfaceContainerLowest
+                        .withValues(alpha: 0.98),
+                  ]
+                : [
+                    theme.colorScheme.surfaceContainerLowest,
+                    theme.colorScheme.surfaceContainerLow
+                        .withValues(alpha: 0.5),
+                  ],
+          ),
+          border: Border(
+            right: BorderSide(
+              color: theme.dividerColor.withValues(alpha: isDark ? 0.15 : 0.08),
+              width: 1,
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: primary.withValues(alpha: isDark ? 0.08 : 0.03),
+              blurRadius: 24,
+              offset: const Offset(-2, 0),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+              blurRadius: 16,
+              offset: const Offset(-1, 0),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.spaceMd,
+                  AppTheme.spaceXl,
+                  AppTheme.spaceMd,
+                  AppTheme.spaceLg,
+                ),
+                child: InkWell(
+                  onTap: () {
+                    closeDrawer();
+                    context.go(AppRoutes.dashboard);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        _SidebarBrandGlyph(
+                          logoUrl: company.currentCompany?.logoUrl?.trim(),
+                          primary: primary,
+                          collapsed: false,
+                        ),
+                        const SizedBox(width: AppTheme.spaceMd),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              FasoStockWordmark(
+                                style: theme.textTheme.titleLarge!.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.3,
+                                  fontSize: 18,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                'Gestion & caisse',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.9),
+                                  fontSize: 13,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppTheme.spaceMd,
+                    AppTheme.spaceSm,
+                    AppTheme.spaceMd,
+                    AppTheme.spaceLg,
+                  ),
+                  children: navItems
+                      .map(
+                        (e) => _NavTile(
+                          path: e.path,
+                          label: e.label,
+                          icon: e.icon,
+                          collapsed: false,
+                          onBeforeNavigate: closeDrawer,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.spaceMd,
+                  AppTheme.spaceSm,
+                  AppTheme.spaceMd,
+                  AppTheme.spaceLg,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _MobileDrawerMenuPill(onPressed: closeDrawer),
+                    if (userEmail != null && userEmail!.trim().isNotEmpty) ...[
+                      const SizedBox(height: AppTheme.spaceSm),
+                      _MobileDrawerAccountChip(email: userEmail!.trim()),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pilule Menu + chevron — même principe que `app-sidebar.tsx` (variant mobileDrawer).
+class _MobileDrawerMenuPill extends StatelessWidget {
+  const _MobileDrawerMenuPill({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = isDark
+        ? theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.45)
+        : const Color(0xFFF5F5F5);
+    final shadowColor = Colors.black.withValues(alpha: isDark ? 0.35 : 0.07);
+
+    return Semantics(
+      button: true,
+      label: 'Fermer le menu',
+      child: Material(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        elevation: 2,
+        shadowColor: shadowColor,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(999),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.menu_rounded, size: 18, color: primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Menu',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
+                      color: isDark
+                          ? theme.colorScheme.onSurface
+                          : const Color(0xFF262626),
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_left_rounded,
+                  size: 22,
+                  color: theme.colorScheme.onSurfaceVariant
+                      .withValues(alpha: 0.85),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileDrawerAccountChip extends StatelessWidget {
+  const _MobileDrawerAccountChip({required this.email});
+
+  final String email;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final primary = cs.primary;
+    final initials = _navDrawerEmailInitials(email);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: cs.outline.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: primary.withValues(alpha: 0.2)),
+            ),
+            child: Text(
+              initials,
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: primary,
+                fontSize: 10,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'COMPTE',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                    fontSize: 10,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                Text(
+                  email,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: cs.onSurface,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ),
         ],
@@ -1256,12 +1613,15 @@ class _NavTile extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.collapsed,
+    this.onBeforeNavigate,
   });
 
   final String path;
   final String label;
   final IconData icon;
   final bool collapsed;
+  /// Ex. fermer le tiroir avant [context.go].
+  final VoidCallback? onBeforeNavigate;
 
   bool _isActive(BuildContext context) {
     final loc = GoRouterState.of(context).uri.path;
@@ -1290,7 +1650,10 @@ class _NavTile extends StatelessWidget {
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                 child: InkWell(
-                  onTap: () => context.go(path),
+                  onTap: () {
+                    onBeforeNavigate?.call();
+                    context.go(path);
+                  },
                   borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                   child: SizedBox(
                     width: 44,
@@ -1335,7 +1698,10 @@ class _NavTile extends StatelessWidget {
             color: isActive ? primary.withValues(alpha: 0.1) : Colors.transparent,
             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
             child: InkWell(
-              onTap: () => context.go(path),
+              onTap: () {
+                onBeforeNavigate?.call();
+                context.go(path);
+              },
               borderRadius: BorderRadius.circular(AppTheme.radiusMd),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
@@ -1459,16 +1825,18 @@ class _BottomNav extends StatelessWidget {
       color: Colors.transparent,
       child: Container(
         decoration: BoxDecoration(
-          color: surface.withValues(alpha: 0.95),
+          color: surface.withValues(alpha: isMobile ? 0.965 : 0.95),
           border: Border(
-            top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.06)),
+            top: BorderSide(
+              color: theme.dividerColor.withValues(alpha: isMobile ? 0.055 : 0.06),
+            ),
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 32,
-              offset: const Offset(0, -8),
-              spreadRadius: -12,
+              color: Colors.black.withValues(alpha: isMobile ? 0.052 : 0.08),
+              blurRadius: isMobile ? 16 : 32,
+              offset: Offset(0, isMobile ? -4 : -8),
+              spreadRadius: isMobile ? -5 : -12,
             ),
           ],
         ),
@@ -1477,10 +1845,10 @@ class _BottomNav extends StatelessWidget {
           minimum: EdgeInsets.zero,
           child: Padding(
             padding: EdgeInsets.fromLTRB(
-              max(8.0, MediaQuery.paddingOf(context).left),
-              8,
-              max(8.0, MediaQuery.paddingOf(context).right),
-              max(8.0, MediaQuery.paddingOf(context).bottom),
+              max(isMobile ? 6.0 : 8.0, MediaQuery.paddingOf(context).left),
+              isMobile ? 4 : 8,
+              max(isMobile ? 6.0 : 8.0, MediaQuery.paddingOf(context).right),
+              max(isMobile ? 5.0 : 8.0, MediaQuery.paddingOf(context).bottom),
             ),
             child: Row(
               children: [
@@ -1544,27 +1912,38 @@ class _NavDestination extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    /* Aligné appweb `shellMobileTabActiveClass` / onglets `rounded-2xl` min-h-[56px] */
+    /* Mobile : équilibre lisibilité / hauteur (entre compact et barre d’origine). */
+    final minH = isMobile ? 44.0 : 56.0;
+    final vPad = isMobile ? 3.0 : 6.0;
+    final hPad = isMobile ? 5.0 : 6.0;
+    final iconGap = isMobile ? 2.0 : 4.0;
+    final iconSize = isMobile ? 22.0 : 26.0;
+    final labelSize = isMobile ? 10.0 : 11.0;
+    final radius = isMobile ? 13.0 : 16.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(radius),
         splashColor: primary.withValues(alpha: 0.12),
         highlightColor: primary.withValues(alpha: 0.06),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-          constraints: const BoxConstraints(minHeight: 56),
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+          constraints: BoxConstraints(minHeight: minH),
           decoration: BoxDecoration(
-            color: isSelected ? primary.withValues(alpha: 0.13) : null,
-            borderRadius: BorderRadius.circular(16),
+            color: isSelected
+                ? primary.withValues(alpha: isMobile ? 0.12 : 0.13)
+                : null,
+            borderRadius: BorderRadius.circular(radius),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.04),
-                      blurRadius: 2,
+                      color: Colors.black.withValues(
+                        alpha: isMobile ? 0.03 : 0.04,
+                      ),
+                      blurRadius: isMobile ? 1.5 : 2,
                       offset: const Offset(0, 1),
                     ),
                   ]
@@ -1577,19 +1956,19 @@ class _NavDestination extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                size: isMobile ? 24 : 26,
+                size: iconSize,
                 color: isSelected
                     ? primary
                     : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8),
               ),
-              const SizedBox(height: 4),
+              SizedBox(height: iconGap),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: labelSize,
                   fontWeight: FontWeight.w600,
                   height: 1,
-                  letterSpacing: -0.2,
+                  letterSpacing: isMobile ? -0.22 : -0.2,
                   color: isSelected
                       ? primary
                       : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.75),

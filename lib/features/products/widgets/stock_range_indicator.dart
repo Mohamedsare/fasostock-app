@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// Indicateur de niveau de stock (équivalent StockRangeSlider web).
@@ -44,34 +46,44 @@ class StockRangeIndicator extends StatelessWidget {
     final variant = _variant(quantity, t);
     final color = _colorForVariant(variant, context);
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 28,
-          child: Text(
-            '$quantity',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-            textAlign: TextAlign.right,
-          ),
-        ),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 100,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: percent,
-              minHeight: 8,
-              backgroundColor: color.withValues(alpha: 0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(color),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const qtyW = 28.0;
+        const gap = 8.0;
+        final maxW = constraints.maxWidth;
+        final barW = maxW.isFinite ? math.max(0.0, maxW - qtyW - gap) : 72.0;
+        return Row(
+          children: [
+            SizedBox(
+              width: qtyW,
+              child: Text(
+                '$quantity',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                textAlign: TextAlign.right,
+                maxLines: 1,
+                overflow: TextOverflow.clip,
+              ),
             ),
-          ),
-        ),
-      ],
+            const SizedBox(width: gap),
+            SizedBox(
+              width: barW,
+              height: 8,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percent,
+                  minHeight: 8,
+                  backgroundColor: color.withValues(alpha: 0.2),
+                  valueColor: AlwaysStoppedAnimation<Color>(color),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

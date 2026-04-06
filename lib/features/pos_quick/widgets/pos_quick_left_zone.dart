@@ -36,8 +36,9 @@ class PosQuickLeftZone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Container(
-      color: PosQuickColors.fondPrincipal,
+      color: cs.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -51,41 +52,61 @@ class PosQuickLeftZone extends StatelessWidget {
                 onSubmitted: onSearchSubmitted,
                 autofocus: true,
                 textInputAction: TextInputAction.done,
-                decoration: InputDecoration(
+                style: TextStyle(color: cs.onSurface),
+                decoration: PosInputTheme.roundedField(
+                  context,
+                  radius: 12,
                   hintText: 'Scanner ou rechercher un produit...',
-                  hintStyle: TextStyle(color: PosQuickColors.textePrincipal.withValues(alpha: 0.5)),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
                   prefixIcon: IconButton(
-                    icon: const Icon(Icons.qr_code_scanner_rounded, color: PosQuickColors.orangePrincipal, size: 26),
+                    icon: Icon(
+                      Icons.qr_code_scanner_rounded,
+                      color: PosQuickColors.orangePrincipal,
+                      size: 26,
+                    ),
                     onPressed: onScanPressed,
                     tooltip: 'Ouvrir le scan caméra',
-                    style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                    ),
                   ),
-                  suffixIcon: const Icon(Icons.search_rounded, color: PosQuickColors.orangePrincipal, size: 24),
-                  filled: true,
-                  fillColor: PosQuickColors.fondPrincipal,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: PosQuickColors.bordure)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  suffixIcon: Icon(
+                    Icons.search_rounded,
+                    color: PosQuickColors.orangePrincipal,
+                    size: 24,
+                  ),
                 ),
               ),
             ),
           ),
           SizedBox(
-            height: 44,
+            // Les FilterChip dépassent ~48px (padding + cible tactile) — 44px provoquait overflow.
+            height: 52,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 16),
               children: [
-                _CategoryChip(label: 'Tous', categoryId: null, selected: selectedCategoryId == null, onSelected: () => onCategorySelected(null)),
+                _CategoryChip(
+                  label: 'Tous',
+                  categoryId: null,
+                  selected: selectedCategoryId == null,
+                  onSelected: () => onCategorySelected(null),
+                ),
                 const SizedBox(width: 8),
-                ...categories.map((c) => Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: _CategoryChip(
-                        label: c.name,
-                        categoryId: c.id,
-                        selected: selectedCategoryId == c.id,
-                        onSelected: () => onCategorySelected(c.id),
-                      ),
-                    )),
+                ...categories.map(
+                  (c) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _CategoryChip(
+                      label: c.name,
+                      categoryId: c.id,
+                      selected: selectedCategoryId == c.id,
+                      onSelected: () => onCategorySelected(c.id),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -105,7 +126,12 @@ class PosQuickLeftZone extends StatelessWidget {
 }
 
 class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({required this.label, required this.categoryId, required this.selected, required this.onSelected});
+  const _CategoryChip({
+    required this.label,
+    required this.categoryId,
+    required this.selected,
+    required this.onSelected,
+  });
 
   final String label;
   final String? categoryId;
@@ -114,11 +140,14 @@ class _CategoryChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return FilterChip(
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       label: Text(
         label,
         style: TextStyle(
-          color: selected ? Colors.white : PosQuickColors.textePrincipal,
+          color: selected ? Colors.white : cs.onSurface,
           fontSize: 14,
           fontWeight: FontWeight.w600,
         ),
@@ -126,10 +155,15 @@ class _CategoryChip extends StatelessWidget {
       selected: selected,
       onSelected: (_) => onSelected(),
       selectedColor: PosQuickColors.orangePrincipal,
-      backgroundColor: PosQuickColors.fondSecondaire,
-      side: BorderSide(color: selected ? PosQuickColors.orangePrincipal : PosQuickColors.bordure, width: selected ? 2 : 1),
+      backgroundColor: cs.surfaceContainerHighest,
+      side: BorderSide(
+        color: selected
+            ? PosQuickColors.orangePrincipal
+            : cs.outline.withValues(alpha: 0.45),
+        width: selected ? 2 : 1,
+      ),
       showCheckmark: false,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
     );
   }
 }

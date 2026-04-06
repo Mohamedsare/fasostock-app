@@ -24,6 +24,7 @@ import '../features/warehouse/warehouse_page.dart';
 import '../features/transfers/transfers_page.dart';
 import '../features/suppliers/suppliers_page.dart';
 import '../features/customers/customers_page.dart';
+import '../features/credit/credit_page.dart';
 import '../features/reports/reports_page.dart';
 import '../features/ai/ai_insights_page.dart';
 import '../features/users/users_page.dart';
@@ -142,6 +143,24 @@ GoRouter createAppRouter(AuthProvider authProvider) {
           }
         } catch (_) {}
       }
+      // Facture (tableau) : sales.invoice_a4_table + facture A4 — sauf ?editSale= avec sales.update.
+      if (path.contains('/stores/') && path.endsWith('/facture-tab')) {
+        try {
+          final perm = context.read<PermissionsProvider>();
+          if (!perm.hasLoaded) return null;
+          final editSale = state.uri.queryParameters['editSale']?.trim() ?? '';
+          if (editSale.isNotEmpty &&
+              perm.hasPermission(Permissions.salesUpdate)) {
+            return null;
+          }
+          final canA4 = perm.hasPermission(Permissions.salesInvoiceA4) ||
+              perm.hasPermission(Permissions.salesCreate);
+          if (!perm.hasPermission(Permissions.salesInvoiceA4Table) ||
+              !canA4) {
+            return AppRoutes.stores;
+          }
+        } catch (_) {}
+      }
 
       return null;
     },
@@ -208,6 +227,18 @@ GoRouter createAppRouter(AuthProvider authProvider) {
             },
           ),
           GoRoute(
+            path: '/stores/:storeId/facture-tab',
+            builder: (context, state) {
+              final storeId = state.pathParameters['storeId'] ?? '';
+              final editSaleId = state.uri.queryParameters['editSale'];
+              return PosPage(
+                storeId: storeId,
+                editSaleId: editSaleId,
+                invoiceTableLayout: true,
+              );
+            },
+          ),
+          GoRoute(
             path: '/stores/:storeId/pos-quick',
             builder: (context, state) {
               final storeId = state.pathParameters['storeId'] ?? '';
@@ -246,6 +277,10 @@ GoRouter createAppRouter(AuthProvider authProvider) {
           GoRoute(
             path: AppRoutes.customers,
             builder: (context, state) => const CustomersPage(),
+          ),
+          GoRoute(
+            path: AppRoutes.credit,
+            builder: (context, state) => const CreditPage(),
           ),
           GoRoute(
             path: AppRoutes.suppliers,

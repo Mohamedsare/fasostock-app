@@ -19,6 +19,16 @@ class SalesRealtimeSync {
   final SyncServiceV2? _syncService;
   RealtimeChannel? _channel;
 
+  /// Canal privé Realtime : si la config Supabase n’autorise pas ce topic pour le JWT,
+  /// on ignore proprement (la sync pull reste le filet de sécurité).
+  static bool _isChannelPermissionError(Object? error) {
+    if (error == null) return false;
+    final s = error.toString().toLowerCase();
+    return (s.contains('unauthorized') && s.contains('channel')) ||
+        s.contains('permissions to read') ||
+        s.contains('topic:');
+  }
+
   static const RealtimeChannelConfig _channelConfig = RealtimeChannelConfig(
     private: true,
   );
@@ -56,6 +66,20 @@ class SalesRealtimeSync {
             debugPrint('[SalesRealtime] $status ${error ?? ''}');
           }
           if (error != null) {
+            if (_isChannelPermissionError(error)) {
+              if (kDebugMode) {
+                debugPrint(
+                  '[SalesRealtime] permission canal ignorée — vérifiez les politiques Realtime '
+                  'pour les canaux privés (sync ventes par pull inchangée).',
+                );
+              }
+              final c = _channel;
+              _channel = null;
+              if (c != null) {
+                unawaited(Supabase.instance.client.removeChannel(c));
+              }
+              return;
+            }
             AppErrorHandler.logWithContext(
               error,
               logSource: 'sales_realtime',
@@ -114,6 +138,9 @@ class SalesRealtimeSync {
       'updated_at': _asIsoString(raw['updated_at']),
       'sale_mode': raw['sale_mode'] == null ? null : _asIsoString(raw['sale_mode']),
       'document_type': raw['document_type'] == null ? null : _asIsoString(raw['document_type']),
+      'credit_due_at': raw['credit_due_at'] == null ? null : _asIsoString(raw['credit_due_at']),
+      'credit_internal_note':
+          raw['credit_internal_note'] == null ? null : _asIsoString(raw['credit_internal_note']),
     };
   }
 
@@ -148,6 +175,8 @@ class SalesRealtimeSync {
         updatedAt: sale.updatedAt,
         saleMode: Value(sale.saleMode?.value),
         documentType: Value(sale.documentType?.value),
+        creditDueAt: Value(sale.creditDueAt),
+        creditInternalNote: Value(sale.creditInternalNote),
       ),
     );
 
@@ -170,6 +199,13 @@ class SalesRealtimeSync {
             ),
           ),
         );
+      }
+      try {
+        final pays = await repo.getPayments(sale.id);
+        final now = DateTime.now().toUtc().toIso8601String();
+        await _db.replaceLocalSalePaymentsFromModels(sale.id, pays, now);
+      } catch (e2, st2) {
+        AppErrorHandler.log('SalesRealtime.fetchPayments id=${sale.id}: $e2', st2);
       }
     } catch (e, st) {
       AppErrorHandler.log('SalesRealtime.fetchItems id=${sale.id}: $e', st);

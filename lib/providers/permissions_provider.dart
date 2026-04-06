@@ -57,6 +57,10 @@ class PermissionsProvider extends ChangeNotifier {
   /// Propriétaire ou rôle Magasinier (permission [Permissions.warehouseManage]).
   bool get canManageWarehouse =>
       isOwner || hasPermission(Permissions.warehouseManage);
+
+  /// Propriétaire ou permission [Permissions.creditView] (accordée via gestion des droits).
+  bool get canAccessCredit =>
+      isOwner || hasPermission(Permissions.creditView);
   /// Slug du rôle courant (ex. cashier, owner) — pour restreindre la nav.
   String? get roleSlug => _roleSlug;
   /// True si l'utilisateur est caissier (menu limité : Ventes, Produits, Clients, Stock C).

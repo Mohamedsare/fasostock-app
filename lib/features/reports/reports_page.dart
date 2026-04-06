@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'package:intl/intl.dart';
@@ -25,7 +26,8 @@ import '../../../shared/utils/format_currency.dart';
 import '../../../shared/utils/share_csv.dart';
 import '../../../shared/utils/save_bytes_file.dart';
 
-/// Page Rapports — offline-first : lecture Drift (même source que dashboard), sync en arrière-plan, top 10 produits.
+/// Page Rapports — offline-first : lecture Drift (même source que dashboard), sync + Realtime via tables locales,
+/// rafraîchissement comme le dashboard ([dashboardDataChangeTriggerStreamProvider]).
 class ReportsPage extends ConsumerStatefulWidget {
   const ReportsPage({super.key});
 
@@ -47,6 +49,21 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   StockValue _stockValue = const StockValue(); // conservé (déjà affiché)
   bool _loading = true;
   String? _error;
+  Timer? _reportsRefreshDebounce;
+
+  @override
+  void dispose() {
+    _reportsRefreshDebounce?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleReportsRefresh() {
+    _reportsRefreshDebounce?.cancel();
+    _reportsRefreshDebounce = Timer(const Duration(milliseconds: 800), () {
+      _reportsRefreshDebounce = null;
+      if (mounted) _loadFromOffline(silent: true);
+    });
+  }
 
   @override
   void initState() {
@@ -93,7 +110,13 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     if (mounted) _loadFromOffline();
   }
 
-  Future<void> _loadFromOffline() async {
+  /// **Flux filtres → données**
+  /// - [getSalesKpis] : `_fromDate` / `_toDate`, `storeId`, `_cashierUserId`, `_productId`, `_categoryId`
+  ///   → cartes **ventes** (hors achats/stock), **histogramme**, **camembert**, top produits.
+  /// - [getDashboardData] : mêmes dates + boutique **sans** caissier/produit/catégorie
+  ///   → cartes **Achats** et **Valeur stock** (vue globale période, pas filtrée comme les ventes).
+  /// - [getStockAlerts] : boutique + dates → rapport stock / courbe mouvements (hors filtres vente).
+  Future<void> _loadFromOffline({bool silent = false}) async {
     final company = context.read<CompanyProvider>();
     final companyId = company.currentCompanyId;
     final storeId = company.currentStoreId;
@@ -101,10 +124,12 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
       setState(() => _loading = false);
       return;
     }
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final salesRepo = ref.read(reportsOfflineRepositoryProvider);
       final salesKpis = await salesRepo.getSalesKpis(
@@ -171,13 +196,20 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Rapports')),
+        appBar: isWide ? AppBar(title: const Text('Rapports')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!isWide) ...[
+                  Text(
+                    'Rapports',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Icon(Icons.error_outline_rounded, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(company.loadError!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -189,16 +221,28 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Rapports')),
+        appBar: isWide ? AppBar(title: const Text('Rapports')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Text(
-              'Sélectionnez une entreprise pour afficher les rapports.',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Rapports',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Text(
+                  'Sélectionnez une entreprise pour afficher les rapports.',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           ),
         ),
@@ -206,7 +250,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     }
     if (!permissions.hasLoaded) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Rapports')),
+        appBar: isWide ? AppBar(title: const Text('Rapports')) : null,
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -214,11 +258,34 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         permissions.hasPermission(Permissions.reportsViewStore);
     if (!canViewReports) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Rapports')),
+        appBar: isWide ? AppBar(title: const Text('Rapports')) : null,
         body: Center(
-          child: _buildNoAccessCard(context),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Rapports',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                _buildNoAccessCard(context),
+              ],
+            ),
+          ),
         ),
       );
+    }
+
+    // Même scénario que le dashboard : entreprise OK mais pas encore de chargement terminé
+    // → évite KPI/graphiques « vides » (tout à 0) sans feedback.
+    if (_salesKpis == null && !_loading && _error == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _salesKpis == null && !_loading) _loadFromOffline();
+      });
     }
 
     final fromFormatted = _formatDate(_fromDate);
@@ -229,8 +296,12 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
         ? 'Tableau de bord — ${currentCompany.name}${currentStore != null ? ' · ${currentStore.name}' : ''}'
         : 'Rapports';
 
+    ref.listen(dashboardDataChangeTriggerStreamProvider(companyId), (_, next) {
+      next.whenOrNull(data: (_) => _scheduleReportsRefresh());
+    });
+
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Rapports')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _runSyncThenRefresh,
         child: SingleChildScrollView(
@@ -250,11 +321,13 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
               ],
               _buildFiltersCard(context, companyId, company, fromFormatted, toFormatted),
               const SizedBox(height: 24),
-              if (_loading)
+              if (_loading || (_salesKpis == null && _error == null))
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 48),
                   child: Center(child: CircularProgressIndicator()),
                 )
+              else if (_error != null)
+                const SizedBox.shrink()
               else ...[
                 _buildKpiGrid(context),
                 const SizedBox(height: 24),

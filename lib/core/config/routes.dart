@@ -17,6 +17,8 @@ class AppRoutes {
   static String posQuick(String storeId) => '/stores/$storeId/pos-quick';
   /// Alias explicite pour le POS facture A4 (même route que pos).
   static String posInvoice(String storeId) => '/stores/$storeId/pos';
+  /// POS facture A4 — lignes du panier affichées en tableau (même PDF A4).
+  static String factureTab(String storeId) => '/stores/$storeId/facture-tab';
 
   static const String products = '/products';
   static const String inventory = '/inventory';
@@ -27,6 +29,8 @@ class AppRoutes {
   /// Dépôt central (magasin) — réservé owner ; distinct du stock par boutique.
   static const String warehouse = '/warehouse';
   static const String customers = '/customers';
+  /// Crédit client / créances — aligné appweb ROUTES.credit.
+  static const String credit = '/credit';
   static const String suppliers = '/suppliers';
   static const String transfers = '/transfers';
   static const String cash = '/cash';

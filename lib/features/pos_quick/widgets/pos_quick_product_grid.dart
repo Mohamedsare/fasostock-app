@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../data/models/product.dart';
-import '../pos_quick_constants.dart';
 import 'pos_quick_product_card.dart';
 
 /// Grille produits caisse rapide avec pull-to-refresh.
@@ -21,6 +20,7 @@ class PosQuickProductGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     if (products.isEmpty) {
       return RefreshIndicator(
         onRefresh: onRefresh,
@@ -31,7 +31,10 @@ class PosQuickProductGrid extends StatelessWidget {
             child: Center(
               child: Text(
                 'Aucun produit',
-                style: TextStyle(color: PosQuickColors.textePrincipal.withValues(alpha: 0.6), fontSize: 15),
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 15,
+                ),
               ),
             ),
           ),

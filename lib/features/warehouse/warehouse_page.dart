@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../core/breakpoints.dart';
 import '../../core/config/routes.dart';
 import '../../core/connectivity/connectivity_service.dart';
 import '../../core/errors/app_error_handler.dart';
@@ -2504,7 +2505,9 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
 
     final scheme = Theme.of(context).colorScheme;
     final maxH = MediaQuery.sizeOf(context).height * 0.92;
-    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final wide = screenW >= 900;
+    final ultraMobileFooter = screenW < Breakpoints.tablet;
 
     Widget body;
     if (listLoading) {
@@ -2656,52 +2659,120 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
                   elevation: 4,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _saving ? null : () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              side: const BorderSide(color: PosQuickColors.bordure),
-                            ),
-                            child: const Text('Annuler'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: (listLoading ||
-                                    listError != null ||
-                                    products.isEmpty ||
-                                    _saving)
-                                ? null
-                                : _submit,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              backgroundColor: PosQuickColors.orangePrincipal,
-                              foregroundColor: Colors.white,
-                            ),
-                            child: _saving
-                                ? const SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
+                    child: ultraMobileFooter
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              OutlinedButton(
+                                onPressed:
+                                    _saving ? null : () => Navigator.pop(context),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  side: const BorderSide(
+                                    color: PosQuickColors.bordure,
+                                  ),
+                                ),
+                                child: const Text('Annuler'),
+                              ),
+                              const SizedBox(height: 10),
+                              FilledButton(
+                                onPressed: (listLoading ||
+                                        listError != null ||
+                                        products.isEmpty ||
+                                        _saving)
+                                    ? null
+                                    : _submit,
+                                style: FilledButton.styleFrom(
+                                  alignment: Alignment.center,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                    horizontal: 12,
+                                  ),
+                                  backgroundColor:
+                                      PosQuickColors.orangePrincipal,
+                                  foregroundColor: Colors.white,
+                                ),
+                                child: _saving
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : Text(
+                                        'Enregistrer la réception',
+                                        textAlign: TextAlign.center,
+                                        maxLines: 2,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.2,
+                                        ),
+                                      ),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: _saving
+                                      ? null
+                                      : () => Navigator.pop(context),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
                                     ),
-                                  )
-                                : const Text(
-                                    'Enregistrer la réception',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
+                                    side: const BorderSide(
+                                      color: PosQuickColors.bordure,
                                     ),
                                   ),
+                                  child: const Text('Annuler'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: (listLoading ||
+                                          listError != null ||
+                                          products.isEmpty ||
+                                          _saving)
+                                      ? null
+                                      : _submit,
+                                  style: FilledButton.styleFrom(
+                                    alignment: Alignment.center,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 16,
+                                    ),
+                                    backgroundColor:
+                                        PosQuickColors.orangePrincipal,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: _saving
+                                      ? const SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'Enregistrer la réception',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ],
-                    ),
                   ),
                 ),
               ),
@@ -2779,7 +2850,6 @@ class _WarehouseEntryLeftPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Expanded(
-            flex: compactGrid ? 1 : 1,
             child: _WarehouseEntryProductGrid(
               products: filteredProducts,
               selected: selected,
@@ -2838,7 +2908,8 @@ class _WarehouseEntryProductGrid extends StatelessWidget {
             crossAxisCount: crossCount,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: 0.9,
+            // Grille dépôt mobile : cellules un peu plus hautes (carte image + 2 lignes de nom).
+            childAspectRatio: compact ? 0.84 : 0.9,
           ),
           itemCount: products.length,
           itemBuilder: (context, index) {
@@ -2855,7 +2926,7 @@ class _WarehouseEntryProductGrid extends StatelessWidget {
               ),
               child: PosQuickProductCard(
                 product: p,
-                stock: 999999,
+                stock: -1,
                 onTap: () => onSelectProduct(p),
               ),
             );

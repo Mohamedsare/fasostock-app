@@ -99,6 +99,8 @@ class Sale {
     this.saleMode,
     this.documentType,
     this.createdByLabel,
+    this.creditDueAt,
+    this.creditInternalNote,
   });
 
   final String id;
@@ -122,6 +124,8 @@ class Sale {
   final DocumentType? documentType;
   /// Affichage « vendeur » (prénom nom, email…) — rempli côté liste offline ; API ne l’envoie pas.
   final String? createdByLabel;
+  final String? creditDueAt;
+  final String? creditInternalNote;
 
   factory Sale.fromJson(Map<String, dynamic> json) {
     return Sale(
@@ -145,6 +149,8 @@ class Sale {
       saleMode: json['sale_mode'] != null ? SaleMode.fromString(json['sale_mode'] as String) : null,
       documentType: json['document_type'] != null ? DocumentType.fromString(json['document_type'] as String) : null,
       createdByLabel: null,
+      creditDueAt: json['credit_due_at'] as String?,
+      creditInternalNote: json['credit_internal_note'] as String?,
     );
   }
 
@@ -160,14 +166,16 @@ class StoreRef {
 }
 
 class CustomerRef {
-  const CustomerRef({required this.id, required this.name, this.phone});
+  const CustomerRef({required this.id, required this.name, this.phone, this.address});
   final String id;
   final String name;
   final String? phone;
+  final String? address;
   static CustomerRef fromJson(Map<String, dynamic> json) => CustomerRef(
         id: json['id'] as String,
         name: json['name'] as String,
         phone: json['phone'] as String?,
+        address: json['address'] as String?,
       );
 }
 
@@ -252,6 +260,7 @@ class SalePayment {
     required this.method,
     required this.amount,
     this.reference,
+    this.createdAt,
   });
 
   final String id;
@@ -259,14 +268,16 @@ class SalePayment {
   final PaymentMethod method;
   final double amount;
   final String? reference;
+  final String? createdAt;
 
   factory SalePayment.fromJson(Map<String, dynamic> json) {
     return SalePayment(
       id: json['id'] as String,
-      saleId: json['sale_id'] as String,
+      saleId: json['sale_id'] as String? ?? '',
       method: PaymentMethodExt.fromString(json['method'] as String? ?? 'other'),
       amount: (json['amount'] is num) ? (json['amount'] as num).toDouble() : 0,
       reference: json['reference'] as String?,
+      createdAt: json['created_at'] as String?,
     );
   }
 }

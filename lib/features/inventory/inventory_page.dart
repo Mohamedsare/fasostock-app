@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import '../../../core/breakpoints.dart';
 import '../../../core/constants/permissions.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/inventory.dart';
@@ -463,6 +465,8 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       );
     }
     final theme = Theme.of(context);
+    final isMobileStock =
+        MediaQuery.sizeOf(context).width < Breakpoints.tablet;
     final company = context.watch<CompanyProvider>();
     final companyId = company.currentCompanyId;
     final storeId = company.currentStoreId;
@@ -532,10 +536,12 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
         }
       });
     }
-    final paginatedMovements = movements
-        .skip(movementsEffectivePage * _movementsPageSize)
-        .take(_movementsPageSize)
-        .toList();
+    final paginatedMovements = isMobileStock
+        ? movements
+        : movements
+            .skip(movementsEffectivePage * _movementsPageSize)
+            .take(_movementsPageSize)
+            .toList();
     final productNameById = <String, String>{
       for (final p in products)
         if (p.name.trim().isNotEmpty) p.id: p.name.trim(),
@@ -601,10 +607,12 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
         if (mounted) setState(() => _currentInventoryPage = effectivePage);
       });
     }
-    final paginatedItems = filteredItems
-        .skip(effectivePage * _inventoryPageSize)
-        .take(_inventoryPageSize)
-        .toList();
+    final paginatedItems = isMobileStock
+        ? filteredItems
+        : filteredItems
+            .skip(effectivePage * _inventoryPageSize)
+            .take(_inventoryPageSize)
+            .toList();
     final lowStock = _lowStock(items, overrides, defaultThreshold);
     final outOfStock = _outOfStock(items);
     final totalValue = _totalValue(items);
@@ -808,44 +816,54 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final w = constraints.maxWidth;
-                    final crossCount = w > 900 ? 4 : (w > 500 ? 2 : 1);
-                    final aspectRatio = w < 400
-                        ? 1.4
-                        : (w < 500 ? 1.6 : (w < 600 ? 1.8 : 2.2));
-                    return GridView.count(
+                    final wide = w >= 900;
+                    final cols = wide ? 4 : 2;
+                    final textScale =
+                        MediaQuery.textScalerOf(context).scale(14) / 14.0;
+                    // Aligné écran Crédit : hauteur fixe (évite cellules géantes en 1 colonne).
+                    final mainExtent = (wide ? 108.0 : 122.0) *
+                        textScale.clamp(1.0, 1.35);
+                    return GridView(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
-                      crossAxisCount: crossCount,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: aspectRatio,
+                      gridDelegate:
+                          SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: cols,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        mainAxisExtent: mainExtent,
+                      ),
                       children: [
                         _StatCard(
                           icon: Icons.inventory_2_rounded,
                           label: 'Produits en stock',
                           value: '${items.length}',
-                          accentLeft: true,
+                          accent: true,
                           color: theme.colorScheme.primary,
+                          wide: wide,
                         ),
                         _StatCard(
                           icon: Icons.trending_up_rounded,
                           label: 'Valeur totale',
                           value: formatCurrency(totalValue),
                           color: Colors.green.shade700,
+                          wide: wide,
                         ),
                         _StatCard(
                           icon: Icons.warning_amber_rounded,
                           label: 'Sous le minimum',
                           value: '${lowStock.length}',
                           color: Colors.amber.shade700,
-                          accentLeft: lowStock.isNotEmpty,
+                          accent: lowStock.isNotEmpty,
+                          wide: wide,
                         ),
                         _StatCard(
                           icon: Icons.cancel_rounded,
                           label: 'Rupture de stock',
                           value: '${outOfStock.length}',
                           color: theme.colorScheme.error,
-                          accentLeft: outOfStock.isNotEmpty,
+                          accent: outOfStock.isNotEmpty,
+                          wide: wide,
                         ),
                       ],
                     );
@@ -1158,7 +1176,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                     movements: paginatedMovements,
                                     productNameById: productNameById,
                                   ),
-                                  if (movementsPageCount > 1) ...[
+                                  if (!isMobileStock && movementsPageCount > 1) ...[
                                     const SizedBox(height: 16),
                                     _buildMovementsPagination(
                                       context,
@@ -1279,7 +1297,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                               }
                               : null,
                             ),
-                            if (pageCount > 1) ...[
+                            if (!isMobileStock && pageCount > 1) ...[
                               const SizedBox(height: 16),
                               _buildInventoryPagination(
                                 context,
@@ -1332,88 +1350,73 @@ class _StatCard extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
-    this.accentLeft = false,
+    required this.wide,
+    this.accent = false,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color color;
-  final bool accentLeft;
+  final bool wide;
+  final bool accent;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final minHeight = 72.0;
-    return Container(
-          constraints: BoxConstraints(minHeight: minHeight),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: theme.dividerColor),
-        boxShadow: [
-              if (accentLeft)
-                BoxShadow(
-                  color: color.withValues(alpha: 0.15),
-                  blurRadius: 8,
-                  offset: const Offset(-2, 0),
-                ),
-        ],
+    return Card(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        side: accent
+            ? BorderSide(
+                color: color.withValues(alpha: 0.4),
+                width: 2,
+              )
+            : BorderSide.none,
       ),
-      child: Row(
-        children: [
-              if (accentLeft)
-          Container(
-                  width: 4,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: color,
-                    borderRadius: BorderRadius.circular(2),
+      child: Padding(
+        padding: EdgeInsets.all(wide ? 16 : 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              if (accentLeft) const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, size: 20, color: color),
-              ),
-              const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-              children: [
-                    Text(
-                      label,
-                      style: theme.textTheme.labelMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Icon(icon, size: 20, color: color),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
-        );
-      },
     );
   }
 }

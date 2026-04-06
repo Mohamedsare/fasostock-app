@@ -251,7 +251,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
 
     if (!permissions.hasLoaded) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Clients')),
+        appBar: isWide ? AppBar(title: const Text('Clients')) : null,
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -259,19 +259,29 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
         permissions.hasPermission(Permissions.customersManage);
     if (!canAccessCustomers) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Clients')),
+        appBar: isWide ? AppBar(title: const Text('Clients')) : null,
         body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_rounded, size: 64, color: Theme.of(context).colorScheme.error),
-              const SizedBox(height: 16),
-              Text(
-                "Vous n'avez pas accès à cette page.",
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-            ],
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Clients',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                Icon(Icons.lock_rounded, size: 64, color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 16),
+                Text(
+                  "Vous n'avez pas accès à cette page.",
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -282,13 +292,20 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
     if (company.loadError != null && company.companies.isEmpty) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Clients')),
+        appBar: isWide ? AppBar(title: const Text('Clients')) : null,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (!isWide) ...[
+                  Text(
+                    'Clients',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Icon(Icons.error_outline_rounded, size: 48, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(company.loadError!, textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -300,8 +317,25 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
     if (companyId == null) {
       return Scaffold(
-        appBar: isWide ? null : AppBar(title: const Text('Clients')),
-        body: const Center(child: Text('Aucune entreprise. Contactez l\'administrateur.')),
+        appBar: isWide ? AppBar(title: const Text('Clients')) : null,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!isWide) ...[
+                  Text(
+                    'Clients',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                const Text('Aucune entreprise. Contactez l\'administrateur.'),
+              ],
+            ),
+          ),
+        ),
       );
     }
 
@@ -335,7 +369,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     final paginatedList = filtered.skip(effectivePage * _customersPageSize).take(_customersPageSize).toList();
 
     return Scaffold(
-      appBar: isWide ? null : AppBar(title: const Text('Clients')),
+      appBar: null,
       body: RefreshIndicator(
         onRefresh: _refresh,
         child: SingleChildScrollView(

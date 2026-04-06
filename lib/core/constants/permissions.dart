@@ -18,6 +18,8 @@ class Permissions {
   static const String salesRefund = 'sales.refund';
   static const String salesView = 'sales.view';
   static const String salesInvoiceA4 = 'sales.invoice_a4';
+  /// POS facture A4 avec lignes affichées en tableau (même PDF A4 que le POS classique).
+  static const String salesInvoiceA4Table = 'sales.invoice_a4_table';
   static const String purchasesCreate = 'purchases.create';
   static const String purchasesView = 'purchases.view';
   static const String purchasesCancel = 'purchases.cancel';
@@ -39,6 +41,8 @@ class Permissions {
   static const String dashboardView = 'dashboard.view';
   static const String customersView = 'customers.view';
   static const String customersManage = 'customers.manage';
+  /// Page Crédit / créances (propriétaire par défaut ; accord explicite aux autres).
+  static const String creditView = 'credit.view';
   static const String suppliersView = 'suppliers.view';
   static const String suppliersManage = 'suppliers.manage';
   static const String transfersCreate = 'transfers.create';
@@ -61,6 +65,7 @@ class Permissions {
     salesRefund,
     salesView,
     salesInvoiceA4,
+    salesInvoiceA4Table,
     purchasesCreate,
     purchasesView,
     purchasesCancel,
@@ -81,6 +86,7 @@ class Permissions {
     dashboardView,
     customersView,
     customersManage,
+    creditView,
     suppliersView,
     suppliersManage,
     transfersCreate,
@@ -105,6 +111,7 @@ class Permissions {
     salesRefund: 'Rembourser des ventes',
     salesView: 'Voir l\'historique des ventes',
     salesInvoiceA4: 'Émettre des factures A4',
+    salesInvoiceA4Table: 'POS facture A4 (vue tableau)',
     purchasesCreate: 'Créer des achats',
     purchasesView: 'Voir les achats',
     purchasesCancel: 'Annuler des achats',
@@ -125,6 +132,7 @@ class Permissions {
     dashboardView: 'Voir le tableau de bord',
     customersView: 'Voir les clients',
     customersManage: 'Gérer les clients',
+    creditView: 'Voir la page Crédit (créances clients)',
     suppliersView: 'Voir les fournisseurs',
     suppliersManage: 'Gérer les fournisseurs',
     transfersCreate: 'Créer / gérer les transferts',

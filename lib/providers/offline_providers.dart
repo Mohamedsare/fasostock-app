@@ -28,6 +28,7 @@ import '../data/repositories/warehouse_dispatch_input.dart';
 import '../data/repositories/offline/dashboard_offline_repository.dart';
 import '../data/repositories/offline/company_members_offline_repository.dart';
 import '../data/repositories/offline/reports_offline_repository.dart';
+import '../data/repositories/credit_sync_facade.dart';
 import '../data/models/company_member.dart';
 import '../data/sync/sync_service_v2.dart';
 
@@ -51,6 +52,36 @@ final salesOfflineRepositoryProvider = Provider<SalesOfflineRepository>((ref) {
   final db = ref.watch(appDatabaseProvider);
   return SalesOfflineRepository(db);
 });
+
+/// Crédit : mutations offline-first + même lecture locale que les ventes.
+final creditSyncFacadeProvider = Provider<CreditSyncFacade>((ref) {
+  final db = ref.watch(appDatabaseProvider);
+  final offline = ref.watch(salesOfflineRepositoryProvider);
+  return CreditSyncFacade(db, offline);
+});
+
+/// Ventes « éligibles crédit » depuis Drift : complété + client + plage de dates (stream réactif paiements inclus).
+final creditSalesFilteredStreamProvider =
+    StreamProvider.autoDispose.family<List<Sale>, ({String companyId, String? storeId, String fromYmd, String toYmd})>(
+  (ref, key) {
+    if (key.companyId.isEmpty) return Stream.value([]);
+    final repo = ref.watch(salesOfflineRepositoryProvider);
+    final fromUtc = '${key.fromYmd}T00:00:00.000Z';
+    final toEnd = '${key.toYmd}T23:59:59.999Z';
+    return repo.watchSales(key.companyId, storeId: key.storeId).map((sales) {
+      final filtered = sales.where((s) {
+        if (s.status != SaleStatus.completed) return false;
+        final cid = s.customerId;
+        if (cid == null || cid.isEmpty) return false;
+        if (s.createdAt.compareTo(fromUtc) < 0) return false;
+        if (s.createdAt.compareTo(toEnd) > 0) return false;
+        return true;
+      }).toList();
+      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return filtered;
+    });
+  },
+);
 
 final storesOfflineRepositoryProvider = Provider<StoresOfflineRepository>((ref) {
   final db = ref.watch(appDatabaseProvider);
@@ -245,8 +276,9 @@ final reportsOfflineRepositoryProvider = Provider<ReportsOfflineRepository>((ref
   return ReportsOfflineRepository(db);
 });
 
-/// Émet quand les ventes ou achats locaux changent (nouvelle vente, sync, etc.) — pour rafraîchir le dashboard en temps réel sans casser l’offline+sync.
-/// La page dashboard écoute ce stream avec debounce et recharge les KPIs.
+/// Émet quand les données Drift utiles aux KPIs dashboard/rapports changent (ventes, lignes, achats, stock boutique,
+/// produits, catégories, seuils, réglages société) — y compris après sync ou écritures Realtime.
+/// Les écrans écoutent ce stream avec debounce et rechargent depuis Drift (pas d’appel réseau direct).
 final dashboardDataChangeTriggerStreamProvider = StreamProvider.autoDispose.family<Object, String>((ref, companyId) {
   final db = ref.watch(appDatabaseProvider);
   return db.watchDashboardDataTrigger(companyId).map((_) => Object());
