@@ -14,6 +14,7 @@ class PosCartItem {
     required this.unitPrice,
     required this.total,
     this.imageUrl,
+    this.linePriceUserSet = false,
   });
 
   final String productId;
@@ -25,6 +26,8 @@ class PosCartItem {
   double unitPrice;
   double total;
   final String? imageUrl;
+  /// PU saisi manuellement ou ligne issue d’une vente en édition — pas de recalcul gros/détail.
+  bool linePriceUserSet;
 }
 
 /// Résultat du dialog de création de client (nom + téléphone).

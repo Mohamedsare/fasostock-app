@@ -4,13 +4,13 @@ import 'package:flutter/material.dart';
 
 /// Toasts de succès, erreur et info — design soigné.
 ///
-/// Affichage via le [Overlay] du [Navigator] racine : **au-dessus des dialogues**,
-/// bottom sheets et du reste de l’UI (équivalent « z-index » maximal dans Flutter).
+/// Affichage **en haut** de l’écran (sous la zone sûre), via [Overlay] : au-dessus des dialogues,
+/// bottom sheets et du reste de l’UI.
 class AppToast {
   AppToast._();
 
-  /// Marge basse pour afficher au-dessus de la barre de navigation (évite le recouvrement).
-  static const double _bottomInset = 80;
+  /// Marge sous la zone sûre haute (statut / encoche) — toast en haut de l’écran.
+  static const double _topInset = 12;
 
   static OverlayEntry? _overlayEntry;
   static Timer? _hideTimer;
@@ -49,12 +49,18 @@ class AppToast {
     );
   }
 
-  /// Overlay du [Navigator] racine : dernier [Overlay.insert] = peint au-dessus (modales incluses).
-  static OverlayState? _rootOverlay(BuildContext context) {
+  /// Overlay du navigateur qui **porte la route actuelle** (Shell / GoRouter), puis racine.
+  ///
+  /// Avant : on prenait d’abord le navigateur racine — sur desktop, l’overlay utile est souvent
+  /// celui du navigateur **imbriqué** ; sinon [Overlay.maybeOf] restait null → repli SnackBar **en bas**.
+  static OverlayState? _resolveOverlay(BuildContext context) {
+    final nav = Navigator.maybeOf(context);
+    if (nav?.overlay != null) return nav!.overlay;
     final rootNav = Navigator.maybeOf(context, rootNavigator: true);
-    final o = rootNav?.overlay;
-    if (o != null) return o;
-    return Overlay.maybeOf(context, rootOverlay: true);
+    if (rootNav?.overlay != null) return rootNav!.overlay;
+    return Overlay.maybeOf(context, rootOverlay: false) ??
+        Overlay.maybeOf(context, rootOverlay: true) ??
+        Overlay.maybeOf(context);
   }
 
   static void _dismissActive() {
@@ -72,17 +78,19 @@ class AppToast {
   }) {
     if (!context.mounted) return;
 
-    // Anciens SnackBars éventuels (autres chemins) ne doivent pas rester visibles.
+    // Anciens SnackBars / bannières (repli) ne doivent pas rester visibles.
     try {
-      ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+      final m = ScaffoldMessenger.maybeOf(context);
+      m?.hideCurrentSnackBar();
+      m?.hideCurrentMaterialBanner();
     } catch (_) {}
 
     _dismissActive();
 
     final theme = Theme.of(context);
-    final overlay = _rootOverlay(context);
+    final overlay = _resolveOverlay(context);
     if (overlay == null) {
-      _showSnackBarFallback(
+      _showTopFallback(
         context,
         message: message,
         icon: icon,
@@ -95,11 +103,11 @@ class AppToast {
     late OverlayEntry entry;
     entry = OverlayEntry(
       builder: (ctx) {
-        final bottom = MediaQuery.paddingOf(ctx).bottom + _bottomInset;
+        final top = MediaQuery.paddingOf(ctx).top + _topInset;
         return Positioned(
           left: 16,
           right: 16,
-          bottom: bottom,
+          top: top,
           child: Material(
             elevation: 24,
             shadowColor: Colors.black54,
@@ -136,8 +144,8 @@ class AppToast {
     _hideTimer = Timer(const Duration(milliseconds: 3200), _dismissActive);
   }
 
-  /// Si aucun overlay (tests / embed rare) : comportement proche de l’ancien SnackBar.
-  static void _showSnackBarFallback(
+  /// Si aucun [Overlay] (tests / embed rare) : bannière **en haut** du [Scaffold] (pas SnackBar en bas).
+  static void _showTopFallback(
     BuildContext context, {
     required String message,
     required IconData icon,
@@ -148,32 +156,45 @@ class AppToast {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, _bottomInset),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    try {
+      messenger.hideCurrentMaterialBanner();
+    } catch (_) {}
+
+    messenger.showMaterialBanner(
+      MaterialBanner(
         backgroundColor: backgroundColor,
-        duration: const Duration(milliseconds: 3200),
-        content: Row(
-          children: [
-            Icon(icon, color: Colors.white, size: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                ),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        leading: Icon(icon, color: Colors.white, size: 22),
+        content: Text(
+          message,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: Colors.white, size: 22),
+            tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
+            onPressed: () {
+              _hideTimer?.cancel();
+              _hideTimer = null;
+              try {
+                messenger.hideCurrentMaterialBanner();
+              } catch (_) {}
+            },
+          ),
+        ],
       ),
     );
+
+    _hideTimer = Timer(const Duration(milliseconds: 3200), () {
+      try {
+        messenger.hideCurrentMaterialBanner();
+      } catch (_) {}
+      _hideTimer = null;
+    });
   }
 }

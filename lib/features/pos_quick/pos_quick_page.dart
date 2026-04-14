@@ -95,6 +95,24 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     return _effectiveStock(p.id, stockByProductId) > 0;
   }
 
+  Product? _productById(String productId) {
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    if (companyId == null || companyId.isEmpty) return null;
+    final list =
+        ref.read(productsStreamProvider(companyId)).valueOrNull ?? const [];
+    try {
+      return list.firstWhere((p) => p.id == productId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  double _catalogUnitPrice(String productId, int qty) {
+    final p = _productById(productId);
+    if (p == null) return 0;
+    return p.unitPriceForCartQuantity(qty);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -213,6 +231,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           return;
         }
         existing.quantity = newQty;
+        if (!existing.linePriceUserSet) {
+          existing.unitPrice = p.unitPriceForCartQuantity(newQty);
+        }
         existing.total = newQty * existing.unitPrice;
         final pid = existing.productId;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -221,6 +242,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         });
       } else {
         if (stock <= 0) return;
+        final pu = p.unitPriceForCartQuantity(1);
         _cart.add(
           PosCartItem(
             productId: p.id,
@@ -228,8 +250,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             sku: p.sku,
             unit: p.unit,
             quantity: 1,
-            unitPrice: p.salePrice,
-            total: p.salePrice,
+            unitPrice: pu,
+            total: pu,
             imageUrl: p.productImages?.isNotEmpty == true
                 ? p.productImages!.first.url
                 : null,
@@ -258,6 +280,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             }
             newQty = q;
             c.quantity = q;
+            if (!c.linePriceUserSet) {
+              c.unitPrice = _catalogUnitPrice(productId, q);
+            }
             c.total = q * c.unitPrice;
             return c;
           })
@@ -299,6 +324,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       _cart = _cart.map((c) {
         if (c.productId != productId) return c;
         c.quantity = clamped;
+        if (!c.linePriceUserSet) {
+          c.unitPrice = _catalogUnitPrice(productId, clamped);
+        }
         c.total = clamped * c.unitPrice;
         return c;
       }).toList();
@@ -410,6 +438,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             unitPrice: item.unitPrice,
             total: item.total,
             imageUrl: null,
+            linePriceUserSet: true,
           ),
         );
       }
@@ -584,8 +613,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           documentType: DocumentType.thermalReceipt,
         );
         final sale = await _salesRepo.get(_activeEditSaleId!);
-        if (sale == null)
+        if (sale == null) {
           throw Exception('Vente introuvable après mise à jour');
+        }
         await _afterSaleEditSuccess(sale);
       } catch (e, st) {
         if (mounted) {
@@ -934,12 +964,18 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   void _showReceiptIfNeeded() {
     final data = _receiptData;
     if (data == null || !mounted || !context.mounted) return;
+    final uid = context.read<AuthProvider>().user?.id;
+    final cid = context.read<CompanyProvider>().currentCompanyId;
     final posSettings = context.read<PosCartSettingsProvider>();
     if (posSettings.posQuickAutoPrint) {
       final ticket = data;
       setState(() => _receiptData = null);
       unawaited(
-        ReceiptThermalPrintService.printReceipt(ticket)
+        ReceiptThermalPrintService.printReceipt(
+          ticket,
+          userId: uid,
+          companyId: cid,
+        )
             .then((_) {
               if (mounted) {
                 AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
@@ -974,7 +1010,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             AppToast.info(context, 'Impression en cours...');
           }
           unawaited(
-            ReceiptThermalPrintService.printReceipt(data)
+            ReceiptThermalPrintService.printReceipt(
+              data,
+              userId: uid,
+              companyId: cid,
+            )
                 .then((_) {
                   if (mounted) {
                     AppToast.success(context, 'Ticket envoyé à l\'imprimante.');

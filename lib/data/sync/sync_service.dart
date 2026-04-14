@@ -143,6 +143,8 @@ class SyncService {
       'unit': p.unit,
       'purchase_price': p.purchasePrice,
       'sale_price': p.salePrice,
+      'wholesale_price': p.wholesalePrice,
+      'wholesale_qty': p.wholesaleQty,
       'min_price': p.minPrice,
       'stock_min': p.stockMin,
       'description': p.description,

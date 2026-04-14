@@ -78,6 +78,8 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   final _barcodeController = TextEditingController();
   final _purchasePriceController = TextEditingController();
   final _salePriceController = TextEditingController();
+  final _wholesalePriceController = TextEditingController();
+  final _wholesaleQtyController = TextEditingController();
   final _stockMinController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _newCategoryController = TextEditingController();
@@ -116,6 +118,8 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
       _unit = p.unit;
       _purchasePriceController.text = p.purchasePrice.toString();
       _salePriceController.text = p.salePrice.toString();
+      _wholesalePriceController.text = p.wholesalePrice.toString();
+      _wholesaleQtyController.text = p.wholesaleQty.toString();
       _stockMinController.text = p.stockMin.toString();
       _descriptionController.text = p.description ?? '';
       _categoryId = p.categoryId;
@@ -124,6 +128,11 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
       _productScope = p.productScope;
       _existingImages = List.from(p.productImages ?? []);
     } else {
+      // Aligné `product-form-dialog.tsx` (web) : champs numériques à 0, stock min 5.
+      _purchasePriceController.text = '0';
+      _salePriceController.text = '0';
+      _wholesalePriceController.text = '0';
+      _wholesaleQtyController.text = '0';
       _stockMinController.text = '5';
     }
   }
@@ -146,6 +155,8 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
     _barcodeController.dispose();
     _purchasePriceController.dispose();
     _salePriceController.dispose();
+    _wholesalePriceController.dispose();
+    _wholesaleQtyController.dispose();
     _stockMinController.dispose();
     _descriptionController.dispose();
     _newCategoryController.dispose();
@@ -261,7 +272,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
     if (!_formKey.currentState!.validate()) return;
     final name = _nameController.text.trim();
     if (name.length < 2) {
-      setState(() => _error = 'Nom requis (2 caractères minimum)');
+      setState(() => _error = 'Nom requis (2 caractères minimum).');
       return;
     }
     final salePrice = _parseDouble(_salePriceController.text) ?? 0;
@@ -281,12 +292,26 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
       );
       return;
     }
+    final wholesalePrice = _parseDouble(_wholesalePriceController.text) ?? 0;
+    if (wholesalePrice < 0) {
+      setState(() => _error = 'Prix gros doit être >= 0');
+      return;
+    }
+    final wholesaleQty = _parseInt(_wholesaleQtyController.text) ?? 0;
+    if (wholesaleQty > 0 && wholesalePrice <= 0) {
+      setState(
+        () => _error =
+            'Renseignez un prix gros (> 0) si la quantité seuil est > 0.',
+      );
+      return;
+    }
     final storeId = widget.currentStoreId;
     final userId = context.read<AuthProvider>().user?.id;
     setState(() {
       _loading = true;
       _error = null;
     });
+    final unitOut = _effectiveUnitValue(_unit);
     try {
       Product? saved;
       if (widget.product != null) {
@@ -298,9 +323,11 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
           'barcode': _barcodeController.text.trim().isEmpty
               ? null
               : _barcodeController.text.trim(),
-          'unit': _unit,
+          'unit': unitOut,
           'purchase_price': purchasePrice,
           'sale_price': salePrice,
+          'wholesale_price': wholesalePrice,
+          'wholesale_qty': wholesaleQty,
           'stock_min': _parseInt(_stockMinController.text) ?? 0,
           'description': _descriptionController.text.trim().isEmpty
               ? null
@@ -328,9 +355,11 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
           barcode: _barcodeController.text.trim().isEmpty
               ? null
               : _barcodeController.text.trim(),
-          unit: _unit,
+          unit: unitOut,
           purchasePrice: purchasePrice,
           salePrice: salePrice,
+          wholesalePrice: wholesalePrice,
+          wholesaleQty: wholesaleQty,
           stockMin: _parseInt(_stockMinController.text) ?? 0,
           description: _descriptionController.text.trim().isEmpty
               ? null
@@ -399,9 +428,16 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             children: [
               Text(
                 isEdit ? 'Modifier le produit' : 'Nouveau produit',
-                style: Theme.of(context).textTheme.titleLarge,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              Divider(
+                height: 1,
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+              const SizedBox(height: 12),
               Flexible(
                 child: SingleChildScrollView(
                   child: Form(
@@ -418,14 +454,14 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                             border: OutlineInputBorder(),
                           ),
                           validator: (v) => (v == null || v.trim().length < 2)
-                              ? 'Nom requis (2 car. min.)'
+                              ? 'Nom requis (2 caractères minimum).'
                               : null,
                           textCapitalization: TextCapitalization.words,
                         ),
                         const SizedBox(height: 12),
                         LayoutBuilder(
                           builder: (context, constraints) {
-                            if (constraints.maxWidth < 400) {
+                            if (constraints.maxWidth < 401) {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -514,7 +550,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                         const SizedBox(height: 12),
                         LayoutBuilder(
                           builder: (context, constraints) {
-                            if (constraints.maxWidth < 400) {
+                            if (constraints.maxWidth < 401) {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -594,7 +630,71 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                         const SizedBox(height: 12),
                         LayoutBuilder(
                           builder: (context, constraints) {
-                            if (constraints.maxWidth < 400) {
+                            if (constraints.maxWidth < 401) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextFormField(
+                                    controller: _wholesalePriceController,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Prix gros (optionnel)',
+                                      border: OutlineInputBorder(),
+                                      hintText: 'FCFA / unité',
+                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  TextFormField(
+                                    controller: _wholesaleQtyController,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Qté seuil gros',
+                                      border: OutlineInputBorder(),
+                                      hintText: '≥ cette qté → prix gros',
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                  ),
+                                ],
+                              );
+                            }
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _wholesalePriceController,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Prix gros (optionnel)',
+                                      border: OutlineInputBorder(),
+                                      hintText: 'FCFA / unité',
+                                    ),
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _wholesaleQtyController,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Qté seuil gros',
+                                      border: OutlineInputBorder(),
+                                      hintText: '≥ cette qté → prix gros',
+                                    ),
+                                    keyboardType: TextInputType.number,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (constraints.maxWidth < 401) {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -613,6 +713,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     const SizedBox(height: 12),
                                     TextFormField(
                                       controller: _initialStockController,
+                                      enabled: widget.currentStoreId != null,
                                       decoration: InputDecoration(
                                         labelText: 'Stock entrant',
                                         border: const OutlineInputBorder(),
@@ -645,6 +746,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                   Expanded(
                                     child: TextFormField(
                                       controller: _initialStockController,
+                                      enabled: widget.currentStoreId != null,
                                       decoration: InputDecoration(
                                         labelText: 'Stock entrant',
                                         border: const OutlineInputBorder(),
@@ -697,7 +799,11 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              Divider(
+                height: 1,
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+              const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -861,11 +967,17 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Catégorie'),
+        Text(
+          'Catégorie',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
         const SizedBox(height: 4),
         LayoutBuilder(
           builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 320;
+            final narrow = constraints.maxWidth < 321;
             final seenCatIds = <String>{};
             final distinctCategories = _categories
                 .where((c) => seenCatIds.add(c.id))
@@ -895,6 +1007,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             );
             final newField = TextFormField(
               controller: _newCategoryController,
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 hintText: 'Nouvelle',
                 border: OutlineInputBorder(),
@@ -902,11 +1015,15 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ),
               textCapitalization: TextCapitalization.words,
             );
-            final addBtn = IconButton(
+            final addBtn = IconButton.filled(
               icon: const Icon(Icons.add),
-              onPressed: _addCategory,
+              onPressed: _loading || _newCategoryController.text.trim().isEmpty
+                  ? null
+                  : _addCategory,
               tooltip: 'Ajouter catégorie',
               style: IconButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: const EdgeInsets.all(12),
                 minimumSize: const Size(
                   Breakpoints.minTouchTarget,
@@ -948,11 +1065,17 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Marque'),
+        Text(
+          'Marque',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
         const SizedBox(height: 4),
         LayoutBuilder(
           builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 320;
+            final narrow = constraints.maxWidth < 321;
             final seenBrandIds = <String>{};
             final distinctBrands = _brands
                 .where((b) => seenBrandIds.add(b.id))
@@ -981,6 +1104,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             );
             final newField = TextFormField(
               controller: _newBrandController,
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 hintText: 'Nouvelle',
                 border: OutlineInputBorder(),
@@ -988,11 +1112,15 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ),
               textCapitalization: TextCapitalization.words,
             );
-            final addBtn = IconButton(
+            final addBtn = IconButton.filled(
               icon: const Icon(Icons.add),
-              onPressed: _addBrand,
+              onPressed: _loading || _newBrandController.text.trim().isEmpty
+                  ? null
+                  : _addBrand,
               tooltip: 'Ajouter marque',
               style: IconButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 padding: const EdgeInsets.all(12),
                 minimumSize: const Size(
                   Breakpoints.minTouchTarget,

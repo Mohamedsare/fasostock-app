@@ -7,6 +7,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../widgets/receipt_ticket_dialog.dart';
 import '../widgets/receipt_ticket_layout.dart';
+import '../../../core/services/printer_association_storage.dart';
 import 'physical_printer_pdf.dart';
 
 /// Ticket caisse rapide : **papier 80 mm**, **zone imprimable ~72 mm** (marges ~4 mm par côté),
@@ -233,11 +234,28 @@ class ReceiptThermalPrintService {
   }
 
   /// Depuis l’UI, appeler via `unawaited(printReceipt(...))` pour ne pas bloquer l’écran.
-  static Future<void> printReceipt(ReceiptTicketData data) async {
+  /// [userId] / [companyId] : si fournis, utilise l’imprimante ticket enregistrée (écran Imprimantes).
+  static Future<void> printReceipt(
+    ReceiptTicketData data, {
+    String? userId,
+    String? companyId,
+  }) async {
     final safe = data.saleNumber.replaceAll(RegExp(r'[^\w\-.]'), '_');
+    String? preferred;
+    if (userId != null &&
+        companyId != null &&
+        userId.isNotEmpty &&
+        companyId.isNotEmpty) {
+      preferred = await PrinterAssociationStorage.getResolvedPrinterName(
+        role: LocalPrinterRole.thermal,
+        userId: userId,
+        companyId: companyId,
+      );
+    }
     await printPdfToPhysicalPrinter(
       jobName: 'ticket_$safe.pdf',
       onLayout: (_) => _buildPdf(data),
+      preferredPrinterName: preferred,
     );
   }
 }

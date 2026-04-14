@@ -30,6 +30,8 @@ class LocalProducts extends Table {
   TextColumn get unit => text().withDefault(const Constant('pce'))();
   RealColumn get purchasePrice => real().withDefault(const Constant(0))();
   RealColumn get salePrice => real().withDefault(const Constant(0))();
+  RealColumn get wholesalePrice => real().withDefault(const Constant(0))();
+  IntColumn get wholesaleQty => integer().withDefault(const Constant(0))();
   RealColumn get minPrice => real().nullable()();
   IntColumn get stockMin => integer().withDefault(const Constant(0))();
   TextColumn get description => text().nullable()();
@@ -410,7 +412,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
 
   /// Évite les erreurs « duplicate column name » si le fichier SQLite a été partiellement migré
   /// ou si `user_version` ne reflète pas le schéma réel.
@@ -574,6 +576,18 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_local_sale_payments_sale_id ON local_sale_payments(sale_id)',
         );
+      }
+      if (from < 23) {
+        if (!await _sqliteColumnExists('local_products', 'wholesale_price')) {
+          await customStatement(
+            'ALTER TABLE local_products ADD COLUMN wholesale_price REAL NOT NULL DEFAULT 0',
+          );
+        }
+        if (!await _sqliteColumnExists('local_products', 'wholesale_qty')) {
+          await customStatement(
+            'ALTER TABLE local_products ADD COLUMN wholesale_qty INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       }
     },
   );

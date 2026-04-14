@@ -14,7 +14,7 @@ class ProductsRepository {
   final SupabaseClient _client;
 
   static const _productSelect =
-      'id, company_id, name, sku, barcode, unit, purchase_price, sale_price, min_price, stock_min, description, is_active, category_id, brand_id, category:categories(id, name), brand:brands(id, name)';
+      'id, company_id, name, sku, barcode, unit, purchase_price, sale_price, wholesale_price, wholesale_qty, min_price, stock_min, description, is_active, category_id, brand_id, category:categories(id, name), brand:brands(id, name)';
 
   Future<List<Product>> list(
     String companyId, {
@@ -40,6 +40,8 @@ class ProductsRepository {
         unit: p.unit,
         purchasePrice: p.purchasePrice,
         salePrice: p.salePrice,
+        wholesalePrice: p.wholesalePrice,
+        wholesaleQty: p.wholesaleQty,
         minPrice: p.minPrice,
         stockMin: p.stockMin,
         description: p.description,
@@ -73,6 +75,8 @@ class ProductsRepository {
       unit: p.unit,
       purchasePrice: p.purchasePrice,
       salePrice: p.salePrice,
+      wholesalePrice: p.wholesalePrice,
+      wholesaleQty: p.wholesaleQty,
       minPrice: p.minPrice,
       stockMin: p.stockMin,
       description: p.description,
@@ -108,12 +112,15 @@ class ProductsRepository {
           'unit': input.unit,
           'purchase_price': input.purchasePrice,
           'sale_price': input.salePrice,
+          'wholesale_price': input.wholesalePrice,
+          'wholesale_qty': input.wholesaleQty,
           'min_price': null,
           'stock_min': input.stockMin,
           'description': input.description,
           'is_active': input.isActive,
           'category_id': input.categoryId,
           'brand_id': input.brandId,
+          'product_scope': input.productScope,
         })
         .select()
         .single();

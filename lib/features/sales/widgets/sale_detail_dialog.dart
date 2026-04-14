@@ -3,12 +3,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/errors/app_error_handler.dart';
+import '../../../providers/auth_provider.dart';
+import '../../../providers/company_provider.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/sale.dart';
 import '../../../providers/offline_providers.dart';
@@ -256,6 +259,8 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
       customerPhone: sale.customer?.phone,
     );
     if (!mounted) return;
+    final uid = context.read<AuthProvider>().user?.id;
+    final cid = context.read<CompanyProvider>().currentCompanyId;
     showDialog<void>(
       context: context,
       builder: (ctx) => ReceiptTicketDialog(
@@ -264,7 +269,11 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
           if (ctx.mounted) Navigator.of(ctx).pop();
           if (mounted) AppToast.info(context, 'Impression en cours...');
           unawaited(
-            ReceiptThermalPrintService.printReceipt(receipt)
+            ReceiptThermalPrintService.printReceipt(
+              receipt,
+              userId: uid,
+              companyId: cid,
+            )
                 .then((_) {
                   if (mounted) {
                     AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
@@ -505,7 +514,13 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                           }
                           AppToast.info(context, 'Impression en cours...');
                           unawaited(
-                            InvoiceA4PdfService.printPdfDirect(data)
+                            InvoiceA4PdfService.printPdfDirect(
+                              data,
+                              userId: context.read<AuthProvider>().user?.id,
+                              companyId: context
+                                  .read<CompanyProvider>()
+                                  .currentCompanyId,
+                            )
                                 .then((_) {
                                   if (!context.mounted) return;
                                   AppToast.success(context, 'Impression envoyée à l\'imprimante.');

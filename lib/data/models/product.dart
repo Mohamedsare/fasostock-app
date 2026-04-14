@@ -41,6 +41,8 @@ class Product {
     this.unit = 'pce',
     this.purchasePrice = 0,
     this.salePrice = 0,
+    this.wholesalePrice = 0,
+    this.wholesaleQty = 0,
     this.minPrice,
     this.stockMin = 0,
     this.description,
@@ -61,6 +63,8 @@ class Product {
   final String unit;
   final double purchasePrice;
   final double salePrice;
+  final double wholesalePrice;
+  final int wholesaleQty;
   final double? minPrice;
   final int stockMin;
   final String? description;
@@ -87,6 +91,16 @@ class Product {
   /// Transfert dépôt → boutique : articles « les deux » uniquement.
   bool get canTransferFromDepotToStore => scope == ProductScope.both;
 
+  /// PU caisse : détail ou gros selon la quantité sur la ligne.
+  double unitPriceForCartQuantity(int quantity) {
+    if (wholesaleQty > 0 &&
+        wholesalePrice > 0 &&
+        quantity >= wholesaleQty) {
+      return wholesalePrice;
+    }
+    return salePrice;
+  }
+
   factory Product.fromJson(Map<String, dynamic> json) {
     return Product(
       id: json['id'] as String,
@@ -97,6 +111,8 @@ class Product {
       unit: json['unit'] as String? ?? 'pce',
       purchasePrice: _toDouble(json['purchase_price']),
       salePrice: _toDouble(json['sale_price']),
+      wholesalePrice: _toDouble(json['wholesale_price']),
+      wholesaleQty: _toInt(json['wholesale_qty']),
       minPrice: json['min_price'] != null ? _toDouble(json['min_price']) : null,
       stockMin: _toInt(json['stock_min']),
       description: json['description'] as String?,
@@ -154,6 +170,8 @@ class CreateProductInput {
     this.unit = 'pce',
     this.purchasePrice = 0,
     this.salePrice = 0,
+    this.wholesalePrice = 0,
+    this.wholesaleQty = 0,
     this.minPrice,
     this.stockMin = 0,
     this.description,
@@ -170,6 +188,8 @@ class CreateProductInput {
   final String unit;
   final double purchasePrice;
   final double salePrice;
+  final double wholesalePrice;
+  final int wholesaleQty;
   final double? minPrice;
   final int stockMin;
   final String? description;

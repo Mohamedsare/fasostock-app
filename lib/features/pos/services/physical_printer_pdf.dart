@@ -46,13 +46,30 @@ Printer? pickPhysicalPrinter(List<Printer> printers) {
   return physical.first;
 }
 
+/// Trouve une imprimante par nom (insensible à la casse), sinon sous-chaîne.
+Printer? findPrinterNamed(List<Printer> printers, String name) {
+  final want = name.trim().toLowerCase();
+  if (want.isEmpty) return null;
+  for (final p in printers) {
+    if (p.name.trim().toLowerCase() == want) return p;
+  }
+  for (final p in printers) {
+    if (p.name.toLowerCase().contains(want)) return p;
+  }
+  return null;
+}
+
 /// Impression directe vers une imprimante physique ; sinon boîte de dialogue système.
+///
+/// [preferredPrinterName] : si renseigné et trouvé dans les imprimantes système,
+/// envoi direct vers cette imprimante (écran Imprimantes).
 ///
 /// **UI :** ne pas `await` depuis un handler d’écran — utiliser `unawaited(...)` + toast
 /// pour ne pas bloquer l’interaction tant que le pilote / spooler travaille.
 Future<void> printPdfToPhysicalPrinter({
   required String jobName,
   required Future<Uint8List> Function(PdfPageFormat format) onLayout,
+  String? preferredPrinterName,
 }) async {
   if (kIsWeb) {
     await Printing.layoutPdf(onLayout: onLayout);
@@ -64,7 +81,15 @@ Future<void> printPdfToPhysicalPrinter({
     throw Exception('Aucune imprimante disponible.');
   }
 
-  final printer = pickPhysicalPrinter(printers);
+  final preferred = preferredPrinterName?.trim();
+  Printer? printer;
+  if (preferred != null && preferred.isNotEmpty) {
+    printer = findPrinterNamed(printers, preferred);
+    if (printer != null && looksLikeVirtualDocumentSink(printer)) {
+      printer = null;
+    }
+  }
+  printer ??= pickPhysicalPrinter(printers);
   if (printer == null) {
     await Printing.layoutPdf(onLayout: onLayout);
     return;

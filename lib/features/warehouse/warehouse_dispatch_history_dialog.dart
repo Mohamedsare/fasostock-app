@@ -615,7 +615,12 @@ class _WarehouseDispatchDetailDialogState
       AppToast.info(context, 'Envoi à l’imprimante…');
       unawaited(() async {
         try {
-          await InvoiceA4PdfService.printPdfBytesDirect(bytes, docNumber);
+          await InvoiceA4PdfService.printPdfBytesDirect(
+            bytes,
+            docNumber,
+            userId: context.read<AuthProvider>().user?.id,
+            companyId: _detail?.companyId,
+          );
           if (mounted) AppToast.success(context, 'Impression A4 lancée.');
         } catch (e, st) {
           WarehouseUi.logOp('dispatch_history_print_spool', e, st);

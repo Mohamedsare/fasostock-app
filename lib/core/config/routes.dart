@@ -37,6 +37,8 @@ class AppRoutes {
   static const String reports = '/reports';
   static const String ai = '/ai';
   static const String settings = '/settings';
+  /// Imprimantes locales (native `printing`) — association ticket / facture A4.
+  static const String printers = '/printers';
   static const String users = '/users';
   static const String audit = '/audit';
   static const String help = '/help';

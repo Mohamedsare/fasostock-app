@@ -96,6 +96,11 @@ class _AppShellState extends State<AppShell> {
       icon: Icons.key_rounded,
     ),
     (
+      path: AppRoutes.printers,
+      label: 'Imprimantes',
+      icon: Icons.print_rounded,
+    ),
+    (
       path: AppRoutes.settings,
       label: 'Paramètres',
       icon: Icons.settings_rounded,
@@ -228,7 +233,9 @@ class _AppShellState extends State<AppShell> {
         if (e.path == AppRoutes.reports) return canReports;
         if (e.path == AppRoutes.ai) return canAi;
         if (e.path == AppRoutes.users) return canUsers;
-        if (e.path == AppRoutes.settings) return canSettings;
+        if (e.path == AppRoutes.settings || e.path == AppRoutes.printers) {
+          return canSettings;
+        }
         if (e.path == AppRoutes.transfers) return canTransfers;
         // Journal d'audit : visible pour les rôles avec droit (ex. comptable), pas dans le menu de l'owner.
         if (e.path == AppRoutes.audit) return canAudit && !permissions.isOwner;

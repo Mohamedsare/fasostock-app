@@ -196,13 +196,28 @@ class PosInvoiceTableCart extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (showButtons)
-                            IconButton(
-                              onPressed: () => onQtyDelta(c.productId, -1),
+                            IconButton.filled(
+                              tooltip: 'Diminuer la quantité',
+                              onPressed: () {
+                                FocusScope.of(context).unfocus();
+                                onQtyDelta(c.productId, -1);
+                              },
                               icon: const Icon(Icons.remove_rounded, size: 22),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                              style: IconButton.styleFrom(
+                                shape: const CircleBorder(),
+                                fixedSize: const Size(
+                                  Breakpoints.minTouchTarget,
+                                  Breakpoints.minTouchTarget,
+                                ),
+                                minimumSize: const Size(
+                                  Breakpoints.minTouchTarget,
+                                  Breakpoints.minTouchTarget,
+                                ),
+                                padding: EdgeInsets.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor:
+                                    cs.surfaceContainerHighest,
+                                foregroundColor: cs.onSurface,
                               ),
                             ),
                           if (showInput)
@@ -228,13 +243,27 @@ class PosInvoiceTableCart extends StatelessWidget {
                               ),
                             ),
                           if (showButtons)
-                            IconButton(
-                              onPressed: () => onQtyDelta(c.productId, 1),
+                            IconButton.filled(
+                              tooltip: 'Augmenter la quantité',
+                              onPressed: () {
+                                FocusScope.of(context).unfocus();
+                                onQtyDelta(c.productId, 1);
+                              },
                               icon: const Icon(Icons.add_rounded, size: 22),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 36,
-                                minHeight: 36,
+                              style: IconButton.styleFrom(
+                                shape: const CircleBorder(),
+                                fixedSize: const Size(
+                                  Breakpoints.minTouchTarget,
+                                  Breakpoints.minTouchTarget,
+                                ),
+                                minimumSize: const Size(
+                                  Breakpoints.minTouchTarget,
+                                  Breakpoints.minTouchTarget,
+                                ),
+                                padding: EdgeInsets.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                backgroundColor: PosQuickColors.orangePrincipal,
+                                foregroundColor: Colors.white,
                               ),
                             ),
                         ],

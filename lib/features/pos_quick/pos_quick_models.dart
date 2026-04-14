@@ -14,6 +14,7 @@ class PosCartItem {
     required this.unitPrice,
     required this.total,
     this.imageUrl,
+    this.linePriceUserSet = false,
   });
 
   final String productId;
@@ -21,9 +22,10 @@ class PosCartItem {
   final String? sku;
   String unit;
   int quantity;
-  final double unitPrice;
+  double unitPrice;
   double total;
   final String? imageUrl;
+  bool linePriceUserSet;
 }
 
 /// Résultat du dialog de création de client (nom + téléphone).

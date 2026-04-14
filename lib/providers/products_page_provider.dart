@@ -117,6 +117,8 @@ class ProductsPageProvider extends ChangeNotifier {
         unit: p.unit,
         purchasePrice: p.purchasePrice,
         salePrice: p.salePrice,
+        wholesalePrice: p.wholesalePrice,
+        wholesaleQty: p.wholesaleQty,
         minPrice: p.minPrice,
         stockMin: p.stockMin,
         description: p.description,

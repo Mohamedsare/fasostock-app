@@ -32,6 +32,7 @@ import '../features/audit/audit_page.dart';
 import '../features/help/help_page.dart';
 import '../features/integrations/integrations_page.dart';
 import '../features/notifications/notifications_page.dart';
+import '../features/printers/printers_page.dart';
 import '../features/settings/settings_page.dart';
 import '../features/admin/shared/admin_shell.dart';
 import '../features/admin/admin_tableau_page.dart';
@@ -294,6 +295,10 @@ GoRouter createAppRouter(AuthProvider authProvider) {
           GoRoute(
             path: AppRoutes.ai,
             builder: (context, state) => const AiInsightsPage(),
+          ),
+          GoRoute(
+            path: AppRoutes.printers,
+            builder: (context, state) => const PrintersPage(),
           ),
           GoRoute(
             path: AppRoutes.settings,

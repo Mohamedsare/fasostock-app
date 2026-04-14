@@ -12,6 +12,7 @@ import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../core/errors/app_error_handler.dart';
+import '../../../core/services/printer_association_storage.dart';
 import 'physical_printer_pdf.dart';
 import '../../../data/models/sale.dart';
 import '../../../data/models/store.dart';
@@ -890,10 +891,27 @@ class InvoiceA4PdfService {
 
   /// Impression directe à partir d’octets PDF — peut être lancée avec [unawaited]
   /// après [generatePdf] pour que l’UI ne reste pas figée pendant le spooler.
-  static Future<void> printPdfBytesDirect(Uint8List bytes, String saleNumber) async {
+  static Future<void> printPdfBytesDirect(
+    Uint8List bytes,
+    String saleNumber, {
+    String? userId,
+    String? companyId,
+  }) async {
+    String? preferred;
+    if (userId != null &&
+        companyId != null &&
+        userId.isNotEmpty &&
+        companyId.isNotEmpty) {
+      preferred = await PrinterAssociationStorage.getResolvedPrinterName(
+        role: LocalPrinterRole.a4,
+        userId: userId,
+        companyId: companyId,
+      );
+    }
     await printPdfToPhysicalPrinter(
       jobName: _pdfFileName(saleNumber),
       onLayout: (_) async => bytes,
+      preferredPrinterName: preferred,
     );
   }
 
@@ -958,13 +976,29 @@ class InvoiceA4PdfService {
   /// Imprime la facture A4 sans étape de preview vers une imprimante **papier** si possible.
   ///
   /// **UI :** utiliser `unawaited(printPdfDirect(...))` + retour utilisateur (toast).
-  static Future<void> printPdfDirect(InvoiceA4Data data) async {
+  static Future<void> printPdfDirect(
+    InvoiceA4Data data, {
+    String? userId,
+    String? companyId,
+  }) async {
+    String? preferred;
+    if (userId != null &&
+        companyId != null &&
+        userId.isNotEmpty &&
+        companyId.isNotEmpty) {
+      preferred = await PrinterAssociationStorage.getResolvedPrinterName(
+        role: LocalPrinterRole.a4,
+        userId: userId,
+        companyId: companyId,
+      );
+    }
     await printPdfToPhysicalPrinter(
       jobName: _pdfFileName(data.saleNumber),
       onLayout: (_) async {
         final doc = await buildDocument(data);
         return doc.save();
       },
+      preferredPrinterName: preferred,
     );
   }
 }

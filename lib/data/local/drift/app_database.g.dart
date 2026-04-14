@@ -92,6 +92,30 @@ class $LocalProductsTable extends LocalProducts
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _wholesalePriceMeta = const VerificationMeta(
+    'wholesalePrice',
+  );
+  @override
+  late final GeneratedColumn<double> wholesalePrice = GeneratedColumn<double>(
+    'wholesale_price',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _wholesaleQtyMeta = const VerificationMeta(
+    'wholesaleQty',
+  );
+  @override
+  late final GeneratedColumn<int> wholesaleQty = GeneratedColumn<int>(
+    'wholesale_qty',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   static const VerificationMeta _minPriceMeta = const VerificationMeta(
     'minPrice',
   );
@@ -207,6 +231,8 @@ class $LocalProductsTable extends LocalProducts
     unit,
     purchasePrice,
     salePrice,
+    wholesalePrice,
+    wholesaleQty,
     minPrice,
     stockMin,
     description,
@@ -281,6 +307,24 @@ class $LocalProductsTable extends LocalProducts
       context.handle(
         _salePriceMeta,
         salePrice.isAcceptableOrUnknown(data['sale_price']!, _salePriceMeta),
+      );
+    }
+    if (data.containsKey('wholesale_price')) {
+      context.handle(
+        _wholesalePriceMeta,
+        wholesalePrice.isAcceptableOrUnknown(
+          data['wholesale_price']!,
+          _wholesalePriceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('wholesale_qty')) {
+      context.handle(
+        _wholesaleQtyMeta,
+        wholesaleQty.isAcceptableOrUnknown(
+          data['wholesale_qty']!,
+          _wholesaleQtyMeta,
+        ),
       );
     }
     if (data.containsKey('min_price')) {
@@ -386,6 +430,14 @@ class $LocalProductsTable extends LocalProducts
         DriftSqlType.double,
         data['${effectivePrefix}sale_price'],
       )!,
+      wholesalePrice: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}wholesale_price'],
+      )!,
+      wholesaleQty: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}wholesale_qty'],
+      )!,
       minPrice: attachedDatabase.typeMapping.read(
         DriftSqlType.double,
         data['${effectivePrefix}min_price'],
@@ -440,6 +492,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
   final String unit;
   final double purchasePrice;
   final double salePrice;
+  final double wholesalePrice;
+  final int wholesaleQty;
   final double? minPrice;
   final int stockMin;
   final String? description;
@@ -460,6 +514,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
     required this.unit,
     required this.purchasePrice,
     required this.salePrice,
+    required this.wholesalePrice,
+    required this.wholesaleQty,
     this.minPrice,
     required this.stockMin,
     this.description,
@@ -485,6 +541,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
     map['unit'] = Variable<String>(unit);
     map['purchase_price'] = Variable<double>(purchasePrice);
     map['sale_price'] = Variable<double>(salePrice);
+    map['wholesale_price'] = Variable<double>(wholesalePrice);
+    map['wholesale_qty'] = Variable<int>(wholesaleQty);
     if (!nullToAbsent || minPrice != null) {
       map['min_price'] = Variable<double>(minPrice);
     }
@@ -519,6 +577,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
       unit: Value(unit),
       purchasePrice: Value(purchasePrice),
       salePrice: Value(salePrice),
+      wholesalePrice: Value(wholesalePrice),
+      wholesaleQty: Value(wholesaleQty),
       minPrice: minPrice == null && nullToAbsent
           ? const Value.absent()
           : Value(minPrice),
@@ -555,6 +615,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
       unit: serializer.fromJson<String>(json['unit']),
       purchasePrice: serializer.fromJson<double>(json['purchasePrice']),
       salePrice: serializer.fromJson<double>(json['salePrice']),
+      wholesalePrice: serializer.fromJson<double>(json['wholesalePrice']),
+      wholesaleQty: serializer.fromJson<int>(json['wholesaleQty']),
       minPrice: serializer.fromJson<double?>(json['minPrice']),
       stockMin: serializer.fromJson<int>(json['stockMin']),
       description: serializer.fromJson<String?>(json['description']),
@@ -578,6 +640,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
       'unit': serializer.toJson<String>(unit),
       'purchasePrice': serializer.toJson<double>(purchasePrice),
       'salePrice': serializer.toJson<double>(salePrice),
+      'wholesalePrice': serializer.toJson<double>(wholesalePrice),
+      'wholesaleQty': serializer.toJson<int>(wholesaleQty),
       'minPrice': serializer.toJson<double?>(minPrice),
       'stockMin': serializer.toJson<int>(stockMin),
       'description': serializer.toJson<String?>(description),
@@ -599,6 +663,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
     String? unit,
     double? purchasePrice,
     double? salePrice,
+    double? wholesalePrice,
+    int? wholesaleQty,
     Value<double?> minPrice = const Value.absent(),
     int? stockMin,
     Value<String?> description = const Value.absent(),
@@ -617,6 +683,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
     unit: unit ?? this.unit,
     purchasePrice: purchasePrice ?? this.purchasePrice,
     salePrice: salePrice ?? this.salePrice,
+    wholesalePrice: wholesalePrice ?? this.wholesalePrice,
+    wholesaleQty: wholesaleQty ?? this.wholesaleQty,
     minPrice: minPrice.present ? minPrice.value : this.minPrice,
     stockMin: stockMin ?? this.stockMin,
     description: description.present ? description.value : this.description,
@@ -639,6 +707,12 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
           ? data.purchasePrice.value
           : this.purchasePrice,
       salePrice: data.salePrice.present ? data.salePrice.value : this.salePrice,
+      wholesalePrice: data.wholesalePrice.present
+          ? data.wholesalePrice.value
+          : this.wholesalePrice,
+      wholesaleQty: data.wholesaleQty.present
+          ? data.wholesaleQty.value
+          : this.wholesaleQty,
       minPrice: data.minPrice.present ? data.minPrice.value : this.minPrice,
       stockMin: data.stockMin.present ? data.stockMin.value : this.stockMin,
       description: data.description.present
@@ -668,6 +742,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
           ..write('unit: $unit, ')
           ..write('purchasePrice: $purchasePrice, ')
           ..write('salePrice: $salePrice, ')
+          ..write('wholesalePrice: $wholesalePrice, ')
+          ..write('wholesaleQty: $wholesaleQty, ')
           ..write('minPrice: $minPrice, ')
           ..write('stockMin: $stockMin, ')
           ..write('description: $description, ')
@@ -691,6 +767,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
     unit,
     purchasePrice,
     salePrice,
+    wholesalePrice,
+    wholesaleQty,
     minPrice,
     stockMin,
     description,
@@ -713,6 +791,8 @@ class LocalProduct extends DataClass implements Insertable<LocalProduct> {
           other.unit == this.unit &&
           other.purchasePrice == this.purchasePrice &&
           other.salePrice == this.salePrice &&
+          other.wholesalePrice == this.wholesalePrice &&
+          other.wholesaleQty == this.wholesaleQty &&
           other.minPrice == this.minPrice &&
           other.stockMin == this.stockMin &&
           other.description == this.description &&
@@ -733,6 +813,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
   final Value<String> unit;
   final Value<double> purchasePrice;
   final Value<double> salePrice;
+  final Value<double> wholesalePrice;
+  final Value<int> wholesaleQty;
   final Value<double?> minPrice;
   final Value<int> stockMin;
   final Value<String?> description;
@@ -752,6 +834,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
     this.unit = const Value.absent(),
     this.purchasePrice = const Value.absent(),
     this.salePrice = const Value.absent(),
+    this.wholesalePrice = const Value.absent(),
+    this.wholesaleQty = const Value.absent(),
     this.minPrice = const Value.absent(),
     this.stockMin = const Value.absent(),
     this.description = const Value.absent(),
@@ -772,6 +856,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
     this.unit = const Value.absent(),
     this.purchasePrice = const Value.absent(),
     this.salePrice = const Value.absent(),
+    this.wholesalePrice = const Value.absent(),
+    this.wholesaleQty = const Value.absent(),
     this.minPrice = const Value.absent(),
     this.stockMin = const Value.absent(),
     this.description = const Value.absent(),
@@ -795,6 +881,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
     Expression<String>? unit,
     Expression<double>? purchasePrice,
     Expression<double>? salePrice,
+    Expression<double>? wholesalePrice,
+    Expression<int>? wholesaleQty,
     Expression<double>? minPrice,
     Expression<int>? stockMin,
     Expression<String>? description,
@@ -815,6 +903,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
       if (unit != null) 'unit': unit,
       if (purchasePrice != null) 'purchase_price': purchasePrice,
       if (salePrice != null) 'sale_price': salePrice,
+      if (wholesalePrice != null) 'wholesale_price': wholesalePrice,
+      if (wholesaleQty != null) 'wholesale_qty': wholesaleQty,
       if (minPrice != null) 'min_price': minPrice,
       if (stockMin != null) 'stock_min': stockMin,
       if (description != null) 'description': description,
@@ -837,6 +927,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
     Value<String>? unit,
     Value<double>? purchasePrice,
     Value<double>? salePrice,
+    Value<double>? wholesalePrice,
+    Value<int>? wholesaleQty,
     Value<double?>? minPrice,
     Value<int>? stockMin,
     Value<String?>? description,
@@ -857,6 +949,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
       unit: unit ?? this.unit,
       purchasePrice: purchasePrice ?? this.purchasePrice,
       salePrice: salePrice ?? this.salePrice,
+      wholesalePrice: wholesalePrice ?? this.wholesalePrice,
+      wholesaleQty: wholesaleQty ?? this.wholesaleQty,
       minPrice: minPrice ?? this.minPrice,
       stockMin: stockMin ?? this.stockMin,
       description: description ?? this.description,
@@ -896,6 +990,12 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
     }
     if (salePrice.present) {
       map['sale_price'] = Variable<double>(salePrice.value);
+    }
+    if (wholesalePrice.present) {
+      map['wholesale_price'] = Variable<double>(wholesalePrice.value);
+    }
+    if (wholesaleQty.present) {
+      map['wholesale_qty'] = Variable<int>(wholesaleQty.value);
     }
     if (minPrice.present) {
       map['min_price'] = Variable<double>(minPrice.value);
@@ -941,6 +1041,8 @@ class LocalProductsCompanion extends UpdateCompanion<LocalProduct> {
           ..write('unit: $unit, ')
           ..write('purchasePrice: $purchasePrice, ')
           ..write('salePrice: $salePrice, ')
+          ..write('wholesalePrice: $wholesalePrice, ')
+          ..write('wholesaleQty: $wholesaleQty, ')
           ..write('minPrice: $minPrice, ')
           ..write('stockMin: $stockMin, ')
           ..write('description: $description, ')
@@ -13083,6 +13185,8 @@ typedef $$LocalProductsTableCreateCompanionBuilder =
       Value<String> unit,
       Value<double> purchasePrice,
       Value<double> salePrice,
+      Value<double> wholesalePrice,
+      Value<int> wholesaleQty,
       Value<double?> minPrice,
       Value<int> stockMin,
       Value<String?> description,
@@ -13104,6 +13208,8 @@ typedef $$LocalProductsTableUpdateCompanionBuilder =
       Value<String> unit,
       Value<double> purchasePrice,
       Value<double> salePrice,
+      Value<double> wholesalePrice,
+      Value<int> wholesaleQty,
       Value<double?> minPrice,
       Value<int> stockMin,
       Value<String?> description,
@@ -13162,6 +13268,16 @@ class $$LocalProductsTableFilterComposer
 
   ColumnFilters<double> get salePrice => $composableBuilder(
     column: $table.salePrice,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get wholesalePrice => $composableBuilder(
+    column: $table.wholesalePrice,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get wholesaleQty => $composableBuilder(
+    column: $table.wholesaleQty,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -13260,6 +13376,16 @@ class $$LocalProductsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<double> get wholesalePrice => $composableBuilder(
+    column: $table.wholesalePrice,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get wholesaleQty => $composableBuilder(
+    column: $table.wholesaleQty,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<double> get minPrice => $composableBuilder(
     column: $table.minPrice,
     builder: (column) => ColumnOrderings(column),
@@ -13341,6 +13467,16 @@ class $$LocalProductsTableAnnotationComposer
   GeneratedColumn<double> get salePrice =>
       $composableBuilder(column: $table.salePrice, builder: (column) => column);
 
+  GeneratedColumn<double> get wholesalePrice => $composableBuilder(
+    column: $table.wholesalePrice,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get wholesaleQty => $composableBuilder(
+    column: $table.wholesaleQty,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<double> get minPrice =>
       $composableBuilder(column: $table.minPrice, builder: (column) => column);
 
@@ -13414,6 +13550,8 @@ class $$LocalProductsTableTableManager
                 Value<String> unit = const Value.absent(),
                 Value<double> purchasePrice = const Value.absent(),
                 Value<double> salePrice = const Value.absent(),
+                Value<double> wholesalePrice = const Value.absent(),
+                Value<int> wholesaleQty = const Value.absent(),
                 Value<double?> minPrice = const Value.absent(),
                 Value<int> stockMin = const Value.absent(),
                 Value<String?> description = const Value.absent(),
@@ -13433,6 +13571,8 @@ class $$LocalProductsTableTableManager
                 unit: unit,
                 purchasePrice: purchasePrice,
                 salePrice: salePrice,
+                wholesalePrice: wholesalePrice,
+                wholesaleQty: wholesaleQty,
                 minPrice: minPrice,
                 stockMin: stockMin,
                 description: description,
@@ -13454,6 +13594,8 @@ class $$LocalProductsTableTableManager
                 Value<String> unit = const Value.absent(),
                 Value<double> purchasePrice = const Value.absent(),
                 Value<double> salePrice = const Value.absent(),
+                Value<double> wholesalePrice = const Value.absent(),
+                Value<int> wholesaleQty = const Value.absent(),
                 Value<double?> minPrice = const Value.absent(),
                 Value<int> stockMin = const Value.absent(),
                 Value<String?> description = const Value.absent(),
@@ -13473,6 +13615,8 @@ class $$LocalProductsTableTableManager
                 unit: unit,
                 purchasePrice: purchasePrice,
                 salePrice: salePrice,
+                wholesalePrice: wholesalePrice,
+                wholesaleQty: wholesaleQty,
                 minPrice: minPrice,
                 stockMin: stockMin,
                 description: description,

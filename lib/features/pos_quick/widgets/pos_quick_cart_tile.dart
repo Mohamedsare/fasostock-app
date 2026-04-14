@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/breakpoints.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../pos/widgets/pos_cart_qty_field.dart';
 import '../pos_quick_constants.dart';
@@ -73,11 +74,24 @@ class PosQuickCartTile extends StatelessWidget {
                   children: [
                     if (showQuantityButtons)
                       IconButton.filled(
-                        onPressed: () => onQtyDelta(-1),
-                        icon: const Icon(Icons.remove_rounded, size: 20),
+                        tooltip: 'Diminuer la quantité',
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          onQtyDelta(-1);
+                        },
+                        icon: const Icon(Icons.remove_rounded, size: 22),
                         style: IconButton.styleFrom(
-                          padding: const EdgeInsets.all(6),
-                          minimumSize: const Size(36, 36),
+                          shape: const CircleBorder(),
+                          fixedSize: const Size(
+                            Breakpoints.minTouchTarget,
+                            Breakpoints.minTouchTarget,
+                          ),
+                          minimumSize: const Size(
+                            Breakpoints.minTouchTarget,
+                            Breakpoints.minTouchTarget,
+                          ),
+                          padding: EdgeInsets.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           backgroundColor: cs.surfaceContainerHighest,
                           foregroundColor: cs.onSurface,
                         ),
@@ -106,11 +120,24 @@ class PosQuickCartTile extends StatelessWidget {
                       ),
                     if (showQuantityButtons)
                       IconButton.filled(
-                        onPressed: () => onQtyDelta(1),
-                        icon: const Icon(Icons.add_rounded, size: 20),
+                        tooltip: 'Augmenter la quantité',
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          onQtyDelta(1);
+                        },
+                        icon: const Icon(Icons.add_rounded, size: 22),
                         style: IconButton.styleFrom(
-                          padding: const EdgeInsets.all(6),
-                          minimumSize: const Size(36, 36),
+                          shape: const CircleBorder(),
+                          fixedSize: const Size(
+                            Breakpoints.minTouchTarget,
+                            Breakpoints.minTouchTarget,
+                          ),
+                          minimumSize: const Size(
+                            Breakpoints.minTouchTarget,
+                            Breakpoints.minTouchTarget,
+                          ),
+                          padding: EdgeInsets.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           backgroundColor: PosQuickColors.orangePrincipal,
                           foregroundColor: Colors.white,
                         ),

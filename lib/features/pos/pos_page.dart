@@ -277,6 +277,24 @@ class _PosPageState extends ConsumerState<PosPage> {
 
   static String _puFieldText(double unitPrice) => '${unitPrice.round()}';
 
+  Product? _productById(String productId) {
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    if (companyId == null || companyId.isEmpty) return null;
+    final list =
+        ref.read(productsStreamProvider(companyId)).valueOrNull ?? const [];
+    try {
+      return list.firstWhere((p) => p.id == productId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  double _catalogUnitPrice(String productId, int qty) {
+    final p = _productById(productId);
+    if (p == null) return 0;
+    return p.unitPriceForCartQuantity(qty);
+  }
+
   void _ensureQtyControllersForCart() {
     for (final c in _cart) {
       _qtyControllers.putIfAbsent(
@@ -307,6 +325,7 @@ class _PosPageState extends ConsumerState<PosPage> {
       for (final c in _cart) {
         if (c.productId == productId) {
           c.unitPrice = pu;
+          c.linePriceUserSet = true;
           c.total = (c.quantity * c.unitPrice).roundToDouble();
           break;
         }
@@ -699,21 +718,31 @@ class _PosPageState extends ConsumerState<PosPage> {
         existing = null;
       }
       if (existing != null) {
-        final newQty = existing.quantity + 1;
+        final line = existing;
+        final newQty = line.quantity + 1;
         if (stock >= 0 && newQty > stock) {
           _showStockLimitToast();
           return;
         }
-        existing.quantity = newQty;
-        existing.total = newQty * existing.unitPrice;
-        final pid = existing.productId;
+        line.quantity = newQty;
+        if (!line.linePriceUserSet) {
+          line.unitPrice = p.unitPriceForCartQuantity(newQty);
+        }
+        line.total = newQty * line.unitPrice;
+        final pid = line.productId;
+        final syncPu = !line.linePriceUserSet;
+        final puText = line.unitPrice;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           _qtyControllers[pid]?.text =
               newQty == 0 ? '' : newQty.toString();
+          if (_puControllers.containsKey(pid) && syncPu) {
+            _puControllers[pid]!.text = _puFieldText(puText);
+          }
         });
       } else {
         if (stock <= 0) return;
+        final pu = p.unitPriceForCartQuantity(1);
         _cart.add(
           PosCartItem(
             productId: p.id,
@@ -721,8 +750,8 @@ class _PosPageState extends ConsumerState<PosPage> {
             sku: p.sku,
             unit: _defaultUnitForProduct(p),
             quantity: 1,
-            unitPrice: p.salePrice,
-            total: p.salePrice,
+            unitPrice: pu,
+            total: pu,
             imageUrl: p.productImages?.isNotEmpty == true
                 ? p.productImages!.first.url
                 : null,
@@ -762,6 +791,9 @@ class _PosPageState extends ConsumerState<PosPage> {
             }
             newQty = q;
             c.quantity = q;
+            if (!c.linePriceUserSet) {
+              c.unitPrice = _catalogUnitPrice(productId, q);
+            }
             c.total = q * c.unitPrice;
             return c;
           })
@@ -777,6 +809,17 @@ class _PosPageState extends ConsumerState<PosPage> {
     if (newQty != null && _qtyControllers.containsKey(productId)) {
       _qtyControllers[productId]!.text =
           newQty == 0 ? '' : newQty.toString();
+      PosCartItem? line;
+      try {
+        line = _cart.firstWhere((c) => c.productId == productId);
+      } catch (_) {
+        line = null;
+      }
+      if (line != null &&
+          _puControllers.containsKey(productId) &&
+          !line.linePriceUserSet) {
+        _puControllers[productId]!.text = _puFieldText(line.unitPrice);
+      }
     }
   }
 
@@ -816,11 +859,20 @@ class _PosPageState extends ConsumerState<PosPage> {
           .map((c) {
             if (c.productId != productId) return c;
             c.quantity = clamped;
+            if (!c.linePriceUserSet) {
+              c.unitPrice = _catalogUnitPrice(productId, clamped);
+            }
             c.total = clamped * c.unitPrice;
             return c;
           })
           .toList();
     });
+    if (_puControllers.containsKey(productId) && !current.linePriceUserSet) {
+      try {
+        final after = _cart.firstWhere((c) => c.productId == productId);
+        _puControllers[productId]!.text = _puFieldText(after.unitPrice);
+      } catch (_) {}
+    }
   }
 
   void _removeCartLine(String productId) {
@@ -951,6 +1003,8 @@ class _PosPageState extends ConsumerState<PosPage> {
                 name: item.product?.name ?? '',
                 unit: item.product?.unit ?? 'pce',
                 salePrice: item.unitPrice,
+                wholesalePrice: 0,
+                wholesaleQty: 0,
                 isActive: true,
               ),
             ),
@@ -958,6 +1012,7 @@ class _PosPageState extends ConsumerState<PosPage> {
             unitPrice: item.unitPrice,
             total: item.total,
             imageUrl: null,
+            linePriceUserSet: true,
           ),
         );
       }
@@ -2810,7 +2865,12 @@ class _PosPageState extends ConsumerState<PosPage> {
                       AppToast.info(context, 'Impression en cours...');
                     }
                     unawaited(
-                      InvoiceA4PdfService.printPdfDirect(invoiceA4).then(
+                      InvoiceA4PdfService.printPdfDirect(
+                        invoiceA4,
+                        userId: context.read<AuthProvider>().user?.id,
+                        companyId:
+                            context.read<CompanyProvider>().currentCompanyId,
+                      ).then(
                         (_) {
                           if (mounted) {
                             AppToast.success(
