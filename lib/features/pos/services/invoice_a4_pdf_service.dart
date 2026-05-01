@@ -45,6 +45,7 @@ class InvoicePaymentLineData {
 
   final String label;
   final double amount;
+
   /// Espèces, mobile money, carte, virement. `false` = montant porté au crédit client ([PaymentMethod.other]).
   final bool isImmediateEncaisse;
 }
@@ -80,11 +81,14 @@ class InvoiceA4Data {
   final String? customerName;
   final String? customerPhone;
   final String? customerAddress;
+
   /// Ancien mode : uniquement « encaissé » si [paymentLines] est vide (ex. brouillon sans détail).
   final double? depositAmount;
+
   /// Détail des paiements : permet encaisse partiel, total et crédit sans confondre « acompte » et créance.
   final List<InvoicePaymentLineData>? paymentLines;
   final String? amountInWords;
+
   /// Octets du logo entreprise (optionnel) — affiché en en-tête de la facture A4.
   final Uint8List? logoBytes;
 }
@@ -165,7 +169,13 @@ class InvoiceA4PdfService {
       if (!await f.exists()) return null;
       final bytes = await f.readAsBytes();
       return bytes.isEmpty ? null : bytes;
-    } catch (_) {
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'invoice_a4_pdf',
+        logContext: const {'op': 'loadCachedLogoBytes'},
+      );
       return null;
     }
   }
@@ -176,13 +186,23 @@ class InvoiceA4PdfService {
       final f = await _logoCacheFile(storeId);
       if (f == null) return;
       await f.writeAsBytes(bytes, flush: true);
-    } catch (_) {}
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'invoice_a4_pdf',
+        logContext: const {'op': 'cacheLogoBytes'},
+      );
+    }
   }
 
   /// Retourne une boutique avec [invoice_template] résolu (depuis l'API si la boutique
   /// du cache n'a pas de modèle défini). À utiliser avant de construire [InvoiceA4Data]
   /// depuis la caisse facture A4 pour appliquer correctement le modèle Classique ou ELOF.
-  static Future<Store> resolveStoreForInvoice(Store store, {bool allowNetwork = true}) async {
+  static Future<Store> resolveStoreForInvoice(
+    Store store, {
+    bool allowNetwork = true,
+  }) async {
     final t = store.invoiceTemplate;
     if (t != null && t.trim().isNotEmpty) return store;
     if (!allowNetwork) return store;
@@ -199,9 +219,15 @@ class InvoiceA4PdfService {
   static String _sanitizeForPdf(String s) {
     if (s.isEmpty) return s;
     return s
-        .replaceAll('\uFFFD', '') // caractère de remplacement Unicode (affiché comme carré avec X)
+        .replaceAll(
+          '\uFFFD',
+          '',
+        ) // caractère de remplacement Unicode (affiché comme carré avec X)
         .replaceAll('\u00A0', ' ') // espace insécable
-        .replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'), '') // caractères de contrôle
+        .replaceAll(
+          RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'),
+          '',
+        ) // caractères de contrôle
         .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), '') // zero-width, BOM
         .replaceAll('\u2014', '-') // tiret long (em dash)
         .replaceAll('\u2013', '-'); // tiret moyen (en dash)
@@ -247,7 +273,8 @@ class InvoiceA4PdfService {
     doc.addPage(
       pw.MultiPage(
         margin: const pw.EdgeInsets.all(32),
-        header: (context) => _buildHeader(store, primary, dateFormat, timeFormat, data),
+        header: (context) =>
+            _buildHeader(store, primary, dateFormat, timeFormat, data),
         footer: (context) => _buildFooter(store),
         pageFormat: PdfPageFormat.a4,
         build: (context) => [
@@ -259,16 +286,25 @@ class InvoiceA4PdfService {
           pw.SizedBox(height: 16),
           _buildCustomerBlock(data),
           pw.SizedBox(height: 16),
-          pw.Text('Facture n° ${_sanitizeForPdf(data.saleNumber)}', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Text(
+            'Facture n° ${_sanitizeForPdf(data.saleNumber)}',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          ),
           pw.SizedBox(height: 8),
-          pw.Text('Date : ${_sanitizeForPdf(dateFormat.format(data.date))} - ${_sanitizeForPdf(timeFormat.format(data.date))}', style: const pw.TextStyle(fontSize: 12)),
+          pw.Text(
+            'Date : ${_sanitizeForPdf(dateFormat.format(data.date))} - ${_sanitizeForPdf(timeFormat.format(data.date))}',
+            style: const pw.TextStyle(fontSize: 12),
+          ),
           pw.SizedBox(height: 20),
           _buildTable(data, currency, primary),
           pw.SizedBox(height: 16),
           _buildTotals(data, currency, primary),
           if (data.amountInWords != null && data.amountInWords!.isNotEmpty) ...[
             pw.SizedBox(height: 12),
-            pw.Text('Montant en lettres : ${_sanitizeForPdf(data.amountInWords!)}', style: const pw.TextStyle(fontSize: 11)),
+            pw.Text(
+              'Montant en lettres : ${_sanitizeForPdf(data.amountInWords!)}',
+              style: const pw.TextStyle(fontSize: 11),
+            ),
           ],
           pw.SizedBox(height: 72),
           _buildSignatureBlock(store),
@@ -278,7 +314,13 @@ class InvoiceA4PdfService {
     return doc;
   }
 
-  static pw.Widget _buildHeader(Store store, PdfColor primary, DateFormat dateFormat, DateFormat timeFormat, InvoiceA4Data data) {
+  static pw.Widget _buildHeader(
+    Store store,
+    PdfColor primary,
+    DateFormat dateFormat,
+    DateFormat timeFormat,
+    InvoiceA4Data data,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.only(bottom: 12),
       decoration: pw.BoxDecoration(
@@ -289,7 +331,11 @@ class InvoiceA4PdfService {
         children: [
           pw.Text(
             _sanitizeForPdf(store.commercialName ?? store.name),
-            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: primary),
+            style: pw.TextStyle(
+              fontSize: 12,
+              fontWeight: pw.FontWeight.bold,
+              color: primary,
+            ),
           ),
           pw.Text(
             'Facture ${_sanitizeForPdf(data.saleNumber)} - ${_sanitizeForPdf(dateFormat.format(data.date))} ${_sanitizeForPdf(timeFormat.format(data.date))}',
@@ -318,7 +364,11 @@ class InvoiceA4PdfService {
   static final PdfColor _textBlack = PdfColors.black;
   static final PdfColor _activityColor = PdfColors.black;
 
-  static pw.Widget _buildStoreBlock(Store store, PdfColor primaryColor, {Uint8List? logoBytes}) {
+  static pw.Widget _buildStoreBlock(
+    Store store,
+    PdfColor primaryColor, {
+    Uint8List? logoBytes,
+  }) {
     final hasLogo = logoBytes != null && logoBytes.isNotEmpty;
     // Bloc droit : titre/acronyme (bold, couleur personnalisable) → nom entreprise → secteur → adresse → tél
     final rightChildren = <pw.Widget>[];
@@ -326,68 +376,114 @@ class InvoiceA4PdfService {
     final titleBold = pw.FontWeight.bold;
     final shortTitle = (store.invoiceShortTitle ?? store.description)?.trim();
     if (shortTitle != null && shortTitle.isNotEmpty) {
-      rightChildren.add(pw.Text(
-        _sanitizeForPdf(shortTitle).toUpperCase(),
-        style: pw.TextStyle(fontSize: 24, fontWeight: titleBold, color: primaryColor, letterSpacing: 4),
-        textAlign: pw.TextAlign.right,
-      ));
+      rightChildren.add(
+        pw.Text(
+          _sanitizeForPdf(shortTitle).toUpperCase(),
+          style: pw.TextStyle(
+            fontSize: 24,
+            fontWeight: titleBold,
+            color: primaryColor,
+            letterSpacing: 4,
+          ),
+          textAlign: pw.TextAlign.right,
+        ),
+      );
       rightChildren.add(pw.SizedBox(height: 6));
     }
-    rightChildren.add(pw.Text(
-      _sanitizeForPdf(store.commercialName ?? store.name).toUpperCase(),
-      style: pw.TextStyle(fontSize: 19, fontWeight: titleBold, color: primaryColor),
-      textAlign: pw.TextAlign.right,
-    ));
+    rightChildren.add(
+      pw.Text(
+        _sanitizeForPdf(store.commercialName ?? store.name).toUpperCase(),
+        style: pw.TextStyle(
+          fontSize: 19,
+          fontWeight: titleBold,
+          color: primaryColor,
+        ),
+        textAlign: pw.TextAlign.right,
+      ),
+    );
     if (store.slogan != null && store.slogan!.trim().isNotEmpty) {
       for (final line in store.slogan!.trim().split('\n')) {
         if (line.isEmpty) continue;
-        rightChildren.add(pw.Padding(padding: const pw.EdgeInsets.only(top: 4), child: pw.Text(_sanitizeForPdf(line).toUpperCase(), style: pw.TextStyle(fontSize: 12, fontWeight: titleBold, color: _textBlack), textAlign: pw.TextAlign.right)));
+        rightChildren.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(line).toUpperCase(),
+              style: pw.TextStyle(
+                fontSize: 12,
+                fontWeight: titleBold,
+                color: _textBlack,
+              ),
+              textAlign: pw.TextAlign.right,
+            ),
+          ),
+        );
       }
     }
     // Secteur d'activité : affiché quand il est renseigné (une ou plusieurs lignes).
     final activityStr = (store.activity ?? '').trim();
     if (activityStr.isNotEmpty) {
-      for (final line in activityStr.split(RegExp(r'[\r\n]+')).where((s) => s.isNotEmpty)) {
-        rightChildren.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 4),
-          child: pw.Text(
-            _sanitizeForPdf(line).toUpperCase(),
-            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: _activityColor),
-            textAlign: pw.TextAlign.right,
+      for (final line
+          in activityStr.split(RegExp(r'[\r\n]+')).where((s) => s.isNotEmpty)) {
+        rightChildren.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(line).toUpperCase(),
+              style: pw.TextStyle(
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+                color: _activityColor,
+              ),
+              textAlign: pw.TextAlign.right,
+            ),
           ),
-        ));
+        );
       }
     }
     // Téléphone (optionnel) — sans "Tel:" dans la facture.
     if (store.phone != null && store.phone!.trim().isNotEmpty) {
       final phone = _stripTelPrefix(store.phone!);
       if (phone.isNotEmpty) {
-        rightChildren.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 4),
-          child: pw.Text(
-            _sanitizeForPdf(phone),
-            style: pw.TextStyle(fontSize: 11, color: _textBlack),
-            textAlign: pw.TextAlign.right,
+        rightChildren.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(phone),
+              style: pw.TextStyle(fontSize: 11, color: _textBlack),
+              textAlign: pw.TextAlign.right,
+            ),
           ),
-        ));
+        );
       }
     }
     // Mobile money (optionnel) — sans "Tel:" dans la facture.
     if (store.mobileMoney != null && store.mobileMoney!.trim().isNotEmpty) {
       final mm = _stripTelPrefix(store.mobileMoney!);
       if (mm.isNotEmpty) {
-        rightChildren.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 2),
-          child: pw.Text(
-            'Mobile money ${_sanitizeForPdf(mm)}',
-            style: pw.TextStyle(fontSize: 11, color: _textBlack),
-            textAlign: pw.TextAlign.right,
+        rightChildren.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 2),
+            child: pw.Text(
+              'Mobile money ${_sanitizeForPdf(mm)}',
+              style: pw.TextStyle(fontSize: 11, color: _textBlack),
+              textAlign: pw.TextAlign.right,
+            ),
           ),
-        ));
+        );
       }
     }
     if (store.address != null && store.address!.trim().isNotEmpty) {
-      rightChildren.add(pw.Padding(padding: const pw.EdgeInsets.only(top: 4), child: pw.Text(_sanitizeForPdf(store.address!.trim()), style: pw.TextStyle(fontSize: 11, color: _textBlack), textAlign: pw.TextAlign.right)));
+      rightChildren.add(
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 4),
+          child: pw.Text(
+            _sanitizeForPdf(store.address!.trim()),
+            style: pw.TextStyle(fontSize: 11, color: _textBlack),
+            textAlign: pw.TextAlign.right,
+          ),
+        ),
+      );
     }
     final rightBlock = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -403,7 +499,11 @@ class InvoiceA4PdfService {
           pw.SizedBox(height: 8),
           pw.Text(
             _sanitizeForPdf(store.name).toUpperCase(),
-            style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: primaryColor),
+            style: pw.TextStyle(
+              fontSize: 13,
+              fontWeight: pw.FontWeight.bold,
+              color: primaryColor,
+            ),
             textAlign: pw.TextAlign.left,
           ),
         ],
@@ -425,19 +525,33 @@ class InvoiceA4PdfService {
   static final PdfColor _elofOrange = PdfColor.fromInt(0xFFE65100);
 
   /// En-tête facture A4 modèle ELOF : logo à gauche (toujours en place), puis E L O F → nom → activité (2 lignes) → adresse → Cel → Orange money (orange) au centre.
-  static pw.Widget _buildStoreBlockElof(Store store, PdfColor primaryColor, {Uint8List? logoBytes}) {
+  static pw.Widget _buildStoreBlockElof(
+    Store store,
+    PdfColor primaryColor, {
+    Uint8List? logoBytes,
+  }) {
     final hasLogo = logoBytes != null && logoBytes.isNotEmpty;
     final mainColor = primaryColor;
     final children = <pw.Widget>[];
 
     // 1. E L O F — lettres espacées (acronyme depuis invoice_short_title)
-    final acronym = (store.invoiceShortTitle ?? 'ELOF').trim().toUpperCase().replaceAll(' ', '');
+    final acronym = (store.invoiceShortTitle ?? 'ELOF')
+        .trim()
+        .toUpperCase()
+        .replaceAll(' ', '');
     if (acronym.isNotEmpty) {
-      final letters = acronym.length >= 4 ? acronym.substring(0, 4).split('') : acronym.split('');
+      final letters = acronym.length >= 4
+          ? acronym.substring(0, 4).split('')
+          : acronym.split('');
       children.add(
         pw.Text(
           letters.join('   '),
-          style: pw.TextStyle(fontSize: 28, fontWeight: pw.FontWeight.bold, color: mainColor, letterSpacing: 6),
+          style: pw.TextStyle(
+            fontSize: 28,
+            fontWeight: pw.FontWeight.bold,
+            color: mainColor,
+            letterSpacing: 6,
+          ),
           textAlign: pw.TextAlign.center,
         ),
       );
@@ -448,7 +562,11 @@ class InvoiceA4PdfService {
     children.add(
       pw.Text(
         _sanitizeForPdf(store.commercialName ?? store.name).toUpperCase(),
-        style: pw.TextStyle(fontSize: 19, fontWeight: pw.FontWeight.bold, color: mainColor),
+        style: pw.TextStyle(
+          fontSize: 19,
+          fontWeight: pw.FontWeight.bold,
+          color: mainColor,
+        ),
         textAlign: pw.TextAlign.center,
       ),
     );
@@ -456,56 +574,72 @@ class InvoiceA4PdfService {
     // 3. Slogan (optionnel, 2 lignes max)
     final sloganStr = (store.slogan ?? '').trim();
     if (sloganStr.isNotEmpty) {
-      for (final line in sloganStr.split(RegExp(r'[\r\n]+')).where((s) => s.isNotEmpty).take(2)) {
-        children.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 4),
-          child: pw.Text(
-            _sanitizeForPdf(line).toUpperCase(),
-            style: pw.TextStyle(fontSize: 12, color: _textBlack),
-            textAlign: pw.TextAlign.center,
+      for (final line
+          in sloganStr
+              .split(RegExp(r'[\r\n]+'))
+              .where((s) => s.isNotEmpty)
+              .take(2)) {
+        children.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(line).toUpperCase(),
+              style: pw.TextStyle(fontSize: 12, color: _textBlack),
+              textAlign: pw.TextAlign.center,
+            ),
           ),
-        ));
+        );
       }
     }
     // 4. Activité — toujours affichée quand renseignée (2 lignes max)
     final activityStr = (store.activity ?? '').trim();
     if (activityStr.isNotEmpty) {
-      for (final line in activityStr.split(RegExp(r'[\r\n]+')).where((s) => s.isNotEmpty).take(2)) {
-        children.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 4),
-          child: pw.Text(
-            _sanitizeForPdf(line).toUpperCase(),
-            style: pw.TextStyle(fontSize: 12, color: _textBlack),
-            textAlign: pw.TextAlign.center,
+      for (final line
+          in activityStr
+              .split(RegExp(r'[\r\n]+'))
+              .where((s) => s.isNotEmpty)
+              .take(2)) {
+        children.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(line).toUpperCase(),
+              style: pw.TextStyle(fontSize: 12, color: _textBlack),
+              textAlign: pw.TextAlign.center,
+            ),
           ),
-        ));
+        );
       }
     }
 
     // 5. Adresse (Sis au marché...)
     if (store.address != null && store.address!.trim().isNotEmpty) {
-      children.add(pw.Padding(
-        padding: const pw.EdgeInsets.only(top: 6),
-        child: pw.Text(
-          _sanitizeForPdf(store.address!.trim()),
-          style: pw.TextStyle(fontSize: 11, color: _textBlack),
-          textAlign: pw.TextAlign.center,
+      children.add(
+        pw.Padding(
+          padding: const pw.EdgeInsets.only(top: 6),
+          child: pw.Text(
+            _sanitizeForPdf(store.address!.trim()),
+            style: pw.TextStyle(fontSize: 11, color: _textBlack),
+            textAlign: pw.TextAlign.center,
+          ),
         ),
-      ));
+      );
     }
 
     // 6. Téléphone — sans "Tel:" ni "Cel:" dans la facture
     if (store.phone != null && store.phone!.trim().isNotEmpty) {
       final phone = _stripTelPrefix(store.phone!);
       if (phone.isNotEmpty) {
-        children.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 4),
-          child: pw.Text(
-            _sanitizeForPdf(phone),
-            style: pw.TextStyle(fontSize: 11, color: _textBlack),
-            textAlign: pw.TextAlign.center,
+        children.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 4),
+            child: pw.Text(
+              _sanitizeForPdf(phone),
+              style: pw.TextStyle(fontSize: 11, color: _textBlack),
+              textAlign: pw.TextAlign.center,
+            ),
           ),
-        ));
+        );
       }
     }
 
@@ -513,14 +647,16 @@ class InvoiceA4PdfService {
     if (store.mobileMoney != null && store.mobileMoney!.trim().isNotEmpty) {
       final mm = _stripTelPrefix(store.mobileMoney!);
       if (mm.isNotEmpty) {
-        children.add(pw.Padding(
-          padding: const pw.EdgeInsets.only(top: 2),
-          child: pw.Text(
-            'Orange money ${_sanitizeForPdf(mm)}',
-            style: pw.TextStyle(fontSize: 11, color: _elofOrange),
-            textAlign: pw.TextAlign.center,
+        children.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.only(top: 2),
+            child: pw.Text(
+              'Orange money ${_sanitizeForPdf(mm)}',
+              style: pw.TextStyle(fontSize: 11, color: _elofOrange),
+              textAlign: pw.TextAlign.center,
+            ),
           ),
-        ));
+        );
       }
     }
 
@@ -541,11 +677,16 @@ class InvoiceA4PdfService {
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             mainAxisSize: pw.MainAxisSize.min,
             children: [
-              if (hasLogo) pw.Image(pw.MemoryImage(logoBytes), width: 80, height: 80),
+              if (hasLogo)
+                pw.Image(pw.MemoryImage(logoBytes), width: 80, height: 80),
               if (hasLogo) pw.SizedBox(height: 8),
               pw.Text(
                 _sanitizeForPdf(store.name).toUpperCase(),
-                style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold, color: primaryColor),
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
+                  color: primaryColor,
+                ),
               ),
             ],
           ),
@@ -556,7 +697,11 @@ class InvoiceA4PdfService {
   }
 
   static pw.Widget _buildCustomerBlock(InvoiceA4Data data) {
-    if (data.customerName == null && data.customerPhone == null && data.customerAddress == null) return pw.SizedBox();
+    if (data.customerName == null &&
+        data.customerPhone == null &&
+        data.customerAddress == null) {
+      return pw.SizedBox();
+    }
     return pw.Container(
       padding: const pw.EdgeInsets.all(8),
       decoration: pw.BoxDecoration(
@@ -566,10 +711,25 @@ class InvoiceA4PdfService {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Text('Client', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-          if (data.customerName != null) pw.Text(_sanitizeForPdf(data.customerName!), style: const pw.TextStyle(fontSize: 11)),
-          if (data.customerPhone != null) pw.Text(_sanitizeForPdf(data.customerPhone!), style: const pw.TextStyle(fontSize: 11)),
-          if (data.customerAddress != null) pw.Text(_sanitizeForPdf(data.customerAddress!), style: const pw.TextStyle(fontSize: 11)),
+          pw.Text(
+            'Client',
+            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+          ),
+          if (data.customerName != null)
+            pw.Text(
+              _sanitizeForPdf(data.customerName!),
+              style: const pw.TextStyle(fontSize: 11),
+            ),
+          if (data.customerPhone != null)
+            pw.Text(
+              _sanitizeForPdf(data.customerPhone!),
+              style: const pw.TextStyle(fontSize: 11),
+            ),
+          if (data.customerAddress != null)
+            pw.Text(
+              _sanitizeForPdf(data.customerAddress!),
+              style: const pw.TextStyle(fontSize: 11),
+            ),
         ],
       ),
     );
@@ -584,7 +744,11 @@ class InvoiceA4PdfService {
   /// Bordures du tableau en noir (pas de gris dans la facture A4).
   static final PdfColor _tableBorderColor = PdfColors.black;
 
-  static pw.Widget _buildTable(InvoiceA4Data data, String currency, PdfColor primary) {
+  static pw.Widget _buildTable(
+    InvoiceA4Data data,
+    String currency,
+    PdfColor primary,
+  ) {
     final headerBg = primary;
     return pw.Table(
       border: pw.TableBorder.all(color: _tableBorderColor, width: 0.4),
@@ -627,7 +791,12 @@ class InvoiceA4PdfService {
   }
 
   /// Cellule en-tête : fond couleur boutique, texte blanc, bien lisible.
-  static pw.Widget _cellHeader(String text, PdfColor headerBg, {bool center = false, bool alignRight = false}) {
+  static pw.Widget _cellHeader(
+    String text,
+    PdfColor headerBg, {
+    bool center = false,
+    bool alignRight = false,
+  }) {
     final alignment = alignRight
         ? pw.Alignment.centerRight
         : (center ? pw.Alignment.center : pw.Alignment.centerLeft);
@@ -650,7 +819,12 @@ class InvoiceA4PdfService {
     );
   }
 
-  static pw.Widget _cell(String text, {bool bold = false, bool center = false, bool alignRight = false}) {
+  static pw.Widget _cell(
+    String text, {
+    bool bold = false,
+    bool center = false,
+    bool alignRight = false,
+  }) {
     final alignment = alignRight
         ? pw.Alignment.centerRight
         : (center ? pw.Alignment.center : pw.Alignment.centerLeft);
@@ -677,7 +851,11 @@ class InvoiceA4PdfService {
     );
   }
 
-  static pw.Widget _buildTotals(InvoiceA4Data data, String currency, PdfColor primaryColor) {
+  static pw.Widget _buildTotals(
+    InvoiceA4Data data,
+    String currency,
+    PdfColor primaryColor,
+  ) {
     final linesList = data.paymentLines;
     var encaisseImmediate = 0.0;
     if (linesList != null) {
@@ -772,17 +950,11 @@ class InvoiceA4PdfService {
               ),
               pw.SizedBox(height: 4),
               if (linesList != null && linesList.isNotEmpty)
-                ...linesList.map(
-                  (pl) => _totalRowSimple(pl.label, pl.amount),
-                )
+                ...linesList.map((pl) => _totalRowSimple(pl.label, pl.amount))
               else if (data.depositAmount != null)
                 _totalRowSimple('Montant encaissé', encaisseEffectif),
               pw.SizedBox(height: 6),
-              _totalRowBlock(
-                'Total encaissé',
-                encaisseEffectif,
-                primaryColor,
-              ),
+              _totalRowBlock('Total encaissé', encaisseEffectif, primaryColor),
               _totalRowBlock('Reste à payer', resteDu, primaryColor),
               ?statutLigne,
             ],
@@ -798,15 +970,25 @@ class InvoiceA4PdfService {
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text(_sanitizeForPdf(label), style: const pw.TextStyle(fontSize: 11)),
-          pw.Text(_sanitizeForPdf(formatCurrency(amount)), style: const pw.TextStyle(fontSize: 11)),
+          pw.Text(
+            _sanitizeForPdf(label),
+            style: const pw.TextStyle(fontSize: 11),
+          ),
+          pw.Text(
+            _sanitizeForPdf(formatCurrency(amount)),
+            style: const pw.TextStyle(fontSize: 11),
+          ),
         ],
       ),
     );
   }
 
   /// Ligne type facture : libellé fond bleu (couleur boutique, comme le slogan), valeur à droite.
-  static pw.Widget _totalRowBlock(String label, double amount, PdfColor labelBg) {
+  static pw.Widget _totalRowBlock(
+    String label,
+    double amount,
+    PdfColor labelBg,
+  ) {
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 2),
       child: pw.Row(
@@ -817,13 +999,22 @@ class InvoiceA4PdfService {
             decoration: pw.BoxDecoration(color: labelBg),
             child: pw.Text(
               _sanitizeForPdf(label),
-              style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+              style: pw.TextStyle(
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white,
+              ),
             ),
           ),
           pw.Expanded(
             child: pw.Container(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.black)),
+              padding: const pw.EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 6,
+              ),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.black),
+              ),
               child: pw.Text(
                 _sanitizeForPdf(formatCurrency(amount)),
                 style: const pw.TextStyle(fontSize: 11),
@@ -839,8 +1030,11 @@ class InvoiceA4PdfService {
   /// Bloc signataire en bas de la dernière page : titre (ex. DIRECTEUR GENERAL) puis nom (ex. M. MAHAMADI ELOF).
   /// L'utilisateur signe et cachette à la main au-dessus.
   static pw.Widget _buildSignatureBlock(Store store) {
-    final hasSigner = (store.invoiceSignerTitle != null && store.invoiceSignerTitle!.trim().isNotEmpty) ||
-        (store.invoiceSignerName != null && store.invoiceSignerName!.trim().isNotEmpty);
+    final hasSigner =
+        (store.invoiceSignerTitle != null &&
+            store.invoiceSignerTitle!.trim().isNotEmpty) ||
+        (store.invoiceSignerName != null &&
+            store.invoiceSignerName!.trim().isNotEmpty);
     if (!hasSigner) return pw.SizedBox(height: 32);
     return pw.Padding(
       padding: const pw.EdgeInsets.only(top: 48),
@@ -850,17 +1044,29 @@ class InvoiceA4PdfService {
           crossAxisAlignment: pw.CrossAxisAlignment.end,
           mainAxisSize: pw.MainAxisSize.min,
           children: [
-            if (store.invoiceSignerTitle != null && store.invoiceSignerTitle!.trim().isNotEmpty)
+            if (store.invoiceSignerTitle != null &&
+                store.invoiceSignerTitle!.trim().isNotEmpty)
               pw.Text(
                 _sanitizeForPdf(store.invoiceSignerTitle!.trim()).toUpperCase(),
-                style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.normal, color: _textBlack),
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.normal,
+                  color: _textBlack,
+                ),
                 textAlign: pw.TextAlign.right,
               ),
-            if (store.invoiceSignerName != null && store.invoiceSignerName!.trim().isNotEmpty) ...[
-              if (store.invoiceSignerTitle != null && store.invoiceSignerTitle!.trim().isNotEmpty) pw.SizedBox(height: 4),
+            if (store.invoiceSignerName != null &&
+                store.invoiceSignerName!.trim().isNotEmpty) ...[
+              if (store.invoiceSignerTitle != null &&
+                  store.invoiceSignerTitle!.trim().isNotEmpty)
+                pw.SizedBox(height: 4),
               pw.Text(
                 _sanitizeForPdf(store.invoiceSignerName!.trim()).toUpperCase(),
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.normal, color: _textBlack),
+                style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.normal,
+                  color: _textBlack,
+                ),
                 textAlign: pw.TextAlign.right,
               ),
             ],
@@ -878,10 +1084,12 @@ class InvoiceA4PdfService {
 
   /// Ouvre la prévisualisation et permet l'impression / partage.
   static Future<void> previewPdf(InvoiceA4Data data) async {
-    await Printing.layoutPdf(onLayout: (_) async {
-      final doc = await buildDocument(data);
-      return doc.save();
-    });
+    await Printing.layoutPdf(
+      onLayout: (_) async {
+        final doc = await buildDocument(data);
+        return doc.save();
+      },
+    );
   }
 
   /// Prévisualise un PDF déjà généré (une seule construction du document).
@@ -891,7 +1099,7 @@ class InvoiceA4PdfService {
 
   /// Impression directe à partir d’octets PDF — peut être lancée avec [unawaited]
   /// après [generatePdf] pour que l’UI ne reste pas figée pendant le spooler.
-  static Future<void> printPdfBytesDirect(
+  static Future<PrintDispatchResult> printPdfBytesDirect(
     Uint8List bytes,
     String saleNumber, {
     String? userId,
@@ -908,7 +1116,7 @@ class InvoiceA4PdfService {
         companyId: companyId,
       );
     }
-    await printPdfToPhysicalPrinter(
+    return printPdfToPhysicalPrinter(
       jobName: _pdfFileName(saleNumber),
       onLayout: (_) async => bytes,
       preferredPrinterName: preferred,
@@ -939,12 +1147,9 @@ class InvoiceA4PdfService {
 
     if (kIsWeb) {
       try {
-        await Share.shareXFiles(
-          [
-            XFile.fromData(bytes, mimeType: 'application/pdf', name: name),
-          ],
-          subject: 'Facture ${data.saleNumber}',
-        );
+        await Share.shareXFiles([
+          XFile.fromData(bytes, mimeType: 'application/pdf', name: name),
+        ], subject: 'Facture ${data.saleNumber}');
       } catch (_) {
         await previewPdf(data);
       }
@@ -976,7 +1181,7 @@ class InvoiceA4PdfService {
   /// Imprime la facture A4 sans étape de preview vers une imprimante **papier** si possible.
   ///
   /// **UI :** utiliser `unawaited(printPdfDirect(...))` + retour utilisateur (toast).
-  static Future<void> printPdfDirect(
+  static Future<PrintDispatchResult> printPdfDirect(
     InvoiceA4Data data, {
     String? userId,
     String? companyId,
@@ -992,7 +1197,7 @@ class InvoiceA4PdfService {
         companyId: companyId,
       );
     }
-    await printPdfToPhysicalPrinter(
+    return printPdfToPhysicalPrinter(
       jobName: _pdfFileName(data.saleNumber),
       onLayout: (_) async {
         final doc = await buildDocument(data);

@@ -44,12 +44,13 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
   /// Arrondi monétaire (évite les rejets RPC dus aux flottants).
   static double _roundMoney(double x) => (x * 100).round() / 100.0;
   static bool _isOverpayError(Object e) => RegExp(
-        r'montant supérieur au reste à payer',
-        caseSensitive: false,
-      ).hasMatch(e.toString());
+    r'montant supérieur au reste à payer',
+    caseSensitive: false,
+  ).hasMatch(e.toString());
 
   Future<void> _submit() async {
-    final parsed = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+    final parsed =
+        double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
     if (parsed <= 0) {
       AppToast.error(context, 'Indiquez un montant valide.');
       return;
@@ -69,7 +70,10 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
       final rest = remainingTotal(fresh);
       if (rest <= creditRpcEpsilon) {
         if (mounted) {
-          AppToast.info(context, 'Cette créance est déjà soldée. La liste a été actualisée.');
+          AppToast.info(
+            context,
+            'Cette créance est déjà soldée. La liste a été actualisée.',
+          );
           widget.onSuccess?.call();
           Navigator.of(context).pop(true);
         }
@@ -108,10 +112,15 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
           widget.sale.id,
           widget.sale.companyId,
         );
-        final restAfter = freshAfter == null ? null : remainingTotal(freshAfter);
+        final restAfter = freshAfter == null
+            ? null
+            : remainingTotal(freshAfter);
         if (restAfter != null && restAfter <= creditRpcEpsilon) {
           if (mounted) {
-            AppToast.info(context, 'Cette créance est déjà soldée. La liste a été actualisée.');
+            AppToast.info(
+              context,
+              'Cette créance est déjà soldée. La liste a été actualisée.',
+            );
             widget.onSuccess?.call();
             Navigator.of(context).pop(true);
           }
@@ -133,7 +142,10 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
     } catch (e, st) {
       AppErrorHandler.log(e, st);
       if (mounted) {
-        AppToast.error(context, AppErrorHandler.toUserMessage(e, fallback: 'Échec enregistrement.'));
+        AppToast.error(
+          context,
+          AppErrorHandler.toUserMessage(e, fallback: 'Échec enregistrement.'),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -153,7 +165,9 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
           children: [
             Text(
               '${widget.sale.saleNumber} — reste ${formatCurrency(rest)}',
-              style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: AppTheme.spaceMd),
             TextField(
@@ -162,21 +176,38 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
                 labelText: 'Montant',
                 border: OutlineInputBorder(),
               ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]'))],
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
             ),
             const SizedBox(height: AppTheme.spaceMd),
             DropdownButtonFormField<PaymentMethod>(
-              value: _method,
+              key: ValueKey<PaymentMethod>(_method),
+              initialValue: _method,
               decoration: const InputDecoration(
                 labelText: 'Mode',
                 border: OutlineInputBorder(),
               ),
               items: const [
-                DropdownMenuItem(value: PaymentMethod.cash, child: Text('Espèces')),
-                DropdownMenuItem(value: PaymentMethod.mobile_money, child: Text('Mobile money')),
-                DropdownMenuItem(value: PaymentMethod.card, child: Text('Carte')),
-                DropdownMenuItem(value: PaymentMethod.transfer, child: Text('Virement')),
+                DropdownMenuItem(
+                  value: PaymentMethod.cash,
+                  child: Text('Espèces'),
+                ),
+                DropdownMenuItem(
+                  value: PaymentMethod.mobile_money,
+                  child: Text('Mobile money'),
+                ),
+                DropdownMenuItem(
+                  value: PaymentMethod.card,
+                  child: Text('Carte'),
+                ),
+                DropdownMenuItem(
+                  value: PaymentMethod.transfer,
+                  child: Text('Virement'),
+                ),
               ],
               onChanged: _busy
                   ? null
@@ -197,19 +228,32 @@ class _CreditPayDialogState extends State<CreditPayDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: _busy ? null : () => Navigator.of(context).pop(false), child: const Text('Annuler')),
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Annuler'),
+        ),
         FilledButton(
           onPressed: _busy
               ? null
               : () {
-                  final parsed = double.tryParse(_amountCtrl.text.trim().replaceAll(',', '.')) ?? 0;
+                  final parsed =
+                      double.tryParse(
+                        _amountCtrl.text.trim().replaceAll(',', '.'),
+                      ) ??
+                      0;
                   if (parsed <= 0) {
                     AppToast.error(context, 'Indiquez un montant valide.');
                     return;
                   }
                   _submit();
                 },
-          child: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Valider'),
+          child: _busy
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Valider'),
         ),
       ],
     );

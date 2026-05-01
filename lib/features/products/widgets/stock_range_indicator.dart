@@ -45,6 +45,11 @@ class StockRangeIndicator extends StatelessWidget {
     final percent = max > 0 ? (q / max).clamp(0.0, 1.0) : 0.0;
     final variant = _variant(quantity, t);
     final color = _colorForVariant(variant, context);
+    final isOutOfStock = q <= 0;
+    final effectivePercent = isOutOfStock ? 1.0 : percent;
+    final effectiveBackground = isOutOfStock
+        ? color.withValues(alpha: 0.55)
+        : color.withValues(alpha: 0.2);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -74,9 +79,9 @@ class StockRangeIndicator extends StatelessWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
-                  value: percent,
+                  value: effectivePercent,
                   minHeight: 8,
-                  backgroundColor: color.withValues(alpha: 0.2),
+                  backgroundColor: effectiveBackground,
                   valueColor: AlwaysStoppedAnimation<Color>(color),
                 ),
               ),

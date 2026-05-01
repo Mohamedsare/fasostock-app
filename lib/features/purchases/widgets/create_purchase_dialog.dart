@@ -380,76 +380,333 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
 
   Widget _buildLineRow(ThemeData theme, int index, List<Product> products) {
     final line = _lines[index];
-    final productItems = [
-      const DropdownMenuItem<String?>(value: null, child: Text('Produit')),
-      ...products.map((p) => DropdownMenuItem<String?>(value: p.id, child: Text(p.name, overflow: TextOverflow.ellipsis))),
-    ];
+    final isNarrow = Breakpoints.isNarrow(MediaQuery.sizeOf(context).width);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 2,
-            child: DropdownButtonFormField<String?>(
-              initialValue: line.productId.isEmpty ? null : line.productId,
-              decoration: InputDecoration(
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      child: isNarrow
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: _buildProductPickerField(theme, index, line, products)),
+                    IconButton(
+                      icon: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 20,
+                        color: theme.colorScheme.error,
+                      ),
+                      onPressed: _lines.length > 1 ? () => _removeLine(index) : null,
+                      tooltip: 'Supprimer la ligne',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: line.quantity == 0 ? '' : line.quantity.toString(),
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Qté',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => _updateLineQty(index, int.tryParse(v) ?? 0),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        initialValue: line.unitPrice == 0 ? '' : line.unitPrice.toString(),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(
+                          labelText: 'Prix unit.',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (v) => _updateLineUnitPrice(index, double.tryParse(v.replaceAll(',', '.')) ?? 0),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 80,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(
+                          formatCurrency(line.lineTotal),
+                          style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+                          textAlign: TextAlign.right,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: _buildProductPickerField(theme, index, line, products),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 70,
+                  child: TextFormField(
+                    initialValue: line.quantity == 0 ? '' : line.quantity.toString(),
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Qté',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (v) => _updateLineQty(index, int.tryParse(v) ?? 0),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 90,
+                  child: TextFormField(
+                    initialValue: line.unitPrice == 0 ? '' : line.unitPrice.toString(),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Prix unit.',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (v) => _updateLineUnitPrice(index, double.tryParse(v.replaceAll(',', '.')) ?? 0),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 75,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(formatCurrency(line.lineTotal), style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.delete_outline_rounded, size: 20, color: theme.colorScheme.error),
+                  onPressed: _lines.length > 1 ? () => _removeLine(index) : null,
+                  tooltip: 'Supprimer la ligne',
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildProductPickerField(
+    ThemeData theme,
+    int index,
+    _LineRow line,
+    List<Product> products,
+  ) {
+    final selected = _findProduct(line.productId, products);
+    final imageUrl = _productImageUrl(selected);
+    final label = selected?.name ?? 'Produit';
+    final subtitle = selected?.sku?.trim().isNotEmpty == true
+        ? selected!.sku!.trim()
+        : null;
+    return InkWell(
+      onTap: () => _openProductPicker(index, products),
+      borderRadius: BorderRadius.circular(8),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          suffixIcon: const Icon(Icons.search_rounded, size: 20),
+        ),
+        child: Row(
+          children: [
+            _buildProductThumb(theme, imageUrl, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: selected == null ? theme.colorScheme.onSurfaceVariant : null,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
               ),
-              isExpanded: true,
-              items: productItems,
-              onChanged: (v) => _updateLineProduct(index, v ?? '', products),
             ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 70,
-            child: TextFormField(
-              initialValue: line.quantity == 0 ? '' : line.quantity.toString(),
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Qté',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) => _updateLineQty(index, int.tryParse(v) ?? 0),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 90,
-            child: TextFormField(
-              initialValue: line.unitPrice == 0 ? '' : line.unitPrice.toString(),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Prix unit.',
-                isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (v) => _updateLineUnitPrice(index, double.tryParse(v.replaceAll(',', '.')) ?? 0),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 75,
-            child: Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(formatCurrency(line.lineTotal), style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.delete_outline_rounded, size: 20, color: theme.colorScheme.error),
-            onPressed: _lines.length > 1 ? () => _removeLine(index) : null,
-            tooltip: 'Supprimer la ligne',
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  Product? _findProduct(String productId, List<Product> products) {
+    if (productId.isEmpty) return null;
+    for (final p in products) {
+      if (p.id == productId) return p;
+    }
+    return null;
+  }
+
+  String? _productImageUrl(Product? p) {
+    if (p?.productImages == null || p!.productImages!.isEmpty) return null;
+    return p.productImages!.first.url;
+  }
+
+  Widget _buildProductThumb(ThemeData theme, String? imageUrl, {double size = 40}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl != null && imageUrl.isNotEmpty
+          ? Image.network(
+              imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => Icon(
+                Icons.inventory_2_outlined,
+                size: size * 0.58,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            )
+          : Icon(
+              Icons.inventory_2_outlined,
+              size: size * 0.58,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+    );
+  }
+
+  void _openProductPicker(int index, List<Product> products) {
+    final searchController = TextEditingController();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        String query = '';
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            final normalized = query.trim().toLowerCase();
+            final filtered = normalized.isEmpty
+                ? products
+                : products.where((p) {
+                    final sku = p.sku?.toLowerCase() ?? '';
+                    final barcode = p.barcode?.toLowerCase() ?? '';
+                    return p.name.toLowerCase().contains(normalized) ||
+                        sku.contains(normalized) ||
+                        barcode.contains(normalized);
+                  }).toList();
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.sizeOf(ctx).height * 0.86,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                      child: Text(
+                        'Choisir un produit',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: TextField(
+                        controller: searchController,
+                        autofocus: true,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Rechercher produit, SKU, code-barres',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onChanged: (v) => setLocalState(() => query = v),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.separated(
+                        itemCount: filtered.length + 1,
+                        separatorBuilder: (_, _) => Divider(
+                          height: 1,
+                          color: theme.dividerColor.withValues(alpha: 0.5),
+                        ),
+                        itemBuilder: (context, i) {
+                          if (i == 0) {
+                            return ListTile(
+                              minTileHeight: 60,
+                              leading: const Icon(Icons.block_rounded),
+                              title: const Text('Aucun produit'),
+                              onTap: () {
+                                _updateLineProduct(index, '', products);
+                                Navigator.of(ctx).pop();
+                              },
+                            );
+                          }
+                          final p = filtered[i - 1];
+                          final imageUrl = _productImageUrl(p);
+                          return ListTile(
+                            minTileHeight: 64,
+                            leading: _buildProductThumb(theme, imageUrl, size: 36),
+                            title: Text(
+                              p.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              [
+                                if (p.sku?.trim().isNotEmpty == true) p.sku!.trim(),
+                                '${formatCurrency(p.purchasePrice)} · ${p.unit}',
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () {
+                              _updateLineProduct(index, p.id, products);
+                              Navigator.of(ctx).pop();
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(searchController.dispose);
   }
 }
 

@@ -9,11 +9,13 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/sale.dart';
+import '../../../data/models/store.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../data/repositories/sales_repository.dart';
 import '../../../data/repositories/stores_repository.dart';
@@ -78,10 +80,12 @@ class SaleDetailDialog extends ConsumerStatefulWidget {
     super.key,
     required this.saleId,
     required this.onClose,
+    this.initialSale,
   });
 
   final String saleId;
   final VoidCallback onClose;
+  final Sale? initialSale;
 
   @override
   ConsumerState<SaleDetailDialog> createState() => _SaleDetailDialogState();
@@ -94,6 +98,8 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
   String? _creatorName;
   bool _loading = true;
   String? _error;
+  InvoiceA4Data? _invoiceA4Cache;
+  String? _invoiceA4CacheSaleId;
 
   @override
   void initState() {
@@ -103,17 +109,45 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
 
   Future<void> _load() async {
     try {
-      final sale = await _repo.get(widget.saleId);
+      final companyId = context.read<CompanyProvider>().currentCompanyId;
+      Sale? sale = widget.initialSale;
+      if (companyId != null && companyId.isNotEmpty) {
+        final offlineSale = await ref
+            .read(salesOfflineRepositoryProvider)
+            .getCreditSaleDetailOffline(widget.saleId, companyId);
+        sale = offlineSale ?? sale;
+      }
+      sale ??= await _repo.get(widget.saleId);
       String? creatorName;
-      if (sale != null && sale.createdBy.isNotEmpty) {
-        final profile = await Supabase.instance.client
-            .from('profiles')
-            .select('full_name')
-            .eq('id', sale.createdBy)
-            .maybeSingle();
-        if (profile != null && profile['full_name'] != null) {
-          creatorName = profile['full_name'] as String?;
-          if (creatorName != null && creatorName.trim().isEmpty) creatorName = null;
+      if (sale != null && sale.createdByLabel != null) {
+        creatorName = sale.createdByLabel;
+      }
+      if (sale != null &&
+          sale.createdBy.isNotEmpty &&
+          ConnectivityService.instance.isOnline) {
+        try {
+          final profile = await Supabase.instance.client
+              .from('profiles')
+              .select('full_name')
+              .eq('id', sale.createdBy)
+              .maybeSingle();
+          if (profile != null && profile['full_name'] != null) {
+            creatorName = profile['full_name'] as String?;
+            if (creatorName != null && creatorName.trim().isEmpty) {
+              creatorName = null;
+            }
+          }
+        } catch (e, st) {
+          AppErrorHandler.logWithContext(
+            e,
+            stackTrace: st,
+            logSource: 'sale_detail_dialog',
+            logContext: {
+              'phase': 'resolve_creator_profile',
+              'sale_id': widget.saleId,
+              'created_by': sale.createdBy,
+            },
+          );
         }
       }
       if (mounted) {
@@ -139,19 +173,103 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
       final uri = Uri.tryParse(url);
       if (uri == null || !uri.hasScheme) return null;
       final response = await http.get(uri).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) return response.bodyBytes;
-    } catch (_) {}
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        return response.bodyBytes;
+      }
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sale_detail_dialog',
+        logContext: const {'phase': 'fetch_logo_bytes'},
+      );
+    }
+    return null;
+  }
+
+  Future<Store?> _resolveStoreForSale(Sale sale) async {
+    final companyId = sale.companyId;
+    final localStores =
+        ref.read(storesStreamProvider(companyId)).valueOrNull ?? [];
+    for (final s in localStores) {
+      if (s.id == sale.storeId) return s;
+    }
+    try {
+      final dbStores = await ref
+          .read(appDatabaseProvider)
+          .getLocalStores(companyId);
+      for (final s in dbStores) {
+        if (s.id == sale.storeId) {
+          return Store(
+            id: s.id,
+            companyId: s.companyId,
+            name: s.name,
+            code: s.code,
+            address: s.address,
+            logoUrl: s.logoUrl,
+            phone: s.phone,
+            email: s.email,
+            description: s.description,
+            isActive: s.isActive,
+            isPrimary: s.isPrimary,
+            posDiscountEnabled: s.posDiscountEnabled,
+            createdAt: s.updatedAt,
+          );
+        }
+      }
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sale_detail_dialog',
+        logContext: {'phase': 'resolve_store_drift', 'store_id': sale.storeId},
+      );
+    }
+    if (!ConnectivityService.instance.isOnline) return null;
+    try {
+      final direct = await _storesRepo.getStore(sale.storeId);
+      if (direct != null) return direct;
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sale_detail_dialog',
+        logContext: {'phase': 'resolve_store_direct', 'store_id': sale.storeId},
+      );
+    }
+    try {
+      final all = await _storesRepo.getStoresByCompany(companyId);
+      for (final s in all) {
+        if (s.id == sale.storeId) return s;
+      }
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sale_detail_dialog',
+        logContext: {'phase': 'resolve_store_list', 'store_id': sale.storeId},
+      );
+    }
     return null;
   }
 
   Future<InvoiceA4Data?> _buildInvoiceA4DataFromSale(Sale sale) async {
     if (sale.saleItems == null || sale.saleItems!.isEmpty) return null;
-    final store = await _storesRepo.getStore(sale.storeId);
-    if (store == null || !mounted) return null;
+    final store =
+        await _resolveStoreForSale(sale) ??
+        Store(
+          id: sale.store?.id ?? sale.storeId,
+          companyId: sale.companyId,
+          name: (sale.store?.name ?? '').trim().isEmpty
+              ? 'Boutique'
+              : sale.store!.name,
+        );
+    if (!mounted) return null;
     final logoBytes = store.logoUrl != null && store.logoUrl!.isNotEmpty
         ? await _fetchLogoBytes(store.logoUrl)
         : null;
-    final paymentLines = sale.salePayments != null && sale.salePayments!.isNotEmpty
+    final paymentLines =
+        sale.salePayments != null && sale.salePayments!.isNotEmpty
         ? InvoiceA4PdfService.paymentLinesFromSalePayments(sale.salePayments!)
         : null;
     return InvoiceA4Data(
@@ -159,13 +277,15 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
       saleNumber: sale.saleNumber,
       date: DateTime.tryParse(sale.createdAt) ?? DateTime.now(),
       items: sale.saleItems!
-          .map((i) => InvoiceLineData(
-                description: i.product?.name ?? '—',
-                quantity: i.quantity,
-                unit: i.product?.unit ?? 'pce',
-                unitPrice: i.unitPrice,
-                total: i.total,
-              ))
+          .map(
+            (i) => InvoiceLineData(
+              description: i.product?.name ?? '—',
+              quantity: i.quantity,
+              unit: i.product?.unit ?? 'pce',
+              unitPrice: i.unitPrice,
+              total: i.total,
+            ),
+          )
           .toList(),
       subtotal: sale.subtotal,
       discount: sale.discount,
@@ -176,6 +296,20 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
       paymentLines: paymentLines,
       logoBytes: logoBytes,
     );
+  }
+
+  Future<InvoiceA4Data?> _getStableInvoiceA4Data() async {
+    final sale = _sale;
+    if (sale == null) return null;
+    if (_invoiceA4Cache != null && _invoiceA4CacheSaleId == sale.id) {
+      return _invoiceA4Cache;
+    }
+    final data = await _buildInvoiceA4DataFromSale(sale);
+    if (data != null && mounted) {
+      _invoiceA4Cache = data;
+      _invoiceA4CacheSaleId = sale.id;
+    }
+    return data;
   }
 
   void _showPdfViewer(BuildContext context, InvoiceA4Data data) {
@@ -208,7 +342,13 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                   final doc = await InvoiceA4PdfService.buildDocument(data);
                   return doc.save();
                 } catch (e) {
-                  if (ctx.mounted) AppErrorHandler.show(ctx, e, fallback: 'Impossible d\'afficher la facture PDF.');
+                  if (ctx.mounted) {
+                    AppErrorHandler.show(
+                      ctx,
+                      e,
+                      fallback: 'Impossible d\'afficher la facture PDF.',
+                    );
+                  }
                   return Uint8List(0);
                 }
               },
@@ -222,14 +362,19 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
   Future<void> _reprintReceipt() async {
     final sale = _sale;
     if (sale == null || sale.saleItems == null) return;
-    final store = await _storesRepo.getStore(sale.storeId);
+    final store = await _resolveStoreForSale(sale);
     if (!mounted) return;
     final payments = sale.salePayments ?? [];
     final paymentMethodLabel = payments.isEmpty
         ? '—'
-        : payments.map((p) => _paymentLabels[p.method] ?? p.method.name).toSet().join(', ');
+        : payments
+              .map((p) => _paymentLabels[p.method] ?? p.method.name)
+              .toSet()
+              .join(', ');
     final date = DateTime.tryParse(sale.createdAt);
-    final qrSite = await ref.read(appDatabaseProvider).getPublicWebsiteUrl(sale.companyId);
+    final qrSite = await ref
+        .read(appDatabaseProvider)
+        .getPublicWebsiteUrl(sale.companyId);
     if (!mounted) return;
     final receipt = ReceiptTicketData(
       storeName: store?.name ?? sale.store?.name ?? '',
@@ -241,12 +386,14 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
       cashierName: '—',
       qrCompanyWebsiteUrl: qrSite,
       items: sale.saleItems!
-          .map((i) => ReceiptItemData(
-                name: i.product?.name ?? '—',
-                quantity: i.quantity,
-                unitPrice: i.unitPrice,
-                total: i.total,
-              ))
+          .map(
+            (i) => ReceiptItemData(
+              name: i.product?.name ?? '—',
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+              total: i.total,
+            ),
+          )
           .toList(),
       subtotal: sale.subtotal,
       discount: sale.discount,
@@ -270,12 +417,25 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
           if (mounted) AppToast.info(context, 'Impression en cours...');
           unawaited(
             ReceiptThermalPrintService.printReceipt(
-              receipt,
-              userId: uid,
-              companyId: cid,
-            )
-                .then((_) {
-                  if (mounted) {
+                  receipt,
+                  userId: uid,
+                  companyId: cid,
+                )
+                .then((r) {
+                  if (!mounted) return;
+                  if (r.usedSystemDialog) {
+                    AppToast.info(
+                      context,
+                      'Fallback système activé: confirmez dans la boîte d’impression.',
+                    );
+                  } else if (!r.usedPreferredPrinter &&
+                      r.preferredPrinterName != null &&
+                      r.preferredPrinterName!.trim().isNotEmpty) {
+                    AppToast.success(
+                      context,
+                      'Imprimante préférée indisponible: envoi vers ${r.selectedPrinterName ?? 'imprimante détectée'}.',
+                    );
+                  } else {
                     AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
                   }
                 })
@@ -299,8 +459,10 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
     final theme = Theme.of(context);
     final saleNo = _sale?.saleNumber;
     final hasItems = _sale?.saleItems != null && (_sale!.saleItems!.isNotEmpty);
-    final canShowInvoiceActions = _sale != null &&
-        (_sale!.documentType == DocumentType.a4Invoice || _sale!.saleMode == SaleMode.invoicePos);
+    final canShowInvoiceActions =
+        _sale != null &&
+        (_sale!.documentType == DocumentType.a4Invoice ||
+            _sale!.saleMode == SaleMode.invoicePos);
 
     return Dialog(
       backgroundColor: theme.colorScheme.surfaceContainerHighest,
@@ -328,10 +490,15 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
+                          color: theme.colorScheme.primaryContainer.withValues(
+                            alpha: 0.9,
+                          ),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.receipt_long_rounded, color: theme.colorScheme.onPrimaryContainer),
+                        child: Icon(
+                          Icons.receipt_long_rounded,
+                          color: theme.colorScheme.onPrimaryContainer,
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -339,15 +506,23 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              saleNo != null ? 'Détail vente $saleNo' : 'Détail vente',
-                              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                              saleNo != null
+                                  ? 'Détail vente $saleNo'
+                                  : 'Détail vente',
+                              style: theme.textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              _sale != null ? 'Résumé + articles' : 'Chargement…',
-                              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                              _sale != null
+                                  ? 'Résumé + articles'
+                                  : 'Chargement…',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -359,11 +534,17 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                           label: Text(
                             _statusLabels[_sale!.status] ?? _sale!.status.name,
                             style: TextStyle(
-                              color: _statusChipForeground(_sale!.status, theme.colorScheme),
+                              color: _statusChipForeground(
+                                _sale!.status,
+                                theme.colorScheme,
+                              ),
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          backgroundColor: _statusChipBackground(_sale!.status, theme.colorScheme),
+                          backgroundColor: _statusChipBackground(
+                            _sale!.status,
+                            theme.colorScheme,
+                          ),
                           visualDensity: VisualDensity.compact,
                         ),
                     ],
@@ -378,109 +559,171 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
                     : _error != null
-                        ? Center(
-                            child: Text(
-                              _error!,
-                              style: TextStyle(color: theme.colorScheme.error),
-                              textAlign: TextAlign.center,
+                    ? Center(
+                        child: Text(
+                          _error!,
+                          style: TextStyle(color: theme.colorScheme.error),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : _sale == null
+                    ? const Center(child: Text('Vente introuvable.'))
+                    : SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Meta row
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                if (_sale!.store != null)
+                                  Text(
+                                    _sale!.store!.name,
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                if (_sale!.customer != null)
+                                  Text(
+                                    _sale!.customer!.name,
+                                    style: theme.textTheme.bodyMedium,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                Text(
+                                  _formatDateTime(_sale!.createdAt),
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
-                          )
-                        : _sale == null
-                            ? const Center(child: Text('Vente introuvable.'))
-                            : SingleChildScrollView(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                                  children: [
-                                    // Meta row
-                                    Wrap(
-                                      spacing: 10,
-                                      runSpacing: 6,
-                                      crossAxisAlignment: WrapCrossAlignment.center,
-                                      children: [
-                                        if (_sale!.store != null) Text(_sale!.store!.name, style: theme.textTheme.bodyMedium),
-                                        if (_sale!.customer != null)
-                                          Text(
-                                            _sale!.customer!.name,
-                                            style: theme.textTheme.bodyMedium,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        Text(_formatDateTime(_sale!.createdAt), style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                                      ],
-                                    ),
 
-                                    if (_sale!.salePayments != null && _sale!.salePayments!.isNotEmpty) ...[
-                                      const SizedBox(height: 12),
-                                      _InfoRow(
-                                        icon: Icons.payment_rounded,
-                                        label: 'Mode de paiement',
-                                        value: _sale!.salePayments!
-                                            .map((p) => _paymentLabels[p.method] ?? p.method.name)
-                                            .toSet()
-                                            .join(', '),
+                            if (_sale!.salePayments != null &&
+                                _sale!.salePayments!.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              _InfoRow(
+                                icon: Icons.payment_rounded,
+                                label: 'Mode de paiement',
+                                value: _sale!.salePayments!
+                                    .map(
+                                      (p) =>
+                                          _paymentLabels[p.method] ??
+                                          p.method.name,
+                                    )
+                                    .toSet()
+                                    .join(', '),
+                              ),
+                            ],
+
+                            if (_creatorName != null &&
+                                _creatorName!.isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              _InfoRow(
+                                icon: Icons.person_outline_rounded,
+                                label: 'Vente par',
+                                value: _creatorName!,
+                              ),
+                            ],
+
+                            const SizedBox(height: 16),
+
+                            if (_sale!.saleItems != null &&
+                                _sale!.saleItems!.isNotEmpty) ...[
+                              _SectionHeader(
+                                icon: Icons.list_alt_rounded,
+                                title: 'Articles',
+                              ),
+                              const SizedBox(height: 8),
+                              ..._sale!.saleItems!.map(
+                                (item) => _ArticleTile(item: item),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+
+                            if (_sale!.salePayments != null &&
+                                _sale!.salePayments!.isNotEmpty) ...[
+                              _SectionHeader(
+                                icon: Icons.receipt_long_rounded,
+                                title: 'Paiements',
+                              ),
+                              const SizedBox(height: 8),
+                              ..._sale!.salePayments!.map(
+                                (p) => Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 2,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        _paymentLabels[p.method] ??
+                                            p.method.name,
+                                        style: theme.textTheme.bodySmall,
                                       ),
-                                    ],
-
-                                    if (_creatorName != null && _creatorName!.isNotEmpty) ...[
-                                      const SizedBox(height: 10),
-                                      _InfoRow(
-                                        icon: Icons.person_outline_rounded,
-                                        label: 'Vente par',
-                                        value: _creatorName!,
-                                      ),
-                                    ],
-
-                                    const SizedBox(height: 16),
-
-                                    if (_sale!.saleItems != null && _sale!.saleItems!.isNotEmpty) ...[
-                                      _SectionHeader(icon: Icons.list_alt_rounded, title: 'Articles'),
-                                      const SizedBox(height: 8),
-                                      ..._sale!.saleItems!.map((item) => _ArticleTile(item: item)),
-                                      const SizedBox(height: 12),
-                                    ],
-
-                                    if (_sale!.salePayments != null && _sale!.salePayments!.isNotEmpty) ...[
-                                      _SectionHeader(icon: Icons.receipt_long_rounded, title: 'Paiements'),
-                                      const SizedBox(height: 8),
-                                      ..._sale!.salePayments!.map((p) => Padding(
-                                            padding: const EdgeInsets.symmetric(vertical: 2),
-                                            child: Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                Text(_paymentLabels[p.method] ?? p.method.name, style: theme.textTheme.bodySmall),
-                                                Text(formatCurrency(p.amount), style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
-                                              ],
+                                      Text(
+                                        formatCurrency(p.amount),
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
                                             ),
-                                          )),
-                                      const SizedBox(height: 12),
+                                      ),
                                     ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
 
-                                    const Divider(),
+                            const Divider(),
 
-                                    if (_sale!.discount > 0)
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(vertical: 6),
-                                        child: Row(
-                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                          children: [
-                                            Text('Remise', style: theme.textTheme.bodyMedium),
-                                            Text('-${formatCurrency(_sale!.discount)}', style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error, fontWeight: FontWeight.w700)),
-                                          ],
-                                        ),
-                                      ),
-
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 8, bottom: 4),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text('Total', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
-                                          Text(formatCurrency(_sale!.total), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
-                                        ],
-                                      ),
+                            if (_sale!.discount > 0)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 6,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      'Remise',
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                    Text(
+                                      '-${formatCurrency(_sale!.discount)}',
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            color: theme.colorScheme.error,
+                                            fontWeight: FontWeight.w700,
+                                          ),
                                     ),
                                   ],
                                 ),
                               ),
+
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8, bottom: 4),
+                              child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Total',
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w900),
+                                  ),
+                                  Text(
+                                    formatCurrency(_sale!.total),
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w900),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
               ),
 
               // Footer actions
@@ -493,44 +736,74 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                     children: [
                       FilledButton.icon(
                         onPressed: () async {
-                          final data = await _buildInvoiceA4DataFromSale(_sale!);
+                          final data = await _getStableInvoiceA4Data();
                           if (!context.mounted) return;
                           if (data == null) {
-                            AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
+                            AppErrorHandler.show(
+                              context,
+                              Exception(
+                                'Impossible de charger les données de la facture.',
+                              ),
+                            );
                             return;
                           }
                           _showPdfViewer(context, data);
                         },
-                        icon: const Icon(Icons.picture_as_pdf_rounded, size: 20),
+                        icon: const Icon(
+                          Icons.picture_as_pdf_rounded,
+                          size: 20,
+                        ),
                         label: const Text('Voir le PDF'),
                       ),
                       FilledButton.icon(
                         onPressed: () async {
-                          final data = await _buildInvoiceA4DataFromSale(_sale!);
+                          final data = await _getStableInvoiceA4Data();
                           if (!context.mounted) return;
                           if (data == null) {
-                            AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
+                            AppErrorHandler.show(
+                              context,
+                              Exception(
+                                'Impossible de charger les données de la facture.',
+                              ),
+                            );
                             return;
                           }
                           AppToast.info(context, 'Impression en cours...');
                           unawaited(
                             InvoiceA4PdfService.printPdfDirect(
-                              data,
-                              userId: context.read<AuthProvider>().user?.id,
-                              companyId: context
-                                  .read<CompanyProvider>()
-                                  .currentCompanyId,
-                            )
-                                .then((_) {
+                                  data,
+                                  userId: context.read<AuthProvider>().user?.id,
+                                  companyId: context
+                                      .read<CompanyProvider>()
+                                      .currentCompanyId,
+                                )
+                                .then((r) {
                                   if (!context.mounted) return;
-                                  AppToast.success(context, 'Impression envoyée à l\'imprimante.');
+                                  if (r.usedSystemDialog) {
+                                    AppToast.success(
+                                      context,
+                                      'Boîte d’impression système ouverte (fallback).',
+                                    );
+                                    return;
+                                  }
+                                  final preferredMissing =
+                                      !r.usedPreferredPrinter &&
+                                      r.preferredPrinterName != null &&
+                                      r.preferredPrinterName!.trim().isNotEmpty;
+                                  AppToast.success(
+                                    context,
+                                    preferredMissing
+                                        ? 'Imprimante préférée indisponible: impression envoyée à ${r.selectedPrinterName ?? 'une imprimante disponible'}.'
+                                        : 'Impression envoyée à l\'imprimante.',
+                                  );
                                 })
                                 .catchError((Object e) {
                                   if (!context.mounted) return;
                                   AppErrorHandler.show(
                                     context,
                                     e,
-                                    fallback: 'Impossible de lancer l\'impression.',
+                                    fallback:
+                                        'Impossible de lancer l\'impression.',
                                   );
                                 }),
                           );
@@ -540,20 +813,33 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                       ),
                       FilledButton.icon(
                         onPressed: () async {
-                          final data = await _buildInvoiceA4DataFromSale(_sale!);
+                          final data = await _getStableInvoiceA4Data();
                           if (!context.mounted) return;
                           if (data == null) {
-                            AppErrorHandler.show(context, Exception('Impossible de charger les données de la facture.'));
+                            AppErrorHandler.show(
+                              context,
+                              Exception(
+                                'Impossible de charger les données de la facture.',
+                              ),
+                            );
                             return;
                           }
                           try {
-                            final path = await InvoiceA4PdfService.downloadPdf(data);
-                            if (context.mounted && path != null && path.isNotEmpty) {
+                            final path = await InvoiceA4PdfService.downloadPdf(
+                              data,
+                            );
+                            if (context.mounted &&
+                                path != null &&
+                                path.isNotEmpty) {
                               AppToast.success(context, 'Facture enregistrée.');
                             }
                           } catch (e) {
                             if (!context.mounted) return;
-                            AppErrorHandler.show(context, e, fallback: 'Impossible de télécharger la facture.');
+                            AppErrorHandler.show(
+                              context,
+                              e,
+                              fallback: 'Impossible de télécharger la facture.',
+                            );
                           }
                         },
                         icon: const Icon(Icons.download_rounded, size: 20),
@@ -570,7 +856,10 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
               ],
 
               const SizedBox(height: 10),
-              TextButton(onPressed: widget.onClose, child: const Text('Fermer')),
+              TextButton(
+                onPressed: widget.onClose,
+                child: const Text('Fermer'),
+              ),
             ],
           ),
         ),
@@ -592,14 +881,23 @@ class _SectionHeader extends StatelessWidget {
       children: [
         Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
         const SizedBox(width: 8),
-        Text(title, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+        Text(
+          title,
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
       ],
     );
   }
 }
 
 class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.icon, required this.label, required this.value});
+  const _InfoRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -624,7 +922,11 @@ class _InfoRow extends StatelessWidget {
               color: theme.colorScheme.primaryContainer.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, size: 18, color: theme.colorScheme.onPrimaryContainer),
+            child: Icon(
+              icon,
+              size: 18,
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -632,9 +934,21 @@ class _InfoRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(value, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700), maxLines: 2, overflow: TextOverflow.ellipsis),
+                Text(
+                  value,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -665,7 +979,11 @@ class _ArticleTile extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Icon(Icons.inventory_2, size: 20, color: theme.colorScheme.outline),
+            child: Icon(
+              Icons.inventory_2,
+              size: 20,
+              color: theme.colorScheme.outline,
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -674,7 +992,9 @@ class _ArticleTile extends StatelessWidget {
               children: [
                 Text(
                   item.product?.name ?? '—',
-                  style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -691,7 +1011,9 @@ class _ArticleTile extends StatelessWidget {
           const SizedBox(width: 8),
           Text(
             formatCurrency(item.total),
-            style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w900),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
             textAlign: TextAlign.right,
           ),
         ],

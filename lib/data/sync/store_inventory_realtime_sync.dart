@@ -90,26 +90,38 @@ class StoreInventoryRealtimeSync {
     if (_reconnectTimer != null) return;
     final attempt = _reconnectAttempt;
     final powSeconds = 1 << (attempt > 5 ? 5 : attempt);
-    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final seconds = powSeconds > _maxReconnectBackoffSeconds
+        ? _maxReconnectBackoffSeconds
+        : powSeconds;
     final jitterMs = DateTime.now().millisecond % 400;
-    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
-      _reconnectTimer = null;
-      if (_stopped) return;
-      _reconnectAttempt = _reconnectAttempt + 1;
-      final c = _channel;
-      _channel = null;
-      if (c != null) {
-        try {
-          await Supabase.instance.client.removeChannel(c);
-        } catch (_) {}
-      }
-      if (kDebugMode) {
-        debugPrint(
-          '[StoreInventoryRealtime] reconnect attempt=$_reconnectAttempt reason=$reason',
-        );
-      }
-      await start();
-    });
+    _reconnectTimer = Timer(
+      Duration(seconds: seconds, milliseconds: jitterMs),
+      () async {
+        _reconnectTimer = null;
+        if (_stopped) return;
+        _reconnectAttempt = _reconnectAttempt + 1;
+        final c = _channel;
+        _channel = null;
+        if (c != null) {
+          try {
+            await Supabase.instance.client.removeChannel(c);
+          } catch (e, st) {
+            AppErrorHandler.logWithContext(
+              e,
+              stackTrace: st,
+              logSource: 'store_inventory_realtime',
+              logContext: const {'op': 'removeChannel_reconnect'},
+            );
+          }
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '[StoreInventoryRealtime] reconnect attempt=$_reconnectAttempt reason=$reason',
+          );
+        }
+        await start();
+      },
+    );
   }
 
   Future<void> _onPayload(PostgresChangePayload payload) async {
@@ -144,7 +156,8 @@ class StoreInventoryRealtimeSync {
     final q = (row['quantity'] as num?)?.toInt() ?? 0;
     final r = (row['reserved_quantity'] as num?)?.toInt() ?? 0;
     final updatedAt =
-        row['updated_at'] as String? ?? DateTime.now().toUtc().toIso8601String();
+        row['updated_at'] as String? ??
+        DateTime.now().toUtc().toIso8601String();
     await _db.upsertStoreInventoryFromRemote(
       storeId: storeId,
       productId: productId,

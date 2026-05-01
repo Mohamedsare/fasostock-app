@@ -23,4 +23,13 @@ class Profile {
       isActive: json['is_active'] as bool? ?? true,
     );
   }
+
+  /// Sérialisation locale (cache session) — mêmes clés que [fromJson].
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'full_name': fullName,
+    'avatar_url': avatarUrl,
+    'is_super_admin': isSuperAdmin,
+    'is_active': isActive,
+  };
 }

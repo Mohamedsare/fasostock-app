@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../../../core/breakpoints.dart';
@@ -9,6 +8,7 @@ import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/repositories/products_repository.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import '../utils/products_csv.dart';
 import '../../../shared/utils/share_csv.dart';
 
@@ -157,7 +157,7 @@ class _ImportProductsCsvDialogState extends State<ImportProductsCsvDialog> {
     try {
       final csv = getProductsCsvModelTemplate();
       const filename = 'modele-import-produits.csv';
-      final bytes = Uint8List.fromList(utf8.encode(csv));
+      final bytes = encodeCsv(csv);
       final saved = await saveCsvFile(filename: filename, bytes: bytes);
       if (mounted && saved) AppToast.success(context, 'Modèle CSV enregistré');
     } catch (e) {

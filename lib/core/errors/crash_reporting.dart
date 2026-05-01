@@ -78,6 +78,9 @@ class CrashReporting {
         return true;
       }
     }
+    final msg = error.toString();
+    // Fermetures WebSocket Realtime (reconnexion automatique) — bruit sans action côté app.
+    if (msg.contains('RealtimeCloseEvent')) return true;
     return false;
   }
 }

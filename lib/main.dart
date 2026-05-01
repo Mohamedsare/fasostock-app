@@ -36,6 +36,10 @@ Future<void> main() async {
     // runApp dans la même zone que ensureInitialized pour éviter "Zone mismatch".
     rootZone.run(() => runApp(const _AppLoader()));
   }, (Object error, StackTrace stackTrace) {
+    if (_isBenignInfrastructureAsyncError(error)) {
+      if (kDebugMode) AppErrorHandler.log(error, stackTrace);
+      return;
+    }
     AppErrorHandler.log(error, stackTrace);
     if (kDebugMode && _isKnownFlutterKeyboardAssertionFromPlatform(error, stackTrace)) {
       return;
@@ -57,6 +61,10 @@ Future<void> main() async {
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    if (_isBenignInfrastructureAsyncError(error)) {
+      if (kDebugMode) AppErrorHandler.log(error, stack);
+      return true;
+    }
     if (kDebugMode && _isKnownFlutterKeyboardAssertionFromPlatform(error, stack)) {
       AppErrorHandler.log(error, stack);
       return true;
@@ -65,6 +73,11 @@ Future<void> main() async {
     CrashReporting.captureException(error, stack);
     return true;
   };
+}
+
+/// Fermetures WebSocket Realtime, etc. — pas d’exception applicative à remonter.
+bool _isBenignInfrastructureAsyncError(Object error) {
+  return error.toString().contains('RealtimeCloseEvent');
 }
 
 /// Assertion connue côté moteur Flutter (clavier matériel) — souvent Windows / hot reload.

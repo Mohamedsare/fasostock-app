@@ -2,16 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:typed_data';
+import 'package:intl/intl.dart';
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/store.dart';
+import '../../../data/repositories/inventory_repository.dart';
+import '../../../data/repositories/products_repository.dart';
 import '../../../data/repositories/settings_repository.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/utils/save_bytes_file.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
 import 'widgets/create_store_dialog.dart';
 import 'widgets/edit_store_dialog.dart';
@@ -284,7 +290,14 @@ class _StoresPageState extends ConsumerState<StoresPage> {
               else if (stores.isEmpty)
                 _buildEmptyState(context, canCreate, companyId)
               else
-                _buildStoresGrid(context, isWide, stores, permissions),
+                _buildStoresGrid(
+                  context,
+                  isWide,
+                  stores,
+                  permissions,
+                  companyId: companyId,
+                  companyName: currentCompany?.name ?? 'Entreprise',
+                ),
             ],
           ),
         ),
@@ -358,14 +371,24 @@ class _StoresPageState extends ConsumerState<StoresPage> {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
-              if (canCreate) ...[
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Nouvelle boutique'),
-                ),
-              ],
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Actualiser'),
+                  ),
+                  if (canCreate)
+                    FilledButton.icon(
+                      onPressed: () => _openCreateDialog(companyId),
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      label: const Text('Nouvelle boutique'),
+                    ),
+                ],
+              ),
             ],
           )
         : Row(
@@ -392,12 +415,23 @@ class _StoresPageState extends ConsumerState<StoresPage> {
                   ],
                 ),
               ),
-              if (canCreate)
-                FilledButton.icon(
-                  onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Nouvelle boutique'),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Actualiser'),
+                  ),
+                  if (canCreate)
+                    FilledButton.icon(
+                      onPressed: () => _openCreateDialog(companyId),
+                      icon: const Icon(Icons.add_rounded, size: 20),
+                      label: const Text('Nouvelle boutique'),
+                    ),
+                ],
+              ),
             ],
           );
   }
@@ -478,7 +512,14 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     );
   }
 
-  Widget _buildStoresGrid(BuildContext context, bool isWide, List<Store> stores, PermissionsProvider permissions) {
+  Widget _buildStoresGrid(
+    BuildContext context,
+    bool isWide,
+    List<Store> stores,
+    PermissionsProvider permissions, {
+    required String companyId,
+    required String companyName,
+  }) {
     final canPosQuick = permissions.hasPermission(Permissions.salesCreate);
     final canPosInvoice = permissions.hasPermission(Permissions.salesInvoiceA4) ||
         permissions.hasPermission(Permissions.salesCreate);
@@ -499,6 +540,8 @@ class _StoresPageState extends ConsumerState<StoresPage> {
               width: cardWidth,
               child: _StoreCard(
                 store: store,
+                companyId: companyId,
+                companyName: companyName,
                 onEdit: () => _openEditDialog(store),
                 onPosQuick: canPosQuick ? () => context.go(AppRoutes.posQuick(store.id)) : null,
                 onPosInvoice: canPosInvoice ? () => context.go(AppRoutes.pos(store.id)) : null,
@@ -513,9 +556,11 @@ class _StoresPageState extends ConsumerState<StoresPage> {
   }
 }
 
-class _StoreCard extends StatelessWidget {
+class _StoreCard extends StatefulWidget {
   const _StoreCard({
     required this.store,
+    required this.companyId,
+    required this.companyName,
     required this.onEdit,
     this.onPosQuick,
     this.onPosInvoice,
@@ -523,10 +568,72 @@ class _StoreCard extends StatelessWidget {
   });
 
   final Store store;
+  final String companyId;
+  final String companyName;
   final VoidCallback onEdit;
   final VoidCallback? onPosQuick;
   final VoidCallback? onPosInvoice;
   final VoidCallback? onPosInvoiceTable;
+
+  @override
+  State<_StoreCard> createState() => _StoreCardState();
+}
+
+class _StoreCardState extends State<_StoreCard> {
+  bool _exportingPdf = false;
+
+  Future<void> _exportProductsPdf() async {
+    if (_exportingPdf) return;
+    setState(() => _exportingPdf = true);
+    try {
+      final products = await ProductsRepository().list(widget.companyId);
+      final stockMap = await InventoryRepository().getStockByStore(widget.store.id);
+      final items = products
+          .where((p) => (stockMap[p.id] ?? 0) > 0)
+          .map((p) => p.name)
+          .toList()
+        ..sort();
+
+      final doc = pw.Document();
+      doc.addPage(
+        pw.MultiPage(
+          build: (_) => [
+            pw.Text(
+              '${widget.companyName} — ${widget.store.name}',
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+            pw.Text('Liste des produits en stock'),
+            pw.SizedBox(height: 12),
+            if (items.isEmpty)
+              pw.Text('Aucun produit en stock.')
+            else
+              pw.Bullet(
+                text: items.join('\n'),
+              ),
+          ],
+        ),
+      );
+      final bytes = await doc.save();
+      final ok = await saveBytesFile(
+        dialogTitle: 'Enregistrer le PDF',
+        filename:
+            'produits-${widget.store.name}-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
+        bytes: Uint8List.fromList(bytes),
+        allowedExtensions: const ['pdf'],
+      );
+      if (ok && mounted) {
+        AppToast.success(context, 'PDF des produits exporté.');
+      }
+    } catch (e, st) {
+      if (mounted) {
+        AppErrorHandler.log(e, st);
+        AppToast.error(context, AppErrorHandler.toUserMessage(e, fallback: 'Export PDF impossible.'));
+      }
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
 
   Widget _buildContent(BuildContext context, ThemeData theme) {
     return Padding(
@@ -546,8 +653,8 @@ class _StoreCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 clipBehavior: Clip.antiAlias,
-                child: store.logoUrl != null && store.logoUrl!.isNotEmpty
-                    ? Image.network(store.logoUrl!, fit: BoxFit.cover)
+                child: widget.store.logoUrl != null && widget.store.logoUrl!.isNotEmpty
+                    ? Image.network(widget.store.logoUrl!, fit: BoxFit.cover)
                     : Icon(Icons.store_rounded, size: 28, color: theme.colorScheme.onSurfaceVariant),
               ),
               const SizedBox(width: 16),
@@ -560,7 +667,7 @@ class _StoreCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            store.name,
+                            widget.store.name,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w700,
                               letterSpacing: -0.2,
@@ -569,7 +676,7 @@ class _StoreCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (store.isPrimary)
+                        if (widget.store.isPrimary)
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
@@ -586,10 +693,10 @@ class _StoreCard extends StatelessWidget {
                           ),
                       ],
                     ),
-                    if (store.code != null && store.code!.isNotEmpty) ...[
+                    if (widget.store.code != null && widget.store.code!.isNotEmpty) ...[
                       const SizedBox(height: 3),
                       Text(
-                        store.code!,
+                        widget.store.code!,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                           fontFamily: 'monospace',
@@ -598,7 +705,7 @@ class _StoreCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
-                    if (store.address != null && store.address!.isNotEmpty) ...[
+                    if (widget.store.address != null && widget.store.address!.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -607,7 +714,7 @@ class _StoreCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              store.address!,
+                              widget.store.address!,
                               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -616,7 +723,7 @@ class _StoreCard extends StatelessWidget {
                         ],
                       ),
                     ],
-                    if (store.phone != null && store.phone!.isNotEmpty) ...[
+                    if (widget.store.phone != null && widget.store.phone!.isNotEmpty) ...[
                       const SizedBox(height: 3),
                       Row(
                         children: [
@@ -624,7 +731,7 @@ class _StoreCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              store.phone!,
+                              widget.store.phone!,
                               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -633,7 +740,7 @@ class _StoreCard extends StatelessWidget {
                         ],
                       ),
                     ],
-                    if (store.email != null && store.email!.isNotEmpty) ...[
+                    if (widget.store.email != null && widget.store.email!.isNotEmpty) ...[
                       const SizedBox(height: 2),
                       Row(
                         children: [
@@ -641,7 +748,7 @@ class _StoreCard extends StatelessWidget {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              store.email!,
+                              widget.store.email!,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),
@@ -652,10 +759,10 @@ class _StoreCard extends StatelessWidget {
                         ],
                       ),
                     ],
-                    if (store.description != null && store.description!.isNotEmpty) ...[
+                    if (widget.store.description != null && widget.store.description!.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       Text(
-                        store.description!,
+                        widget.store.description!,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                           height: 1.35,
@@ -696,14 +803,29 @@ class _StoreCard extends StatelessWidget {
                 )
               else
                 _buildContent(context, theme),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: OutlinedButton.icon(
+                  onPressed: _exportingPdf ? null : _exportProductsPdf,
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: Text(_exportingPdf ? 'Export PDF en cours…' : 'Exporter produits (PDF)'),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: theme.colorScheme.error.withValues(alpha: 0.35),
+                    ),
+                    foregroundColor: theme.colorScheme.error,
+                    minimumSize: const Size(0, 44),
+                  ),
+                ),
+              ),
               const Divider(height: 1),
               IntrinsicHeight(
                 child: Row(
                   children: [
-                    if (onPosQuick != null) ...[
+                    if (widget.onPosQuick != null) ...[
                       Expanded(
                         child: InkWell(
-                          onTap: onPosQuick,
+                          onTap: widget.onPosQuick,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             child: Column(
@@ -729,10 +851,10 @@ class _StoreCard extends StatelessWidget {
                       ),
                       Container(width: 1, color: theme.dividerColor),
                     ],
-                    if (onPosInvoice != null) ...[
+                    if (widget.onPosInvoice != null) ...[
                       Expanded(
                         child: InkWell(
-                          onTap: onPosInvoice,
+                          onTap: widget.onPosInvoice,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             child: Column(
@@ -758,10 +880,10 @@ class _StoreCard extends StatelessWidget {
                       ),
                       Container(width: 1, color: theme.dividerColor),
                     ],
-                    if (onPosInvoiceTable != null) ...[
+                    if (widget.onPosInvoiceTable != null) ...[
                       Expanded(
                         child: InkWell(
-                          onTap: onPosInvoiceTable,
+                          onTap: widget.onPosInvoiceTable,
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             child: Column(
@@ -790,7 +912,7 @@ class _StoreCard extends StatelessWidget {
                     ],
                     Expanded(
                       child: InkWell(
-                        onTap: onEdit,
+                        onTap: widget.onEdit,
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 10),
                           child: Column(

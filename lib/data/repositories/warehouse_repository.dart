@@ -10,7 +10,8 @@ String _toSafeMessage(Object? e) => ErrorMapper.toMessage(e);
 
 /// Magasin (dépôt central) — lecture stock / mouvements ; écriture via RPC (owner).
 class WarehouseRepository {
-  WarehouseRepository([SupabaseClient? client]) : _client = client ?? Supabase.instance.client;
+  WarehouseRepository([SupabaseClient? client])
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -29,7 +30,11 @@ class WarehouseRepository {
           .order('updated_at', ascending: false);
       final list = data as List;
       return list
-          .map((e) => WarehouseStockLine.fromJson(Map<String, dynamic>.from(e as Map)))
+          .map(
+            (e) => WarehouseStockLine.fromJson(
+              Map<String, dynamic>.from(e as Map),
+            ),
+          )
           .where((l) => l.productId.isNotEmpty)
           .toList();
     } catch (e) {
@@ -37,7 +42,10 @@ class WarehouseRepository {
     }
   }
 
-  Future<List<WarehouseMovement>> listMovements(String companyId, {int limit = 200}) async {
+  Future<List<WarehouseMovement>> listMovements(
+    String companyId, {
+    int limit = 200,
+  }) async {
     try {
       final data = await _client
           .from('warehouse_movements')
@@ -46,7 +54,12 @@ class WarehouseRepository {
           .order('created_at', ascending: false)
           .limit(limit);
       final list = data as List;
-      return list.map((e) => WarehouseMovement.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      return list
+          .map(
+            (e) =>
+                WarehouseMovement.fromJson(Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
     } catch (e) {
       throw UserFriendlyError(_toSafeMessage(e));
     }
@@ -104,7 +117,8 @@ class WarehouseRepository {
       } else {
         exits30++;
       }
-      final dayKey = '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+      final dayKey =
+          '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
       final cur = byDay[dayKey] ?? (inQ: 0, outQ: 0);
       if (m.isEntry) {
         byDay[dayKey] = (inQ: cur.inQ + m.quantity, outQ: cur.outQ);
@@ -114,7 +128,9 @@ class WarehouseRepository {
     }
 
     final sortedDays = byDay.keys.toList()..sort();
-    final last7 = sortedDays.length > 7 ? sortedDays.sublist(sortedDays.length - 7) : sortedDays;
+    final last7 = sortedDays.length > 7
+        ? sortedDays.sublist(sortedDays.length - 7)
+        : sortedDays;
     final chartIn = <int>[];
     final chartOut = <int>[];
     final chartLabels = <String>[];
@@ -191,10 +207,7 @@ class WarehouseRepository {
     try {
       await _client.rpc(
         'warehouse_register_exit_for_sale',
-        params: {
-          'p_company_id': companyId,
-          'p_sale_id': saleId,
-        },
+        params: {'p_company_id': companyId, 'p_sale_id': saleId},
       );
     } catch (e) {
       throw UserFriendlyError(_toSafeMessage(e));
@@ -212,7 +225,9 @@ class WarehouseRepository {
       throw UserFriendlyError('Ajoutez au moins une ligne produit.');
     }
     if (customerId.trim().isEmpty) {
-      throw const UserFriendlyError('Choisissez une personne ou un client pour ce bon de sortie.');
+      throw const UserFriendlyError(
+        'Choisissez une personne ou un client pour ce bon de sortie.',
+      );
     }
     try {
       final raw = await _client.rpc(
@@ -275,7 +290,7 @@ class WarehouseRepository {
       final data = await _client
           .from('warehouse_dispatch_invoices')
           .select(
-            'id, company_id, customer_id, document_number, notes, created_at, customer:customers(name)',
+            'id, company_id, customer_id, document_number, notes, created_at, created_by, customer:customers(name)',
           )
           .eq('company_id', companyId)
           .order('created_at', ascending: false)
@@ -293,9 +308,41 @@ class WarehouseRepository {
           customerName: customer?['name'] as String?,
           documentNumber: m['document_number'] as String? ?? '—',
           notes: m['notes'] as String?,
+          createdBy: m['created_by'] as String?,
           createdAt: m['created_at'] as String? ?? '',
         );
       }).toList();
+    } catch (e) {
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
+  Future<Map<String, String>> listDispatchCreatorsByInvoiceId(
+    String companyId, {
+    List<String>? invoiceIds,
+    int limit = 300,
+  }) async {
+    try {
+      final query = _client
+          .from('warehouse_dispatch_invoices')
+          .select('id, created_by')
+          .eq('company_id', companyId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      final data = await query;
+      final rows = data as List;
+      final wanted = invoiceIds?.toSet();
+      final out = <String, String>{};
+      for (final e in rows) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final id = (m['id'] ?? '').toString();
+        final uid = (m['created_by'] ?? '').toString();
+        if (wanted != null && !wanted.contains(id)) continue;
+        if (id.isNotEmpty && uid.isNotEmpty) {
+          out[id] = uid;
+        }
+      }
+      return out;
     } catch (e) {
       throw UserFriendlyError(_toSafeMessage(e));
     }
@@ -360,9 +407,29 @@ class WarehouseRepository {
     try {
       await _client.rpc(
         'warehouse_void_dispatch_invoice',
+        params: {'p_company_id': companyId, 'p_invoice_id': invoiceId},
+      );
+    } catch (e) {
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
+  Future<void> appendDispatchPayment({
+    required String companyId,
+    required String invoiceId,
+    required String method,
+    double? amount,
+    String? mobileProvider,
+  }) async {
+    try {
+      await _client.rpc(
+        'warehouse_append_dispatch_payment',
         params: {
           'p_company_id': companyId,
           'p_invoice_id': invoiceId,
+          'p_method': method,
+          'p_amount': amount,
+          'p_mobile_provider': mobileProvider,
         },
       );
     } catch (e) {

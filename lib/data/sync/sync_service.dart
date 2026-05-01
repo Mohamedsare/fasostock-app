@@ -6,6 +6,7 @@ import '../repositories/products_repository.dart';
 import '../repositories/inventory_repository.dart';
 import '../repositories/customers_repository.dart';
 import '../repositories/stores_repository.dart';
+import '../../core/errors/app_error_handler.dart';
 
 /// Synchronisation en arrière-plan : clients en attente, ventes en attente, ajustements stock, puis rafraîchit les caches.
 class SyncService {
@@ -47,14 +48,21 @@ class SyncService {
         try {
           final p = Map<String, dynamic>.from(payload);
           final customerId = p['p_customer_id'];
-          if (customerId is String && customerId.startsWith(_pendingCustomerPrefix)) {
+          if (customerId is String &&
+              customerId.startsWith(_pendingCustomerPrefix)) {
             final realId = customerIdMap[customerId];
             p['p_customer_id'] = realId;
           }
           await client.rpc('create_sale_with_stock', params: p);
           await _db.removePendingSale(id);
           sent++;
-        } catch (_) {
+        } catch (e, st) {
+          AppErrorHandler.logWithContext(
+            e,
+            stackTrace: st,
+            logSource: 'sync_service_legacy',
+            logContext: {'phase': 'push_sale', 'pending_sale_id': id},
+          );
           errors++;
         }
       }
@@ -78,15 +86,26 @@ class SyncService {
       if (localId == null || companyId == null || name == null) continue;
       try {
         final type = row['type'] as String? ?? 'individual';
-        final customer = await _customersRepo.create(CreateCustomerInput(
-          companyId: companyId,
-          name: name,
-          type: type == 'company' ? CustomerType.company : CustomerType.individual,
-          phone: row['phone'] as String?,
-        ));
+        final customer = await _customersRepo.create(
+          CreateCustomerInput(
+            companyId: companyId,
+            name: name,
+            type: type == 'company'
+                ? CustomerType.company
+                : CustomerType.individual,
+            phone: row['phone'] as String?,
+          ),
+        );
         map[_pendingCustomerPrefix + localId] = customer.id;
         await _db.removePendingCustomer(localId);
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'sync_service_legacy',
+          logContext: {'phase': 'push_customer', 'local_customer_id': localId},
+        );
+      }
     }
     return map;
   }
@@ -100,12 +119,24 @@ class SyncService {
       final delta = row['delta'];
       final reason = row['reason'] as String? ?? 'Ajustement (sync hors ligne)';
       final uid = row['user_id'] as String? ?? userId;
-      if (id == null || storeId == null || productId == null || delta == null) continue;
+      if (id == null || storeId == null || productId == null || delta == null) {
+        continue;
+      }
       final deltaInt = delta is int ? delta : (delta as num).toInt();
       try {
         await _inventoryRepo.adjust(storeId, productId, deltaInt, reason, uid);
         await _db.removePendingStockAdjustment(id);
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'sync_service_legacy',
+          logContext: {
+            'phase': 'push_stock_adjustment',
+            'pending_adjustment_id': id,
+          },
+        );
+      }
     }
   }
 
@@ -114,23 +145,61 @@ class SyncService {
       final products = await _productsRepo.list(companyId);
       final productMaps = products.map((p) => _productToJson(p)).toList();
       await _db.saveProducts(companyId, productMaps);
-    } catch (_) {}
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sync_service_legacy',
+        logContext: {
+          'phase': 'refresh_products_cache',
+          'company_id': companyId,
+        },
+      );
+    }
     if (storeId != null) {
       try {
         final stock = await _inventoryRepo.getStockByStore(storeId);
         await _db.saveInventory(storeId, stock);
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'sync_service_legacy',
+          logContext: {
+            'phase': 'refresh_inventory_cache',
+            'company_id': companyId,
+            'store_id': storeId,
+          },
+        );
+      }
     }
     try {
       final customers = await _customersRepo.list(companyId);
       final customerMaps = customers.map(_customerToJson).toList();
       await _db.saveCustomers(companyId, customerMaps);
-    } catch (_) {}
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sync_service_legacy',
+        logContext: {
+          'phase': 'refresh_customers_cache',
+          'company_id': companyId,
+        },
+      );
+    }
     try {
       final stores = await _storesRepo.getStoresByCompany(companyId);
       final storeMaps = stores.map((s) => s.toJson()).toList();
       await _db.saveStores(companyId, storeMaps);
-    } catch (_) {}
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'sync_service_legacy',
+        logContext: {'phase': 'refresh_stores_cache', 'company_id': companyId},
+      );
+    }
   }
 
   static Map<String, dynamic> _productToJson(Product p) {

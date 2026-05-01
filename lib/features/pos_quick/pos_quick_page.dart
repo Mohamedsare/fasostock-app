@@ -74,6 +74,9 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   late final ValueNotifier<String> _clockLabel;
   StreamSubscription<bool>? _connectivitySubscription;
 
+  /// Panier mobile (bottom sheet) : rafraîchir le contenu après mutation du panier côté parent.
+  VoidCallback? _cartSheetModalSetState;
+
   /// Modification vente : stock boutique affiché + quantités « rendues » par l’ancienne vente (avant enregistrement RPC).
   String? _activeEditSaleId;
   Map<String, int> _editStockRelease = {};
@@ -100,11 +103,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     if (companyId == null || companyId.isEmpty) return null;
     final list =
         ref.read(productsStreamProvider(companyId)).valueOrNull ?? const [];
-    try {
-      return list.firstWhere((p) => p.id == productId);
-    } catch (_) {
-      return null;
+    for (final p in list) {
+      if (p.id == productId) {
+        return p;
+      }
     }
+    return null;
   }
 
   double _catalogUnitPrice(String productId, int qty) {
@@ -163,6 +167,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     _qtyControllers.clear();
   }
 
+  void _notifyCartSheetRebuild() {
+    _cartSheetModalSetState?.call();
+  }
+
   Future<void> _refreshSync() async {
     final auth = context.read<AuthProvider>();
     final company = context.read<CompanyProvider>();
@@ -219,10 +227,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final stock = _effectiveStock(p.id, stockByProductId);
     setState(() {
       PosCartItem? existing;
-      try {
-        existing = _cart.firstWhere((c) => c.productId == p.id);
-      } catch (_) {
-        existing = null;
+      for (final c in _cart) {
+        if (c.productId == p.id) {
+          existing = c;
+          break;
+        }
       }
       if (existing != null) {
         final newQty = existing.quantity + 1;
@@ -259,6 +268,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         );
       }
     });
+    _notifyCartSheetRebuild();
   }
 
   void _updateQty(
@@ -298,15 +308,17 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     if (newQty != null && _qtyControllers.containsKey(productId)) {
       _qtyControllers[productId]!.text = newQty == 0 ? '' : newQty.toString();
     }
+    _notifyCartSheetRebuild();
   }
 
   void _setQty(String productId, int value, Map<String, int> stockByProductId) {
     final stock = _effectiveStock(productId, stockByProductId);
     PosCartItem? current;
-    try {
-      current = _cart.firstWhere((c) => c.productId == productId);
-    } catch (_) {
-      current = null;
+    for (final c in _cart) {
+      if (c.productId == productId) {
+        current = c;
+        break;
+      }
     }
     if (current == null) return;
 
@@ -331,6 +343,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         return c;
       }).toList();
     });
+    _notifyCartSheetRebuild();
   }
 
   void _removeCartLine(String productId) {
@@ -339,6 +352,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       _qtyControllers[productId]?.dispose();
       _qtyControllers.remove(productId);
     });
+    _notifyCartSheetRebuild();
   }
 
   void _showStockLimitToast() {
@@ -527,6 +541,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final router = GoRouter.of(context);
     final storeId = widget.storeId;
     final companyId = context.read<CompanyProvider>().currentCompanyId;
+    final authUserId = context.read<AuthProvider>().user?.id;
 
     context.read<CompanyProvider>().setCurrentStoreId(storeId);
     context.read<SalesPageProvider>().setFilters(storeId: storeId);
@@ -562,6 +577,23 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         logContext: const {'op': 'persist_local_after_sale_update'},
       );
     }
+    if (companyId != null && companyId.isNotEmpty) {
+      try {
+        if (authUserId != null && authUserId.isNotEmpty) {
+          await ref
+              .read(syncServiceV2Provider)
+              .sync(userId: authUserId, companyId: companyId, storeId: storeId);
+        }
+      } catch (e4, st4) {
+        AppErrorHandler.logWithContext(
+          e4,
+          stackTrace: st4,
+          logSource: 'pos_quick',
+          logContext: const {'op': 'sync_after_sale_update'},
+        );
+      }
+    }
+    ref.invalidate(stockMovementsStreamProvider(storeId));
 
     router.go(AppRoutes.sales);
   }
@@ -643,6 +675,46 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final isOnline = ConnectivityService.instance.isOnline;
     setState(() => _creating = true);
 
+    Future<void> applyLocalStockForSale({
+      required String referenceId,
+      required String createdAtIso,
+      required String note,
+    }) async {
+      final db = ref.read(appDatabaseProvider);
+      final currentQty = await db.getInventoryQuantities(widget.storeId);
+      final nextQty = <String, int>{...currentQty};
+      final movements = <LocalStockMovementsCompanion>[];
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      for (var i = 0; i < _cart.length; i++) {
+        final c = _cart[i];
+        final prev = nextQty[c.productId] ?? 0;
+        final after = prev - c.quantity;
+        nextQty[c.productId] = after < 0 ? 0 : after;
+        movements.add(
+          LocalStockMovementsCompanion.insert(
+            id: 'mv_${referenceId}_${i}_$ts',
+            storeId: widget.storeId,
+            productId: c.productId,
+            type: 'out',
+            quantity: c.quantity,
+            referenceType: drift.Value('sale'),
+            referenceId: drift.Value(referenceId),
+            createdBy: drift.Value(userId),
+            createdAt: createdAtIso,
+            notes: drift.Value(note),
+          ),
+        );
+      }
+      for (final e in nextQty.entries) {
+        await db.upsertInventory(widget.storeId, e.key, e.value, createdAtIso);
+      }
+      if (movements.isNotEmpty) {
+        await db.upsertLocalStockMovements(movements);
+      }
+      ref.invalidate(inventoryQuantitiesStreamProvider(widget.storeId));
+      ref.invalidate(stockMovementsStreamProvider(widget.storeId));
+    }
+
     Future<void> saveOfflineAndShowReceipt(
       List<CreateSalePaymentInput> payments, {
       required String successMessage,
@@ -721,15 +793,13 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           ),
         ),
       );
-
-      for (final c in _cart) {
-        final current = stockByProductId[c.productId] ?? 0;
-        final newQty = (current - c.quantity).clamp(0, 0x7FFFFFFF);
-        await db.upsertInventory(widget.storeId, c.productId, newQty, isoNow);
-      }
+      await applyLocalStockForSale(
+        referenceId: pendingSaleId,
+        createdAtIso: isoNow,
+        note: 'Vente hors ligne en attente de synchronisation',
+      );
 
       if (!mounted) return;
-      ref.invalidate(inventoryQuantitiesStreamProvider(widget.storeId));
       final cashierName =
           context.read<AuthProvider>().profile?.fullName ??
           context.read<AuthProvider>().user?.email ??
@@ -851,6 +921,11 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
         );
         // Vente d?j? cr??e c?t? serveur ; on continue pour afficher le ticket
       }
+      await applyLocalStockForSale(
+        referenceId: sale.id,
+        createdAtIso: sale.createdAt,
+        note: 'Vente enregistree',
+      );
       if (!mounted) return;
       ref.invalidate(
         salesStreamProvider((companyId: companyId, storeId: widget.storeId)),
@@ -972,13 +1047,27 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       setState(() => _receiptData = null);
       unawaited(
         ReceiptThermalPrintService.printReceipt(
-          ticket,
-          userId: uid,
-          companyId: cid,
-        )
-            .then((_) {
+              ticket,
+              userId: uid,
+              companyId: cid,
+            )
+            .then((r) {
               if (mounted) {
-                AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
+                if (r.usedSystemDialog) {
+                  AppToast.success(
+                    context,
+                    'Boîte d’impression système ouverte (fallback).',
+                  );
+                } else if (!r.usedPreferredPrinter &&
+                    r.preferredPrinterName != null &&
+                    r.preferredPrinterName!.trim().isNotEmpty) {
+                  AppToast.success(
+                    context,
+                    'Imprimante préférée indisponible: envoi vers ${r.selectedPrinterName ?? 'une imprimante disponible'}.',
+                  );
+                } else {
+                  AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
+                }
               }
             })
             .catchError((Object e, StackTrace st) {
@@ -1011,13 +1100,30 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           }
           unawaited(
             ReceiptThermalPrintService.printReceipt(
-              data,
-              userId: uid,
-              companyId: cid,
-            )
-                .then((_) {
+                  data,
+                  userId: uid,
+                  companyId: cid,
+                )
+                .then((r) {
                   if (mounted) {
-                    AppToast.success(context, 'Ticket envoyé à l\'imprimante.');
+                    if (r.usedSystemDialog) {
+                      AppToast.success(
+                        context,
+                        'Boîte d’impression système ouverte (fallback).',
+                      );
+                    } else if (!r.usedPreferredPrinter &&
+                        r.preferredPrinterName != null &&
+                        r.preferredPrinterName!.trim().isNotEmpty) {
+                      AppToast.success(
+                        context,
+                        'Imprimante préférée indisponible: envoi vers ${r.selectedPrinterName ?? 'une imprimante disponible'}.',
+                      );
+                    } else {
+                      AppToast.success(
+                        context,
+                        'Ticket envoyé à l\'imprimante.',
+                      );
+                    }
                   }
                 })
                 .catchError((Object e, StackTrace st) {
@@ -1178,9 +1284,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final stockByProductId = stockAsync.value ?? {};
     final stores = storesAsync.value ?? [];
     Store? store;
-    try {
-      store = stores.firstWhere((s) => s.id == widget.storeId);
-    } catch (_) {}
+    for (final s in stores) {
+      if (s.id == widget.storeId) {
+        store = s;
+        break;
+      }
+    }
 
     final loading =
         (productsAsync.isLoading && !productsAsync.hasValue) ||
@@ -1279,75 +1388,75 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           children: [
             if (!hidePosOrangeBar) _buildPosHeader(store!, caissierName),
             if (_activeEditSaleId != null) _buildSaleEditModeBanner(theme),
-          if (!isOnline) _buildOfflineBanner(),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (!isNarrow)
-                  Expanded(
-                    flex: 65,
-                    child: PosQuickLeftZone(
-                      searchController: _searchController,
-                      selectedCategoryId: _selectedCategoryId,
-                      categories: categories,
-                      filteredProducts: filtered,
-                      stockByProductId: stockByProductId,
-                      onSearchChanged: (_) => setState(() {}),
-                      onSearchSubmitted: (value) =>
-                          _addByBarcode(value, products, stockByProductId),
-                      onCategorySelected: (id) =>
-                          setState(() => _selectedCategoryId = id),
-                      onAddToCart: (p) => _addToCart(p, stockByProductId),
-                      onScanPressed: () =>
-                          _openBarcodeScanner(products, stockByProductId),
-                      onRefresh: _refreshSync,
-                    ),
-                  ),
-                if (!isNarrow)
-                  Expanded(
-                    flex: 35,
-                    child: PosQuickRightZone(
-                      cartItemCount: _cartItemCount,
-                      cartTiles: _buildQuickCartTiles(
-                        stockByProductId,
-                        showQuantityInput: posCart.quickShowQuantityInput,
-                        showQuantityButtons: posCart.quickShowQuantityButtons,
+            if (!isOnline) _buildOfflineBanner(),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!isNarrow)
+                    Expanded(
+                      flex: 65,
+                      child: PosQuickLeftZone(
+                        searchController: _searchController,
+                        selectedCategoryId: _selectedCategoryId,
+                        categories: categories,
+                        filteredProducts: filtered,
+                        stockByProductId: stockByProductId,
+                        onSearchChanged: (_) => setState(() {}),
+                        onSearchSubmitted: (value) =>
+                            _addByBarcode(value, products, stockByProductId),
+                        onCategorySelected: (id) =>
+                            setState(() => _selectedCategoryId = id),
+                        onAddToCart: (p) => _addToCart(p, stockByProductId),
+                        onScanPressed: () =>
+                            _openBarcodeScanner(products, stockByProductId),
+                        onRefresh: _refreshSync,
                       ),
-                      footer: _buildRightZoneFooter(store, stockByProductId),
                     ),
-                  ),
-                if (isNarrow)
-                  Expanded(
-                    child: PosQuickLeftZone(
-                      searchController: _searchController,
-                      selectedCategoryId: _selectedCategoryId,
-                      categories: categories,
-                      filteredProducts: filtered,
-                      stockByProductId: stockByProductId,
-                      onSearchChanged: (_) => setState(() {}),
-                      onSearchSubmitted: (value) =>
-                          _addByBarcode(value, products, stockByProductId),
-                      onCategorySelected: (id) =>
-                          setState(() => _selectedCategoryId = id),
-                      onAddToCart: (p) => _addToCart(p, stockByProductId),
-                      onScanPressed: () =>
-                          _openBarcodeScanner(products, stockByProductId),
-                      onRefresh: _refreshSync,
+                  if (!isNarrow)
+                    Expanded(
+                      flex: 35,
+                      child: PosQuickRightZone(
+                        cartItemCount: _cartItemCount,
+                        cartTiles: _buildQuickCartTiles(
+                          stockByProductId,
+                          showQuantityInput: posCart.quickShowQuantityInput,
+                          showQuantityButtons: posCart.quickShowQuantityButtons,
+                        ),
+                        footer: _buildRightZoneFooter(store, stockByProductId),
+                      ),
                     ),
-                  ),
-              ],
+                  if (isNarrow)
+                    Expanded(
+                      child: PosQuickLeftZone(
+                        searchController: _searchController,
+                        selectedCategoryId: _selectedCategoryId,
+                        categories: categories,
+                        filteredProducts: filtered,
+                        stockByProductId: stockByProductId,
+                        onSearchChanged: (_) => setState(() {}),
+                        onSearchSubmitted: (value) =>
+                            _addByBarcode(value, products, stockByProductId),
+                        onCategorySelected: (id) =>
+                            setState(() => _selectedCategoryId = id),
+                        onAddToCart: (p) => _addToCart(p, stockByProductId),
+                        onScanPressed: () =>
+                            _openBarcodeScanner(products, stockByProductId),
+                        onRefresh: _refreshSync,
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-          if (isNarrow)
-            _buildMobileBottomBar(
-              theme,
-              store,
-              stockByProductId,
-              showQuantityInput: posCart.quickShowQuantityInput,
-              showQuantityButtons: posCart.quickShowQuantityButtons,
-            ),
-        ],
+            if (isNarrow)
+              _buildMobileBottomBar(
+                theme,
+                store,
+                stockByProductId,
+                showQuantityInput: posCart.quickShowQuantityInput,
+                showQuantityButtons: posCart.quickShowQuantityButtons,
+              ),
+          ],
         ),
       ),
     );
@@ -1765,15 +1874,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Sous-total',
-                    style: TextStyle(color: cs.onSurface),
-                  ),
+                  Text('Sous-total', style: TextStyle(color: cs.onSurface)),
                   Text(
                     formatCurrency(_subtotal),
-                    style: TextStyle(
-                      color: cs.onSurface,
-                    ),
+                    style: TextStyle(color: cs.onSurface),
                   ),
                 ],
               ),
@@ -1782,15 +1886,10 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Remise',
-                      style: TextStyle(color: cs.onSurface),
-                    ),
+                    Text('Remise', style: TextStyle(color: cs.onSurface)),
                     Text(
                       formatCurrency(_discount),
-                      style: TextStyle(
-                        color: cs.onSurface,
-                      ),
+                      style: TextStyle(color: cs.onSurface),
                     ),
                   ],
                 ),
@@ -1847,6 +1946,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
               onChanged: (v) {
                 final n = double.tryParse(v.replaceAll(',', '.')) ?? 0;
                 setState(() => _discount = n.clamp(0, double.infinity));
+                _notifyCartSheetRebuild();
               },
               decoration: PosInputTheme.roundedField(
                 context,
@@ -1878,6 +1978,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                         double.infinity,
                       );
                 });
+                _notifyCartSheetRebuild();
               },
               decoration: PosInputTheme.roundedField(
                 context,
@@ -1937,13 +2038,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                       _amountReceivedController.clear();
                     });
                     _clearQtyControllers();
+                    _notifyCartSheetRebuild();
                   },
                   style: OutlinedButton.styleFrom(
                     backgroundColor: cs.surfaceContainerHighest,
                     foregroundColor: cs.onSurface,
-                    side: BorderSide(
-                      color: cs.outline.withValues(alpha: 0.45),
-                    ),
+                    side: BorderSide(color: cs.outline.withValues(alpha: 0.45)),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   child: Text(
@@ -2001,11 +2101,12 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final trimmed = code.trim();
     if (trimmed.isEmpty) return;
     Product? product;
-    try {
-      product = products.firstWhere(
-        (p) => p.barcode != null && p.barcode!.trim() == trimmed && p.isActive,
-      );
-    } catch (_) {}
+    for (final p in products) {
+      if (p.barcode != null && p.barcode!.trim() == trimmed && p.isActive) {
+        product = p;
+        break;
+      }
+    }
     if (product == null) {
       AppToast.error(context, 'Aucun produit avec ce code-barres.');
       return;
@@ -2023,14 +2124,15 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     final selected = _paymentMethod == method;
     final cs = Theme.of(context).colorScheme;
     return FilledButton(
-      onPressed: () => setState(() => _paymentMethod = method),
+      onPressed: () {
+        setState(() => _paymentMethod = method);
+        _notifyCartSheetRebuild();
+      },
       style: FilledButton.styleFrom(
         backgroundColor: selected
             ? PosQuickColors.orangePrincipal
             : cs.surfaceContainerHighest,
-        foregroundColor: selected
-            ? Colors.white
-            : cs.onSurface,
+        foregroundColor: selected ? Colors.white : cs.onSurface,
         padding: const EdgeInsets.symmetric(vertical: 12),
       ),
       child: Text(
@@ -2053,93 +2155,105 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final sheetCs = Theme.of(sheetContext).colorScheme;
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
-          ),
-          child: Container(
-            height: MediaQuery.sizeOf(sheetContext).height * 0.9,
-            decoration: BoxDecoration(
-              color: sheetCs.surfaceContainerLow,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            _cartSheetModalSetState = () {
+              if (context.mounted) setModalState(() {});
+            };
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+              ),
+              child: Container(
+                height: MediaQuery.sizeOf(sheetContext).height * 0.9,
+                decoration: BoxDecoration(
+                  color: sheetCs.surfaceContainerLow,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(20),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Icon(
-                            Icons.shopping_cart_rounded,
-                            color: PosQuickColors.orangePrincipal,
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.shopping_cart_rounded,
+                                color: PosQuickColors.orangePrincipal,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: sheetCs.onSurface,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: sheetCs.onSurface,
-                              fontSize: 16,
-                            ),
+                          IconButton(
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                            icon: const Icon(Icons.close_rounded),
                           ),
                         ],
                       ),
-                      IconButton(
-                        onPressed: () => Navigator.of(sheetContext).pop(),
-                        icon: const Icon(Icons.close_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (_cart.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 32),
-                            child: Center(
-                              child: Text(
-                                'Panier vide',
-                                style: TextStyle(
-                                  color: sheetCs.onSurfaceVariant,
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (_cart.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 32,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Panier vide',
+                                    style: TextStyle(
+                                      color: sheetCs.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            else ...[
+                              ..._buildQuickCartTiles(
+                                stockByProductId,
+                                showQuantityInput: showQuantityInput,
+                                showQuantityButtons: showQuantityButtons,
+                              ).map(
+                                (w) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: w,
                                 ),
                               ),
-                            ),
-                          )
-                      else ...[
-                        ..._buildQuickCartTiles(
-                          stockByProductId,
-                          showQuantityInput: showQuantityInput,
-                          showQuantityButtons: showQuantityButtons,
-                        ).map(
-                          (w) => Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: w,
-                          ),
+                              const SizedBox(height: 8),
+                            ],
+                            // Même bandeau que le bureau : moyens de paiement, remise, espèces, valider.
+                            _buildRightZoneFooter(store, stockByProductId),
+                          ],
                         ),
-                        const SizedBox(height: 8),
-                      ],
-                      // Même bandeau que le bureau : moyens de paiement, remise, espèces, valider.
-                      _buildRightZoneFooter(store, stockByProductId),
-                    ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
-    );
+    ).whenComplete(() {
+      _cartSheetModalSetState = null;
+    });
   }
 
   Widget _buildMobileBottomBar(

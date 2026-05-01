@@ -281,7 +281,9 @@ final reportsOfflineRepositoryProvider = Provider<ReportsOfflineRepository>((ref
 /// Les écrans écoutent ce stream avec debounce et rechargent depuis Drift (pas d’appel réseau direct).
 final dashboardDataChangeTriggerStreamProvider = StreamProvider.autoDispose.family<Object, String>((ref, companyId) {
   final db = ref.watch(appDatabaseProvider);
-  return db.watchDashboardDataTrigger(companyId).map((_) => Object());
+  // Multicast explicite : [StreamProvider] + [ref.listen] sur le même flux → évite
+  // « Bad state: Stream has already been listened to » (écouteurs multiples).
+  return db.watchDashboardDataTrigger(companyId).map((_) => Object()).asBroadcastStream();
 });
 
 /// Stream des mouvements de stock depuis Drift (par boutique), avec libellé produit depuis le catalogue local.

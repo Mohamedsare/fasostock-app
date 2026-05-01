@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +17,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/utils/share_csv.dart';
 import 'widgets/adjust_stock_dialog.dart';
@@ -214,19 +214,30 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
     int defaultThreshold,
   ) async {
     if (filteredItems.isEmpty) return;
-    final sb = StringBuffer();
-    sb.writeln('Produit;SKU;Qté;Réservé;Min;Unité;Prix vente');
-    for (final i in filteredItems) {
+    const headers = ['Produit', 'SKU', 'Qté', 'Unité', 'Seuil', 'Statut', 'Vente', 'Réservé'];
+    final rows = filteredItems.map<List<CsvCell>>((i) {
       final p = i.product;
       final min = _effectiveMin(i, overrides, defaultThreshold);
-      sb.writeln(
-        '${p?.name ?? "—"};${p?.sku ?? "—"};${i.quantity};${i.reservedQuantity};$min;${p?.unit ?? "pce"};${p?.salePrice ?? 0}',
-      );
-    }
-    final csv = sb.toString();
+      final status = i.quantity == 0
+          ? 'Rupture'
+          : (min > 0 && i.quantity <= min)
+              ? 'Alerte'
+              : 'OK';
+      return [
+        p?.name ?? '—',
+        p?.sku ?? '—',
+        i.quantity,
+        p?.unit ?? 'pce',
+        min,
+        status,
+        formatCsvMoney(p?.salePrice ?? 0),
+        i.reservedQuantity,
+      ];
+    }).toList();
+    final csv = buildCsv(headers: headers, rows: rows, separator: ';');
     final filename =
         'stock-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv';
-    final bytes = Uint8List.fromList(utf8.encode(csv));
+    final bytes = encodeCsv(csv);
     final saved = await saveCsvFile(filename: filename, bytes: bytes);
     if (mounted && saved) AppToast.success(context, 'CSV enregistré');
   }
@@ -1215,6 +1226,10 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                               id: item.productId,
                               name: item.product?.name ?? '—',
                               sku: item.product?.sku,
+                              imageUrl: item.product?.productImages != null &&
+                                      item.product!.productImages!.isNotEmpty
+                                  ? item.product!.productImages!.first.url
+                                  : null,
                               unit: item.product?.unit ?? 'pce',
                               currentQty: item.quantity,
                             );
@@ -1434,6 +1449,53 @@ class _StockTable extends StatelessWidget {
   final int defaultThreshold;
   final void Function(InventoryItem)? onAdjust;
 
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    final screenW = MediaQuery.sizeOf(context).width;
+    final previewSize = screenW >= 640 ? 170.0 : 140.0;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.30),
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(ctx).pop(),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                width: previewSize,
+                height: previewSize,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withValues(alpha: 0.10)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.inventory_2,
+                    color: Theme.of(ctx).colorScheme.outline,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1472,16 +1534,25 @@ class _StockTable extends StatelessWidget {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         clipBehavior: Clip.antiAlias,
-                        child:
-                            i.product?.productImages != null &&
+                        child: i.product?.productImages != null &&
                                 i.product!.productImages!.isNotEmpty
-                            ? Image.network(
-                                i.product!.productImages!.first.url,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => Icon(
-                                  Icons.inventory_2_rounded,
-                                  size: 22,
-                                  color: theme.colorScheme.onSurfaceVariant,
+                            ? Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () => _openImagePreview(
+                                    context,
+                                    i.product!.productImages!.first.url,
+                                  ),
+                                  child: Image.network(
+                                    i.product!.productImages!.first.url,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => Icon(
+                                      Icons.inventory_2_rounded,
+                                      size: 22,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
                                 ),
                               )
                             : Icon(

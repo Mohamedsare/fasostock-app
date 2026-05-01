@@ -1,14 +1,8 @@
 import '../../../../data/models/product.dart';
+import '../../../../shared/utils/csv_export.dart';
 
 const String _sep = ',';
 const String _quote = '"';
-
-String _escapeCsv(String val) {
-  if (val.contains(_sep) || val.contains(_quote) || val.contains('\n')) {
-    return '$_quote${val.replaceAll(_quote, '$_quote$_quote')}$_quote';
-  }
-  return val;
-}
 
 /// Export des produits en CSV (même colonnes que web : nom, sku, code_barres, ...).
 String productsToCsv(List<Product> products) {
@@ -25,22 +19,24 @@ String productsToCsv(List<Product> products) {
     'categorie',
     'marque',
   ];
-  final rows = products.map((p) {
-    return [
-      _escapeCsv(p.name),
-      _escapeCsv(p.sku ?? ''),
-      _escapeCsv(p.barcode ?? ''),
-      _escapeCsv(p.unit),
-      '${p.purchasePrice}',
-      '${p.salePrice}',
-      '${p.stockMin}',
-      _escapeCsv(p.description ?? ''),
-      p.isActive ? '1' : '0',
-      _escapeCsv(p.category?.name ?? ''),
-      _escapeCsv(p.brand?.name ?? ''),
-    ].join(_sep);
-  }).toList();
-  return [headers.join(_sep), ...rows].join('\n');
+  final rows = products
+      .map<List<CsvCell>>(
+        (p) => [
+          p.name,
+          p.sku ?? '',
+          p.barcode ?? '',
+          p.unit,
+          formatCsvMoney(p.purchasePrice),
+          formatCsvMoney(p.salePrice),
+          p.stockMin,
+          p.description ?? '',
+          p.isActive ? 1 : 0,
+          p.category?.name ?? '',
+          p.brand?.name ?? '',
+        ],
+      )
+      .toList();
+  return buildCsv(headers: headers, rows: rows, separator: ';');
 }
 
 /// Ligne produit parsée depuis CSV (équivalent CsvProductRow web).

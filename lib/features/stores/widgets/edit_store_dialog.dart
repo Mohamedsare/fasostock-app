@@ -29,6 +29,21 @@ class EditStoreDialog extends StatefulWidget {
 }
 
 class _EditStoreDialogState extends State<EditStoreDialog> {
+  static const List<Color> _invoiceColorChoices = <Color>[
+    Color(0xFF1976D2),
+    Color(0xFF0D47A1),
+    Color(0xFF1D4ED8),
+    Color(0xFF0EA5E9),
+    Color(0xFF7C3AED),
+    Color(0xFF9333EA),
+    Color(0xFF7C2D12),
+    Color(0xFFEA580C),
+    Color(0xFF16A34A),
+    Color(0xFF047857),
+    Color(0xFFDC2626),
+    Color(0xFF1F2937),
+  ];
+
   late final TextEditingController _nameController;
   late final TextEditingController _addressController;
   late final TextEditingController _phoneController;
@@ -247,6 +262,32 @@ class _EditStoreDialogState extends State<EditStoreDialog> {
         });
       }
     }
+  }
+
+  String? _normalizeHexColor(String? raw) {
+    if (raw == null) return null;
+    final t = raw.trim();
+    if (t.isEmpty) return null;
+    final full = RegExp(r'^#([0-9A-Fa-f]{6})$');
+    if (full.hasMatch(t)) return '#${full.firstMatch(t)!.group(1)!.toUpperCase()}';
+    final short = RegExp(r'^#([0-9A-Fa-f]{3})$');
+    final m = short.firstMatch(t);
+    if (m == null) return null;
+    final g = m.group(1)!.toUpperCase();
+    return '#${g[0]}${g[0]}${g[1]}${g[1]}${g[2]}${g[2]}';
+  }
+
+  Color? _hexToColor(String? raw) {
+    final hex = _normalizeHexColor(raw);
+    if (hex == null) return null;
+    final value = int.tryParse(hex.substring(1), radix: 16);
+    if (value == null) return null;
+    return Color(0xFF000000 | value);
+  }
+
+  String _colorToHex(Color color) {
+    final v = color.toARGB32() & 0x00FFFFFF;
+    return '#${v.toRadixString(16).padLeft(6, '0').toUpperCase()}';
   }
 
   /// Construit une boutique à partir des champs du formulaire (pour aperçu facture A4).
@@ -496,8 +537,8 @@ class _EditStoreDialogState extends State<EditStoreDialog> {
                           border: OutlineInputBorder(),
                         ),
                         items: const [
-                          DropdownMenuItem(value: 'classic', child: Text('Classique (en-tête actuel)', overflow: TextOverflow.ellipsis)),
-                          DropdownMenuItem(value: 'elof', child: Text('ELOF (E L O F, ordre fixe, Orange money en orange)', overflow: TextOverflow.ellipsis)),
+                          DropdownMenuItem(value: 'classic', child: Text('Modèle 1', overflow: TextOverflow.ellipsis)),
+                          DropdownMenuItem(value: 'elof', child: Text('Modèle 2', overflow: TextOverflow.ellipsis)),
                         ],
                         onChanged: (v) => setState(() => _invoiceTemplate = v ?? 'classic'),
                       ),
@@ -554,22 +595,16 @@ class _EditStoreDialogState extends State<EditStoreDialog> {
                         flex1: 2,
                       ),
                       const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _primaryColorController,
-                              decoration: const InputDecoration(labelText: 'Couleur principale (hex)', border: OutlineInputBorder(), hintText: '#1976D2'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _secondaryColorController,
-                              decoration: const InputDecoration(labelText: 'Couleur secondaire', border: OutlineInputBorder(), hintText: '#0D47A1'),
-                            ),
-                          ),
-                        ],
+                      _buildResponsiveRow(
+                        context,
+                        child1: _buildInvoiceColorPicker(
+                          label: 'Couleur principale',
+                          controller: _primaryColorController,
+                        ),
+                        child2: _buildInvoiceColorPicker(
+                          label: 'Couleur secondaire',
+                          controller: _secondaryColorController,
+                        ),
                       ),
                       const SizedBox(height: 8),
                       _buildResponsiveRow(
@@ -699,6 +734,93 @@ class _EditStoreDialogState extends State<EditStoreDialog> {
         const SizedBox(width: 12),
         Expanded(child: child2),
       ],
+    );
+  }
+
+  Widget _buildInvoiceColorPicker({
+    required String label,
+    required TextEditingController controller,
+  }) {
+    final selected = _hexToColor(controller.text);
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final color in _invoiceColorChoices)
+                _buildColorChoice(
+                  color: color,
+                  selected: selected != null && _colorToHex(selected) == _colorToHex(color),
+                  onTap: () => setState(() => controller.text = _colorToHex(color)),
+                ),
+              OutlinedButton(
+                onPressed: () => setState(() => controller.text = ''),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(44, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                child: const Text('Aucune'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: selected ?? Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Theme.of(context).colorScheme.outline.withValues(alpha: 0.5)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                selected == null ? 'Aucune couleur' : _colorToHex(selected),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildColorChoice({
+    required Color color,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected ? Theme.of(context).colorScheme.primary : Colors.black.withValues(alpha: 0.2),
+            width: selected ? 2.2 : 1,
+          ),
+        ),
+        child: selected
+            ? Icon(
+                Icons.check_rounded,
+                size: 16,
+                color: color.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+              )
+            : null,
+      ),
     );
   }
 

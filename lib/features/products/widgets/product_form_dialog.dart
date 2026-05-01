@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -84,7 +85,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   final _descriptionController = TextEditingController();
   final _newCategoryController = TextEditingController();
   final _newBrandController = TextEditingController();
-  final _initialStockController = TextEditingController(text: '0');
+  final _initialStockController = TextEditingController();
 
   String _unit = 'pce';
 
@@ -101,6 +102,17 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   List<ProductImage> _existingImages = [];
   List<Category> _categories = [];
   List<Brand> _brands = [];
+  List<Category> _searchedCategories = [];
+  List<Brand> _searchedBrands = [];
+  bool _categorySearching = false;
+  bool _brandSearching = false;
+  Timer? _categorySearchDebounce;
+  Timer? _brandSearchDebounce;
+  int _categorySearchToken = 0;
+  int _brandSearchToken = 0;
+  int _categoryPage = 0;
+  int _brandPage = 0;
+  static const int _choicePageSize = 20;
 
   final ProductsRepository _repo = ProductsRepository();
   final InventoryRepository _invRepo = InventoryRepository();
@@ -110,6 +122,10 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
     super.initState();
     _categories = List.from(widget.categories);
     _brands = List.from(widget.brands);
+    _searchedCategories = List.from(_categories);
+    _searchedBrands = List.from(_brands);
+    _newCategoryController.addListener(_onCategorySearchChanged);
+    _newBrandController.addListener(_onBrandSearchChanged);
     if (widget.product != null) {
       final p = widget.product!;
       _nameController.text = p.name;
@@ -128,11 +144,11 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
       _productScope = p.productScope;
       _existingImages = List.from(p.productImages ?? []);
     } else {
-      // Aligné `product-form-dialog.tsx` (web) : champs numériques à 0, stock min 5.
-      _purchasePriceController.text = '0';
-      _salePriceController.text = '0';
-      _wholesalePriceController.text = '0';
-      _wholesaleQtyController.text = '0';
+      // Nouveau produit: champs prix/qté non préremplis + placeholders UX.
+      _purchasePriceController.text = '';
+      _salePriceController.text = '';
+      _wholesalePriceController.text = '';
+      _wholesaleQtyController.text = '';
       _stockMinController.text = '5';
     }
   }
@@ -140,16 +156,30 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   @override
   void didUpdateWidget(ProductFormDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.categories.length != oldWidget.categories.length) {
-      _categories = List.from(widget.categories);
+    _categories = List.from(widget.categories);
+    _brands = List.from(widget.brands);
+    if (_newCategoryController.text.trim().isEmpty) {
+      _searchedCategories = List.from(_categories);
     }
-    if (widget.brands.length != oldWidget.brands.length) {
-      _brands = List.from(widget.brands);
+    if (_newBrandController.text.trim().isEmpty) {
+      _searchedBrands = List.from(_brands);
+    }
+
+    // Si la valeur sélectionnée n'existe plus, on la réinitialise.
+    if (_categoryId != null && !_categories.any((c) => c.id == _categoryId)) {
+      _categoryId = null;
+    }
+    if (_brandId != null && !_brands.any((b) => b.id == _brandId)) {
+      _brandId = null;
     }
   }
 
   @override
   void dispose() {
+    _categorySearchDebounce?.cancel();
+    _brandSearchDebounce?.cancel();
+    _newCategoryController.removeListener(_onCategorySearchChanged);
+    _newBrandController.removeListener(_onBrandSearchChanged);
     _nameController.dispose();
     _skuController.dispose();
     _barcodeController.dispose();
@@ -266,6 +296,112 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
   int? _parseInt(String v) {
     if (v.trim().isEmpty) return null;
     return int.tryParse(v.trim());
+  }
+
+  String _norm(String v) => v.trim().toLowerCase();
+
+  bool _categoryExists(String name) {
+    final n = _norm(name);
+    if (n.isEmpty) return false;
+    return _categories.any((c) => _norm(c.name) == n);
+  }
+
+  bool _brandExists(String name) {
+    final n = _norm(name);
+    if (n.isEmpty) return false;
+    return _brands.any((b) => _norm(b.name) == n);
+  }
+
+  void _onCategorySearchChanged() {
+    final typed = _newCategoryController.text.trim();
+    if (typed.isNotEmpty) {
+      final match = _categories.where((c) => _norm(c.name) == _norm(typed));
+      if (match.isNotEmpty && _categoryId != match.first.id) {
+        setState(() => _categoryId = match.first.id);
+      }
+    }
+    _categorySearchDebounce?.cancel();
+    _categoryPage = 0;
+    _categorySearchDebounce = Timer(
+      const Duration(milliseconds: 280),
+      _searchCategoriesAsync,
+    );
+    if (!_categorySearching) {
+      setState(() => _categorySearching = true);
+    }
+  }
+
+  void _onBrandSearchChanged() {
+    final typed = _newBrandController.text.trim();
+    if (typed.isNotEmpty) {
+      final match = _brands.where((b) => _norm(b.name) == _norm(typed));
+      if (match.isNotEmpty && _brandId != match.first.id) {
+        setState(() => _brandId = match.first.id);
+      }
+    }
+    _brandSearchDebounce?.cancel();
+    _brandPage = 0;
+    _brandSearchDebounce = Timer(
+      const Duration(milliseconds: 280),
+      _searchBrandsAsync,
+    );
+    if (!_brandSearching) {
+      setState(() => _brandSearching = true);
+    }
+  }
+
+  Future<void> _searchCategoriesAsync() async {
+    final ticket = ++_categorySearchToken;
+    final query = _newCategoryController.text.trim().toLowerCase();
+    try {
+      final remote = await _repo.categories(widget.companyId);
+      if (!mounted || ticket != _categorySearchToken) return;
+      final filtered = query.isEmpty
+          ? remote
+          : remote.where((c) => c.name.toLowerCase().contains(query)).toList();
+      setState(() {
+        _categories = List.from(remote);
+        _searchedCategories = filtered;
+        _categorySearching = false;
+      });
+    } catch (_) {
+      if (!mounted || ticket != _categorySearchToken) return;
+      final fallback = query.isEmpty
+          ? _categories
+          : _categories
+                .where((c) => c.name.toLowerCase().contains(query))
+                .toList();
+      setState(() {
+        _searchedCategories = fallback;
+        _categorySearching = false;
+      });
+    }
+  }
+
+  Future<void> _searchBrandsAsync() async {
+    final ticket = ++_brandSearchToken;
+    final query = _newBrandController.text.trim().toLowerCase();
+    try {
+      final remote = await _repo.brands(widget.companyId);
+      if (!mounted || ticket != _brandSearchToken) return;
+      final filtered = query.isEmpty
+          ? remote
+          : remote.where((b) => b.name.toLowerCase().contains(query)).toList();
+      setState(() {
+        _brands = List.from(remote);
+        _searchedBrands = filtered;
+        _brandSearching = false;
+      });
+    } catch (_) {
+      if (!mounted || ticket != _brandSearchToken) return;
+      final fallback = query.isEmpty
+          ? _brands
+          : _brands.where((b) => b.name.toLowerCase().contains(query)).toList();
+      setState(() {
+        _searchedBrands = fallback;
+        _brandSearching = false;
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -428,9 +564,9 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             children: [
               Text(
                 isEdit ? 'Modifier le produit' : 'Nouveau produit',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               Divider(
@@ -559,6 +695,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: "Prix d'achat",
                                       border: OutlineInputBorder(),
+                                      hintText: 'Ex: 2500',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -571,6 +708,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Prix de vente *',
                                       border: OutlineInputBorder(),
+                                      hintText: 'Ex: 3200',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -595,6 +733,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: "Prix d'achat",
                                       border: OutlineInputBorder(),
+                                      hintText: 'Ex: 2500',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -609,6 +748,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Prix de vente *',
                                       border: OutlineInputBorder(),
+                                      hintText: 'Ex: 3200',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -639,7 +779,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Prix gros (optionnel)',
                                       border: OutlineInputBorder(),
-                                      hintText: 'FCFA / unité',
+                                      hintText: 'Ex: 2800',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -652,7 +792,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Qté seuil gros',
                                       border: OutlineInputBorder(),
-                                      hintText: '≥ cette qté → prix gros',
+                                      hintText: 'Ex: 10',
                                     ),
                                     keyboardType: TextInputType.number,
                                   ),
@@ -667,7 +807,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Prix gros (optionnel)',
                                       border: OutlineInputBorder(),
-                                      hintText: 'FCFA / unité',
+                                      hintText: 'Ex: 2800',
                                     ),
                                     keyboardType:
                                         const TextInputType.numberWithOptions(
@@ -682,7 +822,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                                     decoration: const InputDecoration(
                                       labelText: 'Qté seuil gros',
                                       border: OutlineInputBorder(),
-                                      hintText: '≥ cette qté → prix gros',
+                                      hintText: 'Ex: 10',
                                     ),
                                     keyboardType: TextInputType.number,
                                   ),
@@ -970,18 +1110,37 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
         Text(
           'Catégorie',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 4),
         LayoutBuilder(
           builder: (context, constraints) {
             final narrow = constraints.maxWidth < 321;
             final seenCatIds = <String>{};
-            final distinctCategories = _categories
+            final distinctCategories = _searchedCategories
                 .where((c) => seenCatIds.add(c.id))
                 .toList();
+            final query = _newCategoryController.text.trim();
+            final exists = _categoryExists(query);
+            final canCreate =
+                query.isNotEmpty && !exists && !_loading && !_categorySearching;
+            final totalPages = distinctCategories.isEmpty
+                ? 1
+                : ((distinctCategories.length - 1) ~/ _choicePageSize) + 1;
+            final safePage = _categoryPage.clamp(0, totalPages - 1);
+            if (safePage != _categoryPage) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => _categoryPage = safePage);
+              });
+            }
+            final start = safePage * _choicePageSize;
+            final end = (start + _choicePageSize) > distinctCategories.length
+                ? distinctCategories.length
+                : (start + _choicePageSize);
+            final pagedCategories = distinctCategories.sublist(start, end);
             final categoryValue =
                 _categoryId != null &&
                     distinctCategories.any((c) => c.id == _categoryId)
@@ -996,7 +1155,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ),
               items: [
                 const DropdownMenuItem(value: null, child: Text('—')),
-                ...distinctCategories.map(
+                ...pagedCategories.map(
                   (c) => DropdownMenuItem(
                     value: c.id,
                     child: Text(c.name, overflow: TextOverflow.ellipsis),
@@ -1007,23 +1166,40 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             );
             final newField = TextFormField(
               controller: _newCategoryController,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                hintText: 'Nouvelle',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Rechercher ou ajouter (Ex: Boissons)',
+                border: const OutlineInputBorder(),
                 isDense: true,
+                suffixIcon: _categorySearching
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : (_newCategoryController.text.trim().isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Effacer la recherche',
+                              onPressed: () => _newCategoryController.clear(),
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                            )),
               ),
               textCapitalization: TextCapitalization.words,
             );
             final addBtn = IconButton.filled(
               icon: const Icon(Icons.add),
-              onPressed: _loading || _newCategoryController.text.trim().isEmpty
-                  ? null
-                  : _addCategory,
+              onPressed: canCreate ? _addCategory : null,
               tooltip: 'Ajouter catégorie',
               style: IconButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                backgroundColor: canCreate
+                    ? const Color(0xFFF97316)
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                foregroundColor: canCreate
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 padding: const EdgeInsets.all(12),
                 minimumSize: const Size(
                   Breakpoints.minTouchTarget,
@@ -1031,11 +1207,36 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                 ),
               ),
             );
+            final pager = Row(
+              children: [
+                Text(
+                  '${distinctCategories.isEmpty ? 0 : start + 1}-$end / ${distinctCategories.length}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Précédent',
+                  onPressed: safePage > 0
+                      ? () => setState(() => _categoryPage = safePage - 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Suivant',
+                  onPressed: safePage < totalPages - 1
+                      ? () => setState(() => _categoryPage = safePage + 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
+            );
             if (narrow) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   dropdown,
+                  const SizedBox(height: 4),
+                  pager,
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -1049,7 +1250,13 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 2, child: dropdown),
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [dropdown, const SizedBox(height: 4), pager],
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Expanded(child: newField),
                 addBtn,
@@ -1068,18 +1275,37 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
         Text(
           'Marque',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontWeight: FontWeight.w500,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            fontWeight: FontWeight.w500,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 4),
         LayoutBuilder(
           builder: (context, constraints) {
             final narrow = constraints.maxWidth < 321;
             final seenBrandIds = <String>{};
-            final distinctBrands = _brands
+            final distinctBrands = _searchedBrands
                 .where((b) => seenBrandIds.add(b.id))
                 .toList();
+            final query = _newBrandController.text.trim();
+            final exists = _brandExists(query);
+            final canCreate =
+                query.isNotEmpty && !exists && !_loading && !_brandSearching;
+            final totalPages = distinctBrands.isEmpty
+                ? 1
+                : ((distinctBrands.length - 1) ~/ _choicePageSize) + 1;
+            final safePage = _brandPage.clamp(0, totalPages - 1);
+            if (safePage != _brandPage) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                setState(() => _brandPage = safePage);
+              });
+            }
+            final start = safePage * _choicePageSize;
+            final end = (start + _choicePageSize) > distinctBrands.length
+                ? distinctBrands.length
+                : (start + _choicePageSize);
+            final pagedBrands = distinctBrands.sublist(start, end);
             final brandValue =
                 _brandId != null && distinctBrands.any((b) => b.id == _brandId)
                 ? _brandId
@@ -1093,7 +1319,7 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
               ),
               items: [
                 const DropdownMenuItem(value: null, child: Text('—')),
-                ...distinctBrands.map(
+                ...pagedBrands.map(
                   (b) => DropdownMenuItem(
                     value: b.id,
                     child: Text(b.name, overflow: TextOverflow.ellipsis),
@@ -1104,23 +1330,40 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             );
             final newField = TextFormField(
               controller: _newBrandController,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                hintText: 'Nouvelle',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: 'Rechercher ou ajouter (Ex: Nestlé)',
+                border: const OutlineInputBorder(),
                 isDense: true,
+                suffixIcon: _brandSearching
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : (_newBrandController.text.trim().isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Effacer la recherche',
+                              onPressed: () => _newBrandController.clear(),
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                            )),
               ),
               textCapitalization: TextCapitalization.words,
             );
             final addBtn = IconButton.filled(
               icon: const Icon(Icons.add),
-              onPressed: _loading || _newBrandController.text.trim().isEmpty
-                  ? null
-                  : _addBrand,
+              onPressed: canCreate ? _addBrand : null,
               tooltip: 'Ajouter marque',
               style: IconButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                backgroundColor: canCreate
+                    ? const Color(0xFFF97316)
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                foregroundColor: canCreate
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 padding: const EdgeInsets.all(12),
                 minimumSize: const Size(
                   Breakpoints.minTouchTarget,
@@ -1128,11 +1371,36 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
                 ),
               ),
             );
+            final pager = Row(
+              children: [
+                Text(
+                  '${distinctBrands.isEmpty ? 0 : start + 1}-$end / ${distinctBrands.length}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Précédent',
+                  onPressed: safePage > 0
+                      ? () => setState(() => _brandPage = safePage - 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Suivant',
+                  onPressed: safePage < totalPages - 1
+                      ? () => setState(() => _brandPage = safePage + 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_right_rounded),
+                ),
+              ],
+            );
             if (narrow) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   dropdown,
+                  const SizedBox(height: 4),
+                  pager,
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -1146,7 +1414,13 @@ class _ProductFormDialogState extends State<ProductFormDialog> {
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 2, child: dropdown),
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [dropdown, const SizedBox(height: 4), pager],
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Expanded(child: newField),
                 addBtn,

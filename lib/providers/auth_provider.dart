@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/errors/app_error_handler.dart';
+import '../core/services/profile_session_cache.dart';
 import '../data/models/profile.dart';
 import '../services/auth/auth_service.dart';
 import 'company_provider.dart';
@@ -42,7 +44,10 @@ class AuthProvider extends ChangeNotifier {
   PermissionsProvider? _permissions;
 
   /// À appeler au démarrage (ex. dans main) pour que signOut réinitialise company et permissions.
-  void setSessionProviders(CompanyProvider? company, PermissionsProvider? permissions) {
+  void setSessionProviders(
+    CompanyProvider? company,
+    PermissionsProvider? permissions,
+  ) {
     _company = company;
     _permissions = permissions;
   }
@@ -67,6 +72,12 @@ class AuthProvider extends ChangeNotifier {
       loading: false,
     );
     if (user != null) {
+      final optimistic = await ProfileSessionCache.loadOptimisticForUser(
+        user.id,
+      );
+      if (optimistic != null && _auth.currentUser?.id == user.id) {
+        _applyProfile(optimistic, fromSessionCache: true);
+      }
       Profile? p = await _loadProfileUntilResolved(
         user.id,
         maxNullRetries: _kProfileNullRetriesCold,
@@ -90,7 +101,7 @@ class AuthProvider extends ChangeNotifier {
           return;
         }
       }
-      _applyProfile(p);
+      _applyProfile(p, fromSessionCache: false);
     }
     notifyListeners();
   }
@@ -125,7 +136,13 @@ class AuthProvider extends ChangeNotifier {
       if (!isJwtPostgrestError(e)) return null;
       try {
         await _auth.refreshSession();
-      } catch (_) {
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'auth_provider',
+          logContext: const {'phase': 'refresh_session_after_jwt_error'},
+        );
         await signOut();
         return null;
       }
@@ -140,7 +157,7 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  void _applyProfile(Profile? p) {
+  void _applyProfile(Profile? p, {bool fromSessionCache = false}) {
     _state = AppAuthState(
       user: _state.user,
       session: _state.session,
@@ -148,8 +165,11 @@ class AuthProvider extends ChangeNotifier {
       loading: _state.loading,
     );
     if (p != null && p.isActive == false) {
+      unawaited(ProfileSessionCache.clear());
       _auth.signOut();
       _state = const AppAuthState(loading: false);
+    } else if (p != null && p.isActive && !fromSessionCache) {
+      unawaited(ProfileSessionCache.save(p));
     }
     notifyListeners();
   }
@@ -160,10 +180,12 @@ class AuthProvider extends ChangeNotifier {
       // Après un signIn (bouton Connexion), on ne charge pas le profil ici : la page de login
       // appelle refreshProfile() après un délai. Évite la course qui provoquait "Compte désactivé".
       if (authState.event == AuthChangeEvent.signedIn) {
+        final prev = _state.profile;
+        final sameUser = prev != null && prev.id == user.id;
         _state = AppAuthState(
           user: user,
           session: authState.session,
-          profile: _state.profile,
+          profile: sameUser ? prev : null,
           loading: false,
         );
         notifyListeners();
@@ -190,10 +212,13 @@ class AuthProvider extends ChangeNotifier {
           );
           if (_auth.currentUser == null) return;
         }
-        if (_auth.currentUser?.id == user.id) _applyProfile(p);
+        if (_auth.currentUser?.id == user.id) {
+          _applyProfile(p, fromSessionCache: false);
+        }
       });
     } else {
       // Session expirée, déconnexion ailleurs ou token invalide : même nettoyage que signOut.
+      unawaited(ProfileSessionCache.clear());
       _company?.loadCompanies(null);
       _permissions?.load(null);
       _state = const AppAuthState(loading: false);
@@ -209,11 +234,18 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     final u = _auth.currentUser ?? _auth.currentSession?.user;
     if (u == null) {
-      _state = AppAuthState(user: _state.user, session: _state.session, profile: null, loading: false);
+      _state = AppAuthState(
+        user: _state.user,
+        session: _state.session,
+        profile: null,
+        loading: false,
+      );
       notifyListeners();
       return null;
     }
-    final maxNull = fromLoginAttempt ? _kProfileNullRetriesLogin : _kProfileNullRetriesCold;
+    final maxNull = fromLoginAttempt
+        ? _kProfileNullRetriesLogin
+        : _kProfileNullRetriesCold;
     Profile? p = await _loadProfileUntilResolved(
       u.id,
       maxNullRetries: maxNull,
@@ -238,7 +270,7 @@ class AuthProvider extends ChangeNotifier {
         return null;
       }
     }
-    _applyProfile(p);
+    _applyProfile(p, fromSessionCache: false);
     return p;
   }
 
@@ -248,6 +280,7 @@ class AuthProvider extends ChangeNotifier {
     CompanyProvider? company,
     PermissionsProvider? permissions,
   }) async {
+    await ProfileSessionCache.clear();
     final c = company ?? _company;
     final p = permissions ?? _permissions;
     await c?.loadCompanies(null);

@@ -621,6 +621,53 @@ class _ProductStockTile extends StatelessWidget {
   final InventoryItem item;
   final int threshold;
 
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    final screenW = MediaQuery.sizeOf(context).width;
+    final previewSize = screenW >= 640 ? 170.0 : 140.0;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.30),
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(ctx).pop(),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                width: previewSize,
+                height: previewSize,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withValues(alpha: 0.10)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.inventory_2,
+                    color: Theme.of(ctx).colorScheme.outline,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -644,17 +691,24 @@ class _ProductStockTile extends StatelessWidget {
               width: 44,
               height: 44,
               child: firstImageUrl != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        firstImageUrl,
-                        fit: BoxFit.cover,
-                        width: 44,
-                        height: 44,
-                        errorBuilder: (_, _, _) => Icon(
-                          Icons.inventory_2_outlined,
-                          size: 24,
-                          color: theme.colorScheme.onSurfaceVariant,
+                  ? Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => _openImagePreview(context, firstImageUrl),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            firstImageUrl,
+                            fit: BoxFit.cover,
+                            width: 44,
+                            height: 44,
+                            errorBuilder: (_, _, _) => Icon(
+                              Icons.inventory_2_outlined,
+                              size: 24,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
                         ),
                       ),
                     )

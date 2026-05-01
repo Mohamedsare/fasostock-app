@@ -63,6 +63,14 @@ class ErrorMessages {
   /// Message générique — aucun détail technique ne doit être affiché à l'utilisateur.
   static const String generic = "Une erreur s'est produite.";
 
+  /// Plugin impression / liste d’imprimantes non disponible sur cette plateforme (ex. mobile sans implémentation native).
+  static const String printingUnavailableOnDevice =
+      "La détection des imprimantes n'est pas disponible sur cet appareil. Utilisez l'application sur Windows, ou imprimez en PDF puis partagez vers votre imprimante.";
+
+  /// Autre [MissingPluginException] (hors impression) — message court, sans détail technique.
+  static const String pluginFeatureUnavailable =
+      "Cette fonctionnalité n'est pas disponible sur cet appareil.";
+
   /// Retourne un message utilisateur sûr. Ne retourne jamais de message technique (API, code, stack).
   static String translate(String? message, {String? code}) {
     if (message == null || message.isEmpty) return generic;

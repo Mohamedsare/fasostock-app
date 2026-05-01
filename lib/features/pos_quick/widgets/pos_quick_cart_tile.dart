@@ -33,6 +33,8 @@ class PosQuickCartTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final isMobile = MediaQuery.sizeOf(context).width < Breakpoints.tablet;
+    final qtyBtnIconSize = isMobile ? 15.0 : 22.0;
     final lowStock = stock >= 0 && item.quantity > stock;
 
     return Container(
@@ -79,7 +81,7 @@ class PosQuickCartTile extends StatelessWidget {
                           FocusScope.of(context).unfocus();
                           onQtyDelta(-1);
                         },
-                        icon: const Icon(Icons.remove_rounded, size: 22),
+                        icon: Icon(Icons.remove_rounded, size: qtyBtnIconSize),
                         style: IconButton.styleFrom(
                           shape: const CircleBorder(),
                           fixedSize: const Size(
@@ -125,7 +127,7 @@ class PosQuickCartTile extends StatelessWidget {
                           FocusScope.of(context).unfocus();
                           onQtyDelta(1);
                         },
-                        icon: const Icon(Icons.add_rounded, size: 22),
+                        icon: Icon(Icons.add_rounded, size: qtyBtnIconSize),
                         style: IconButton.styleFrom(
                           shape: const CircleBorder(),
                           fixedSize: const Size(

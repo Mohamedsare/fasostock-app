@@ -36,13 +36,15 @@ class OfflineSyncWrapper extends ConsumerStatefulWidget {
   ConsumerState<OfflineSyncWrapper> createState() => _OfflineSyncWrapperState();
 }
 
-class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with WidgetsBindingObserver {
+class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper>
+    with WidgetsBindingObserver {
   final ConnectivityService _connectivity = ConnectivityService.instance;
   StreamSubscription<bool>? _sub;
   Timer? _periodicSyncTimer;
   Timer? _inventoryLightPollTimer;
   bool _isOnline = true;
   bool _dbReady = false;
+
   /// Dernière paire (utilisateur + entreprise) pour laquelle on a lancé la sync « au démarrage ».
   /// Évite les doublons à chaque rebuild, mais permet une nouvelle sync après login ou changement d’entreprise.
   String? _lastInitialSyncKey;
@@ -54,6 +56,7 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   ProductImagesRealtimeSync? _productImagesRealtime;
   bool _postgresRealtimeActive = false;
   bool? _lastWantPostgresRealtime;
+
   /// Dernière entreprise pour laquelle on a déclenché un pull stock immédiat (changement de société).
   String? _lastInventoryKickCompanyId;
 
@@ -91,7 +94,9 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
         final cs = company.currentStoreId;
         if (cs != null && cs.isNotEmpty) extra.add(cs);
         unawaited(
-          ref.read(syncServiceV2Provider).pullStoreInventoryLight(companyId: cid, extraStoreIds: extra),
+          ref
+              .read(syncServiceV2Provider)
+              .pullStoreInventoryLight(companyId: cid, extraStoreIds: extra),
         );
       }
       _runSync(silent: true);
@@ -104,8 +109,14 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
       final client = Supabase.instance.client;
       if (client.auth.currentSession == null) return;
       await client.auth.refreshSession();
-    } catch (_) {
+    } catch (e, st) {
       // Refresh token expiré ou erreur réseau : l’utilisateur verra « Session expirée » si besoin.
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'offline_sync_wrapper',
+        logContext: const {'phase': 'refresh_session_on_resume'},
+      );
     }
   }
 
@@ -114,12 +125,21 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     if (mounted) {
       setState(() {
         _isOnline = _connectivity.isOnline;
-        _dbReady = true; // Drift est réchauffé au premier build via appDatabaseProvider
+        _dbReady =
+            true; // Drift est réchauffé au premier build via appDatabaseProvider
       });
       _sub = _connectivity.onConnectivityChanged.listen((online) {
         if (!mounted) return;
+        final wasOffline = !_isOnline;
         setState(() => _isOnline = online);
         if (online) {
+          if (wasOffline) {
+            // Retour réseau : recharger les droits depuis le serveur (révoqués pendant l’offline).
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _reloadPermissions();
+            });
+          }
           _runSync(silent: false);
           _startPeriodicSync();
         } else {
@@ -157,11 +177,19 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
       final extra = <String>{};
       final cs = company.currentStoreId;
       if (cs != null && cs.isNotEmpty) extra.add(cs);
-      unawaited(sync.pullStoreInventoryLight(companyId: companyId, extraStoreIds: extra));
+      unawaited(
+        sync.pullStoreInventoryLight(
+          companyId: companyId,
+          extraStoreIds: extra,
+        ),
+      );
     }
 
     runInventoryLightPull();
-    _inventoryLightPollTimer = Timer.periodic(_inventoryLightPollInterval, (_) => runInventoryLightPull());
+    _inventoryLightPollTimer = Timer.periodic(
+      _inventoryLightPollInterval,
+      (_) => runInventoryLightPull(),
+    );
   }
 
   void _stopInventoryLightPoll() {
@@ -211,7 +239,10 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     } catch (e, st) {
       if (kDebugMode) AppErrorHandler.log(e, st);
       if (mounted && !silent) {
-        AppToast.error(context, 'Synchronisation impossible. Réessayez plus tard.');
+        AppToast.error(
+          context,
+          'Synchronisation impossible. Réessayez plus tard.',
+        );
       }
     }
   }
@@ -234,8 +265,11 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     if (_lastInitialSyncKey == key) return;
     _lastInitialSyncKey = key;
     ref.read(appDatabaseProvider);
-    Future.microtask(() async {
-      await _runSync(silent: false);
+    // Après le premier frame : l’utilisateur voit tout de suite le shell + données Drift ;
+    // sync silencieuse (pas de toast) — la bannière d’erreur et le timer périodique gèrent le reste.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_runSync(silent: true));
     });
   }
 
@@ -247,12 +281,17 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
     if (active) {
       final db = ref.read(appDatabaseProvider);
       _storeInventoryRealtime ??= StoreInventoryRealtimeSync(db);
-      _salesRealtime ??= SalesRealtimeSync(db, syncService: ref.read(syncServiceV2Provider));
+      _salesRealtime ??= SalesRealtimeSync(
+        db,
+        syncService: ref.read(syncServiceV2Provider),
+      );
       _salePaymentsRealtime ??= SalePaymentsRealtimeSync(db);
-      _productsRealtime ??=
-          ProductsRealtimeSync(ref.read(productsOfflineRepositoryProvider));
-      _productImagesRealtime ??=
-          ProductImagesRealtimeSync(ref.read(productsOfflineRepositoryProvider));
+      _productsRealtime ??= ProductsRealtimeSync(
+        ref.read(productsOfflineRepositoryProvider),
+      );
+      _productImagesRealtime ??= ProductImagesRealtimeSync(
+        ref.read(productsOfflineRepositoryProvider),
+      );
       unawaited(_storeInventoryRealtime!.start());
       unawaited(_salesRealtime!.start());
       unawaited(_salePaymentsRealtime!.start());
@@ -293,7 +332,9 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
   @override
   Widget build(BuildContext context) {
     context.watch<AuthProvider>();
-    ref.read(appDatabaseProvider); // Warm Drift on first build so first screen is instant.
+    ref.read(
+      appDatabaseProvider,
+    ); // Warm Drift on first build so first screen is instant.
     _maybeRunSyncOnStart();
     final wantPostgresRealtime =
         _dbReady && _isOnline && context.read<AuthProvider>().user != null;
@@ -331,7 +372,9 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
         final cs = co.currentStoreId;
         if (cs != null && cs.isNotEmpty) extra.add(cs);
         unawaited(
-          ref.read(syncServiceV2Provider).pullStoreInventoryLight(companyId: toPull, extraStoreIds: extra),
+          ref
+              .read(syncServiceV2Provider)
+              .pullStoreInventoryLight(companyId: toPull, extraStoreIds: extra),
         );
       });
     }
@@ -344,17 +387,28 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.cloud_off_rounded, color: Colors.white, size: 20),
+                    Icon(
+                      Icons.cloud_off_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         pendingCount > 0
                             ? 'Mode hors ligne — $pendingCount action(s) en attente. Synchronisation à la reconnexion.'
                             : 'Mode hors ligne — les ventes seront synchronisées à la reconnexion.',
-                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   ],
@@ -368,15 +422,26 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
             child: SafeArea(
               bottom: false,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Row(
                   children: [
-                    Icon(Icons.sync_problem_rounded, color: Colors.white, size: 20),
+                    Icon(
+                      Icons.sync_problem_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         'Échec de synchronisation ($_lastSyncErrors). Tirez pour réessayer.',
-                        style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                     TextButton(
@@ -384,7 +449,13 @@ class _OfflineSyncWrapperState extends ConsumerState<OfflineSyncWrapper> with Wi
                         setState(() => _lastSyncErrors = 0);
                         _runSync(silent: false);
                       },
-                      child: Text('Réessayer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      child: Text(
+                        'Réessayer',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),

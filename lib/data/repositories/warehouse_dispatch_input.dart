@@ -11,10 +11,10 @@ class WarehouseDispatchLineInput {
   final double unitPrice;
 
   Map<String, dynamic> toJson() => {
-        'product_id': productId,
-        'quantity': quantity,
-        'unit_price': unitPrice,
-      };
+    'product_id': productId,
+    'quantity': quantity,
+    'unit_price': unitPrice,
+  };
 }
 
 /// Résultat RPC [WarehouseRepository.createDispatchInvoice].
@@ -38,6 +38,7 @@ class WarehouseDispatchInvoiceSummary {
     this.customerId,
     this.customerName,
     this.notes,
+    this.createdBy,
   });
 
   final String id;
@@ -47,6 +48,7 @@ class WarehouseDispatchInvoiceSummary {
   final String? customerId;
   final String? customerName;
   final String? notes;
+  final String? createdBy;
 }
 
 /// Ligne d'un bon / facture de sortie dépôt.

@@ -50,10 +50,7 @@ class ProductsRealtimeSync {
 
     if (_channel != null) return;
 
-    _channel = client.channel(
-      'fasostock-products-$uid',
-      opts: _channelConfig,
-    );
+    _channel = client.channel('fasostock-products-$uid', opts: _channelConfig);
     _channel!
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -107,24 +104,38 @@ class ProductsRealtimeSync {
     if (_reconnectTimer != null) return;
     final attempt = _reconnectAttempt;
     final powSeconds = 1 << (attempt > 5 ? 5 : attempt);
-    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final seconds = powSeconds > _maxReconnectBackoffSeconds
+        ? _maxReconnectBackoffSeconds
+        : powSeconds;
     final jitterMs = DateTime.now().millisecond % 400;
-    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
-      _reconnectTimer = null;
-      if (_stopped) return;
-      _reconnectAttempt = _reconnectAttempt + 1;
-      final c = _channel;
-      _channel = null;
-      if (c != null) {
-        try {
-          await Supabase.instance.client.removeChannel(c);
-        } catch (_) {}
-      }
-      if (kDebugMode) {
-        debugPrint('[ProductsRealtime] reconnect attempt=$_reconnectAttempt reason=$reason');
-      }
-      await start();
-    });
+    _reconnectTimer = Timer(
+      Duration(seconds: seconds, milliseconds: jitterMs),
+      () async {
+        _reconnectTimer = null;
+        if (_stopped) return;
+        _reconnectAttempt = _reconnectAttempt + 1;
+        final c = _channel;
+        _channel = null;
+        if (c != null) {
+          try {
+            await Supabase.instance.client.removeChannel(c);
+          } catch (e, st) {
+            AppErrorHandler.logWithContext(
+              e,
+              stackTrace: st,
+              logSource: 'products_realtime',
+              logContext: const {'op': 'removeChannel_reconnect'},
+            );
+          }
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '[ProductsRealtime] reconnect attempt=$_reconnectAttempt reason=$reason',
+          );
+        }
+        await start();
+      },
+    );
   }
 
   Future<void> _onPayload(PostgresChangePayload payload) async {

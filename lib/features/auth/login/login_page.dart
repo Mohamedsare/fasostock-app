@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -13,7 +15,6 @@ import '../../../data/models/profile.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/permissions_provider.dart';
-import '../../../shared/widgets/faso_stock_wordmark.dart';
 
 /// Page de connexion — même comportement que LoginPage (web).
 class LoginPage extends StatefulWidget {
@@ -33,6 +34,7 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   String? _error;
   bool _loading = false;
+  bool _obscurePassword = true;
 
   /// Compte bloqué après 5 tentatives : on affiche l'écran avec contact WhatsApp.
   bool _isLocked = false;
@@ -107,7 +109,14 @@ class _LoginPageState extends State<LoginPage> {
       }
       try {
         await Supabase.instance.client.rpc('reset_login_attempts');
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'login_page',
+          logContext: {'phase': 'reset_login_attempts', 'email': email},
+        );
+      }
       if (!mounted) return;
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
@@ -139,16 +148,37 @@ class _LoginPageState extends State<LoginPage> {
         });
         return;
       }
-      // Précharge le contexte minimal (entreprise + permissions) avant navigation
-      // pour éviter l'effet "écran vide puis remplissage progressif" après login.
-      await _prepareAfterLogin(auth);
       final dest = auth.isSuperAdmin ? AppRoutes.admin : AppRoutes.dashboard;
       if (!mounted || !context.mounted) return;
+      final company = context.read<CompanyProvider>();
+      final permissions = context.read<PermissionsProvider>();
+      final userId = auth.user?.id;
+      if (!auth.isSuperAdmin && userId != null && userId.isNotEmpty) {
+        // En parallèle de la navigation : le tableau de bord relit Drift tout de suite ;
+        // entreprises + permissions arrivent sans bloquer l’ouverture de l’app.
+        unawaited(
+          bootstrapCompanySessionAfterLogin(
+            userId: userId,
+            company: company,
+            permissions: permissions,
+          ),
+        );
+      }
+      if (mounted) {
+        setState(() => _loading = false);
+      }
       Future<void>.delayed(const Duration(milliseconds: 50), () {
         if (!mounted || !context.mounted) return;
         try {
           context.go(dest);
-        } catch (_) {}
+        } catch (e, st) {
+          AppErrorHandler.logWithContext(
+            e,
+            stackTrace: st,
+            logSource: 'login_page',
+            logContext: {'phase': 'post_login_navigation', 'destination': dest},
+          );
+        }
       });
     } on AuthException catch (e) {
       if (mounted) {
@@ -200,41 +230,6 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _prepareAfterLogin(AuthProvider auth) async {
-    if (!mounted) return;
-    if (auth.isSuperAdmin) return;
-    final userId = auth.user?.id;
-    if (userId == null || userId.isEmpty) return;
-
-    final company = context.read<CompanyProvider>();
-    final permissions = context.read<PermissionsProvider>();
-
-    if (mounted) {
-      setState(() => _loadingLabel = 'Préparation de votre espace...');
-    }
-
-    Future<void> safe(Future<void> Function() fn) async {
-      try {
-        await fn().timeout(const Duration(milliseconds: 1800));
-      } catch (_) {}
-    }
-
-    await safe(() async {
-      if (company.companies.isEmpty || company.currentCompanyId == null) {
-        await company.loadCompanies(userId);
-      } else {
-        await company.refreshStores();
-      }
-    });
-
-    await safe(() async {
-      final cid = company.currentCompanyId;
-      if (cid != null && cid.isNotEmpty) {
-        await permissions.load(cid);
-      }
-    });
   }
 
   Widget _buildBlockedContent(BuildContext context) {
@@ -333,9 +328,7 @@ class _LoginPageState extends State<LoginPage> {
                     if (!context.mounted) return;
                     AppErrorHandler.log(e);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(AppErrorHandler.toUserMessage(e)),
-                      ),
+                      SnackBar(content: Text(AppErrorHandler.toUserMessage(e))),
                     );
                   }
                 },
@@ -376,9 +369,7 @@ class _LoginPageState extends State<LoginPage> {
                     if (!context.mounted) return;
                     AppErrorHandler.log(e);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(AppErrorHandler.toUserMessage(e)),
-                      ),
+                      SnackBar(content: Text(AppErrorHandler.toUserMessage(e))),
                     );
                   }
                 },
@@ -456,7 +447,7 @@ class _LoginPageState extends State<LoginPage> {
                           children: [
                             Center(
                               child: Image.asset(
-                                'assets/fasostocklogo.png',
+                                'assets/fs.png',
                                 height: logoSize,
                                 width: logoSize,
                                 fit: BoxFit.contain,
@@ -465,14 +456,6 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                             SizedBox(height: spaceL),
-                            FasoStockWordmark(
-                              style: (theme.textTheme.headlineSmall ?? const TextStyle()).copyWith(
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.3,
-                              ),
-                              textAlign: TextAlign.center,
-                            ),
-                            SizedBox(height: spaceS),
                             Text(
                               'Connexion à votre espace',
                               style: theme.textTheme.bodyMedium?.copyWith(
@@ -511,14 +494,18 @@ class _LoginPageState extends State<LoginPage> {
                                       : AppTheme.spaceMd,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: colorScheme.errorContainer.withValues(alpha: 0.6),
+                                  color: colorScheme.errorContainer.withValues(
+                                    alpha: 0.6,
+                                  ),
                                   borderRadius: BorderRadius.circular(
                                     isMobile
                                         ? AppTheme.radiusMdM
                                         : AppTheme.radiusMd,
                                   ),
                                   border: Border.all(
-                                    color: colorScheme.error.withValues(alpha: 0.2),
+                                    color: colorScheme.error.withValues(
+                                      alpha: 0.2,
+                                    ),
                                     width: 1,
                                   ),
                                 ),
@@ -563,10 +550,23 @@ class _LoginPageState extends State<LoginPage> {
                             SizedBox(height: spaceL),
                             TextFormField(
                               controller: _passwordController,
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 labelText: 'Mot de passe',
+                                suffixIcon: IconButton(
+                                  onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  ),
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                  ),
+                                  tooltip: _obscurePassword
+                                      ? 'Afficher le mot de passe'
+                                      : 'Masquer le mot de passe',
+                                ),
                               ),
-                              obscureText: true,
+                              obscureText: _obscurePassword,
                               validator: (v) {
                                 if (v == null || v.isEmpty) {
                                   return 'Mot de passe requis';
@@ -655,4 +655,40 @@ class _LoginPageState extends State<LoginPage> {
       ),
     );
   }
+}
+
+/// Après connexion : charge entreprises + permissions **sans bloquer** la navigation.
+/// Le tableau de bord et [OfflineSyncWrapper] complètent le contexte si besoin.
+Future<void> bootstrapCompanySessionAfterLogin({
+  required String userId,
+  required CompanyProvider company,
+  required PermissionsProvider permissions,
+}) async {
+  Future<void> safe(Future<void> Function() fn) async {
+    try {
+      await fn().timeout(const Duration(milliseconds: 1800));
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'login_page',
+        logContext: const {'phase': 'bootstrap_company_session_after_login'},
+      );
+    }
+  }
+
+  await safe(() async {
+    if (company.companies.isEmpty || company.currentCompanyId == null) {
+      await company.loadCompanies(userId);
+    } else {
+      await company.refreshStores();
+    }
+  });
+
+  await safe(() async {
+    final cid = company.currentCompanyId;
+    if (cid != null && cid.isNotEmpty) {
+      await permissions.load(cid);
+    }
+  });
 }

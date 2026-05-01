@@ -22,8 +22,18 @@ import '../repositories/suppliers_repository.dart';
 import '../repositories/transfers_repository.dart';
 import '../repositories/users_repository.dart';
 import '../repositories/warehouse_repository.dart';
+import '../repositories/legacy_credit_repository.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/client_request_id.dart';
+
+/// Logs des échecs pull/push sync : erreurs d’infra passagères (502, JWT expiré côté filtre…) → [AppErrorHandler.logSyncTransient].
+void _syncV2LogFailure(String message, Object e, StackTrace st) {
+  if (AppErrorHandler.isTransientInfrastructureError(e)) {
+    AppErrorHandler.logSyncTransient(e, st, logContext: {'detail': message});
+  } else {
+    AppErrorHandler.log(message, st);
+  }
+}
 
 /// Offline-first sync: push pending actions to Supabase, then pull and merge into Drift.
 /// - All reads in the UI come from Drift (never wait for network).
@@ -51,6 +61,7 @@ class SyncServiceV2 {
   SettingsRepository? _settingsRepoCached;
   UsersRepository? _usersRepoCached;
   WarehouseRepository? _warehouseRepoCached;
+  LegacyCreditRepository? _legacyCreditRepoCached;
   InventoryRepository get _inventoryRepo =>
       _inventoryRepoCached ??= InventoryRepository();
   CustomersRepository get _customersRepo =>
@@ -70,6 +81,8 @@ class SyncServiceV2 {
   UsersRepository get _usersRepo => _usersRepoCached ??= UsersRepository();
   WarehouseRepository get _warehouseRepo =>
       _warehouseRepoCached ??= WarehouseRepository();
+  LegacyCreditRepository get _legacyCreditRepo =>
+      _legacyCreditRepoCached ??= LegacyCreditRepository();
   final Future<void> Function(Map<String, dynamic> payload)?
   _pushWarehouseSetThresholdOverride;
 
@@ -124,10 +137,14 @@ class SyncServiceV2 {
             await _pushProductImport(payload);
           } else if (kind == 'transfer') {
             await _pushTransfer(payload);
+          } else if (kind == 'transfer_delete') {
+            await _pushTransferDelete(payload);
           } else if (kind == 'warehouse_manual_entry') {
             await _pushWarehouseManualEntry(payload);
           } else if (kind == 'warehouse_dispatch_invoice') {
             await _pushWarehouseDispatchInvoice(payload, customerIdMap);
+          } else if (kind == 'warehouse_dispatch_void') {
+            await _pushWarehouseDispatchVoid(payload);
           } else if (kind == 'warehouse_adjustment') {
             await _pushWarehouseAdjustment(payload);
           } else if (kind == 'warehouse_exit_sale') {
@@ -138,6 +155,14 @@ class SyncServiceV2 {
             await _pushCreditAppendPayment(payload);
           } else if (kind == 'credit_update_meta') {
             await _pushCreditUpdateMeta(payload);
+          } else if (kind == 'legacy_credit_create') {
+            await _pushLegacyCreditCreate(payload);
+          } else if (kind == 'legacy_credit_append_payment') {
+            await _pushLegacyCreditAppendPayment(payload);
+          } else if (kind == 'legacy_credit_delete') {
+            await _pushLegacyCreditDelete(payload);
+          } else if (kind == 'warehouse_dispatch_append_payment') {
+            await _pushWarehouseDispatchAppendPayment(payload);
           } else {
             handled = false;
           }
@@ -156,8 +181,9 @@ class SyncServiceV2 {
             debugPrint(st.toString());
           }
           if (!_isExpectedBusinessPushError(e)) {
-            AppErrorHandler.log(
+            _syncV2LogFailure(
               'SyncV2.push pending id=$id kind=$kind: $e',
+              e,
               st,
             );
           }
@@ -174,7 +200,11 @@ class SyncServiceV2 {
             debugPrint('[Sync] Erreur pull: $e');
             debugPrint(st.toString());
           }
-          AppErrorHandler.log('SyncV2.pullAndMerge companyId=$companyId: $e', st);
+          _syncV2LogFailure(
+            'SyncV2.pullAndMerge companyId=$companyId: $e',
+            e,
+            st,
+          );
         }
       }
       return SyncResult(sent: sent, errors: errors, pulled: pulled);
@@ -183,7 +213,7 @@ class SyncServiceV2 {
         debugPrint('[Sync] Erreur générale: $e');
         debugPrint(st.toString());
       }
-      AppErrorHandler.log('SyncV2.sync outer: $e', st);
+      _syncV2LogFailure('SyncV2.sync outer: $e', e, st);
       return SyncResult(sent: sent, errors: errors + 1, pulled: false);
     } finally {
       _isSyncing = false;
@@ -236,7 +266,9 @@ class SyncServiceV2 {
       // Si la DB ne contient pas l'overload avec `p_client_request_id`, retenter
       // sans cette clé (pour que les 2 caisses restent fonctionnelles).
       final msg = e.toString();
-      if (msg.contains('create_sale_with_stock') && msg.contains('PGRST202') && msg.contains('p_client_request_id')) {
+      if (msg.contains('create_sale_with_stock') &&
+          msg.contains('PGRST202') &&
+          msg.contains('p_client_request_id')) {
         final p2 = Map<String, dynamic>.from(p);
         p2.remove('p_client_request_id');
         _normalizeSalePaymentsInPlace(p2);
@@ -315,6 +347,18 @@ class SyncServiceV2 {
     }
   }
 
+  Future<void> _pushTransferDelete(Map<String, dynamic> payload) async {
+    final transferId = (payload['transfer_id'] as String?)?.trim() ?? '';
+    if (transferId.isEmpty) {
+      throw StateError('transfer_delete: transfer_id manquant');
+    }
+    if (transferId.startsWith(_pendingCustomerPrefix)) {
+      throw StateError('transfer_delete: transfer local en attente de sync');
+    }
+    await _transfersRepo.deletePermanently(transferId);
+    await _db.deleteLocalTransfer(transferId);
+  }
+
   /// Rejoue un import CSV enregistré hors ligne : crée produits (et catégories/marques) puis stock entrant.
   Future<void> _pushProductImport(Map<String, dynamic> payload) async {
     final companyId = payload['company_id'] as String?;
@@ -346,8 +390,9 @@ class SyncServiceV2 {
       await _db.deleteStoreInventoryNotIn(storeId, keepIds);
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull inventory quantities only: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull inventory quantities storeId=$storeId: $e',
+        e,
         st,
       );
     }
@@ -355,7 +400,9 @@ class SyncServiceV2 {
 
   /// Remet à jour le stock Drift pour des boutiques précises (rapide, hors file « light poll »).
   /// À appeler après annulation vente, ajustement serveur, etc. : ne dépend pas de [sync] ni du timer.
-  Future<void> pullInventoryQuantitiesForStores(Iterable<String> storeIds) async {
+  Future<void> pullInventoryQuantitiesForStores(
+    Iterable<String> storeIds,
+  ) async {
     final now = DateTime.now().toUtc().toIso8601String();
     for (final id in storeIds) {
       if (id.isEmpty) continue;
@@ -398,8 +445,9 @@ class SyncServiceV2 {
         // Erreur non bloquante ici: on bascule sur le cache Drift.
         // Évite de polluer les logs d'erreurs pour un simple fallback réseau/schéma.
         if (e is! UserFriendlyError) {
-          AppErrorHandler.log(
+          _syncV2LogFailure(
             'SyncV2.pullStoreInventoryLight stores companyId=$companyId: $e',
+            e,
             st,
           );
         }
@@ -427,10 +475,7 @@ class SyncServiceV2 {
   ) async {
     await _pullInventoryQuantitiesOnly(storeId, now);
     try {
-      final movements = await _inventoryRepo.getMovements(
-        storeId,
-        limit: 500,
-      );
+      final movements = await _inventoryRepo.getMovements(storeId, limit: 500);
       await _db.upsertLocalStockMovements(
         movements.map(
           (m) => LocalStockMovementsCompanion.insert(
@@ -453,27 +498,31 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull stockMovements: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull stock_movements storeId=$storeId: $e',
+        e,
         st,
       );
     }
     try {
-      final overrides = await _inventoryRepo.getStoreStockMinOverrides(
-        storeId,
-      );
+      final overrides = await _inventoryRepo.getStoreStockMinOverrides(storeId);
       await _db.upsertStockMinOverrides(storeId, overrides);
       await _db.deleteStockMinOverridesNotIn(storeId, overrides.keys.toSet());
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull stockMinOverrides: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull stock_min_overrides storeId=$storeId: $e',
+        e,
         st,
       );
     }
   }
 
-  Future<void> _pullSalesIntoDrift(String companyId, String? storeId, String now) async {
+  Future<void> _pullSalesIntoDrift(
+    String companyId,
+    String? storeId,
+    String now,
+  ) async {
     try {
       final sales = await _salesRepo.list(companyId, storeId: storeId);
       for (final sale in sales) {
@@ -518,14 +567,21 @@ class SyncServiceV2 {
           final pays = await _salesRepo.getPayments(sale.id);
           await _db.replaceLocalSalePaymentsFromModels(sale.id, pays, now);
         } catch (e, st) {
-          if (kDebugMode) debugPrint('[Sync] pull sale_payments ${sale.id}: $e');
-          AppErrorHandler.log('SyncV2.pull sale_payments saleId=${sale.id}: $e', st);
+          if (kDebugMode) {
+            debugPrint('[Sync] pull sale_payments ${sale.id}: $e');
+          }
+          _syncV2LogFailure(
+            'SyncV2.pull sale_payments saleId=${sale.id}: $e',
+            e,
+            st,
+          );
         }
       }
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull sales: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull sales companyId=$companyId storeId=$storeId: $e',
+        e,
         st,
       );
     }
@@ -552,8 +608,9 @@ class SyncServiceV2 {
       await _db.upsertDefaultStockAlertThreshold(companyId, threshold);
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull defaultStockAlertThreshold: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull default_stock_alert_threshold companyId=$companyId: $e',
+        e,
         st,
       );
     }
@@ -566,8 +623,9 @@ class SyncServiceV2 {
       }
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull publicWebsiteUrl: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull public_website_url companyId=$companyId: $e',
+        e,
         st,
       );
     }
@@ -588,8 +646,9 @@ class SyncServiceV2 {
         if (kDebugMode) {
           debugPrint('[Sync] pull inventory (toutes boutiques): $e');
         }
-        AppErrorHandler.log(
+        _syncV2LogFailure(
           'SyncV2.pull inventory all stores companyId=$companyId: $e',
+          e,
           st,
         );
       }
@@ -616,8 +675,9 @@ class SyncServiceV2 {
       await _db.deleteLocalCompanyMembersNotIn(companyId, memberKeepIds);
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull companyMembers: $e');
-      AppErrorHandler.log(
+      _syncV2LogFailure(
         'SyncV2.pull company_members companyId=$companyId: $e',
+        e,
         st,
       );
     }
@@ -642,7 +702,11 @@ class SyncServiceV2 {
       await _db.deleteLocalCustomersNotIn(companyId, keepIds);
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull customers: $e');
-      AppErrorHandler.log('SyncV2.pull customers companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull customers companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final stores = await _storesRepo.getStoresByCompany(companyId);
@@ -687,7 +751,7 @@ class SyncServiceV2 {
       await _db.upsertLocalStores(storeCompanions);
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull stores: $e');
-      AppErrorHandler.log('SyncV2.pull stores companyId=$companyId: $e', st);
+      _syncV2LogFailure('SyncV2.pull stores companyId=$companyId: $e', e, st);
     }
     await _pullSalesIntoDrift(companyId, storeId, now);
     try {
@@ -704,7 +768,11 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull categories: $e');
-      AppErrorHandler.log('SyncV2.pull categories companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull categories companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final brands = await _productsRepo.brands(companyId);
@@ -719,7 +787,7 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull brands: $e');
-      AppErrorHandler.log('SyncV2.pull brands companyId=$companyId: $e', st);
+      _syncV2LogFailure('SyncV2.pull brands companyId=$companyId: $e', e, st);
     }
     try {
       final suppliers = await _suppliersRepo.list(companyId);
@@ -740,7 +808,11 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull suppliers: $e');
-      AppErrorHandler.log('SyncV2.pull suppliers companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull suppliers companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final purchases = await _purchasesRepo.list(companyId);
@@ -778,7 +850,11 @@ class SyncServiceV2 {
       await _db.deleteLocalPurchasesNotIn(companyId, purchaseIds.toSet());
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull purchases: $e');
-      AppErrorHandler.log('SyncV2.pull purchases companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull purchases companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final transfers = await _transfersRepo.list(companyId);
@@ -821,7 +897,11 @@ class SyncServiceV2 {
       await _db.deleteLocalTransfersNotIn(companyId, transferIds.toSet());
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull transfers: $e');
-      AppErrorHandler.log('SyncV2.pull transfers companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull transfers companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final whInv = await _warehouseRepo.listInventory(companyId);
@@ -843,7 +923,11 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull warehouseInventory: $e');
-      AppErrorHandler.log('SyncV2.pull warehouse_inventory companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull warehouse_inventory companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
       final whMov = await _warehouseRepo.listMovements(companyId, limit: 500);
@@ -871,10 +955,17 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull warehouseMovements: $e');
-      AppErrorHandler.log('SyncV2.pull warehouse_movements companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull warehouse_movements companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
     try {
-      final dispatchInv = await _warehouseRepo.listDispatchInvoices(companyId, limit: 200);
+      final dispatchInv = await _warehouseRepo.listDispatchInvoices(
+        companyId,
+        limit: 200,
+      );
       await _db.upsertLocalWarehouseDispatchInvoices(
         dispatchInv.map(
           (row) => LocalWarehouseDispatchInvoicesCompanion.insert(
@@ -894,7 +985,11 @@ class SyncServiceV2 {
       );
     } catch (e, st) {
       if (kDebugMode) debugPrint('[Sync] pull warehouseDispatchInvoices: $e');
-      AppErrorHandler.log('SyncV2.pull warehouse_dispatch_invoices companyId=$companyId: $e', st);
+      _syncV2LogFailure(
+        'SyncV2.pull warehouse_dispatch_invoices companyId=$companyId: $e',
+        e,
+        st,
+      );
     }
   }
 
@@ -902,7 +997,9 @@ class SyncServiceV2 {
     final companyId = payload['company_id'] as String?;
     final productId = payload['product_id'] as String?;
     if (companyId == null || productId == null) {
-      throw StateError('warehouse_manual_entry: company_id / product_id manquants');
+      throw StateError(
+        'warehouse_manual_entry: company_id / product_id manquants',
+      );
     }
     await _warehouseRepo.registerManualEntry(
       companyId: companyId,
@@ -930,7 +1027,9 @@ class SyncServiceV2 {
     if (customerId.startsWith(_pendingCustomerPrefix)) {
       final resolved = customerIdMap[customerId];
       if (resolved == null || resolved.isEmpty) {
-        throw StateError('warehouse_dispatch_invoice: client en attente de synchronisation');
+        throw StateError(
+          'warehouse_dispatch_invoice: client en attente de synchronisation',
+        );
       }
       customerId = resolved;
     }
@@ -957,11 +1056,35 @@ class SyncServiceV2 {
     );
   }
 
+  Future<void> _pushWarehouseDispatchVoid(Map<String, dynamic> payload) async {
+    final companyId = payload['company_id'] as String?;
+    final invoiceId = payload['invoice_id'] as String?;
+    if (companyId == null ||
+        companyId.isEmpty ||
+        invoiceId == null ||
+        invoiceId.isEmpty) {
+      throw StateError(
+        'warehouse_dispatch_void: company_id / invoice_id manquants',
+      );
+    }
+    if (invoiceId.startsWith(_pendingCustomerPrefix)) {
+      throw StateError(
+        'warehouse_dispatch_void: invoice_id local en attente de sync',
+      );
+    }
+    await _warehouseRepo.voidDispatchInvoice(
+      companyId: companyId,
+      invoiceId: invoiceId,
+    );
+  }
+
   Future<void> _pushWarehouseAdjustment(Map<String, dynamic> payload) async {
     final companyId = payload['company_id'] as String?;
     final productId = payload['product_id'] as String?;
     if (companyId == null || productId == null) {
-      throw StateError('warehouse_adjustment: company_id / product_id manquants');
+      throw StateError(
+        'warehouse_adjustment: company_id / product_id manquants',
+      );
     }
     final delta = _payloadInt(payload['delta']);
     final unitCost = payload['unit_cost'];
@@ -984,7 +1107,10 @@ class SyncServiceV2 {
       // Dépend d'abord de la sync de la vente. On conserve l'action en pending.
       throw StateError('warehouse_exit_sale: sale_id local en attente de sync');
     }
-    await _warehouseRepo.registerExitForSale(companyId: companyId, saleId: saleId);
+    await _warehouseRepo.registerExitForSale(
+      companyId: companyId,
+      saleId: saleId,
+    );
   }
 
   Future<void> _pushWarehouseSetThreshold(Map<String, dynamic> payload) async {
@@ -995,7 +1121,9 @@ class SyncServiceV2 {
     final companyId = payload['company_id'] as String?;
     final productId = payload['product_id'] as String?;
     if (companyId == null || productId == null) {
-      throw StateError('warehouse_set_threshold: company_id / product_id manquants');
+      throw StateError(
+        'warehouse_set_threshold: company_id / product_id manquants',
+      );
     }
     await _warehouseRepo.setStockMinWarehouse(
       companyId: companyId,
@@ -1019,7 +1147,9 @@ class SyncServiceV2 {
     final m = error.toString().toLowerCase();
     return m.contains('stock insuffisant') ||
         m.contains('sale_payments_amount_check') ||
-        m.contains('warehouse_dispatch_invoice: client en attente de synchronisation') ||
+        m.contains(
+          'warehouse_dispatch_invoice: client en attente de synchronisation',
+        ) ||
         m.contains('warehouse_exit_sale: sale_id local en attente de sync');
   }
 
@@ -1029,7 +1159,9 @@ class SyncServiceV2 {
 
     final subtotal = _payloadDouble(params['p_subtotal']);
     final discount = _payloadDouble(params['p_discount']);
-    final fallbackTotal = (subtotal - discount).clamp(0.0, double.infinity).toDouble();
+    final fallbackTotal = (subtotal - discount)
+        .clamp(0.0, double.infinity)
+        .toDouble();
     final rpcTotal = _extractTotalFromItems(params['p_items'], discount);
     final saleTotal = rpcTotal > 0 ? rpcTotal : fallbackTotal;
     final floorAmount = saleTotal > 0 ? 0.01 : 0.01;
@@ -1075,15 +1207,22 @@ class SyncServiceV2 {
     if (saleId == null || saleId.isEmpty || method == null || method.isEmpty) {
       throw ArgumentError('credit_append_payment: sale_id et method requis');
     }
-    final amount = (payload['amount'] is num) ? (payload['amount'] as num).toDouble() : 0;
-    if (amount <= 0) throw ArgumentError('credit_append_payment: montant invalide');
+    final amount = (payload['amount'] is num)
+        ? (payload['amount'] as num).toDouble()
+        : 0;
+    if (amount <= 0) {
+      throw ArgumentError('credit_append_payment: montant invalide');
+    }
     final client = Supabase.instance.client;
-    await client.rpc('append_sale_payment', params: {
-      'p_sale_id': saleId,
-      'p_method': method,
-      'p_amount': amount,
-      'p_reference': payload['reference'],
-    });
+    await client.rpc(
+      'append_sale_payment',
+      params: {
+        'p_sale_id': saleId,
+        'p_method': method,
+        'p_amount': amount,
+        'p_reference': payload['reference'],
+      },
+    );
     final now = DateTime.now().toUtc().toIso8601String();
     final pays = await _salesRepo.getPayments(saleId);
     await _db.replaceLocalSalePaymentsFromModels(saleId, pays, now);
@@ -1101,12 +1240,101 @@ class SyncServiceV2 {
         ? null
         : (note.trim().isEmpty ? null : note.trim());
     final client = Supabase.instance.client;
-    await client.from('sales').update({
-      'credit_due_at': due,
-      'credit_internal_note': trimmedNote,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', saleId);
+    await client
+        .from('sales')
+        .update({
+          'credit_due_at': due,
+          'credit_internal_note': trimmedNote,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', saleId);
     await _db.updateLocalSaleCreditMeta(saleId, due, trimmedNote);
+  }
+
+  Future<void> _pushLegacyCreditCreate(Map<String, dynamic> payload) async {
+    final companyId = (payload['company_id'] as String?)?.trim() ?? '';
+    final storeId = (payload['store_id'] as String?)?.trim() ?? '';
+    final customerId = (payload['customer_id'] as String?)?.trim() ?? '';
+    final title = (payload['title'] as String?)?.trim() ?? '';
+    final dueAtIso = (payload['due_at_iso'] as String?)?.trim();
+    final internalNote = payload['internal_note'] as String?;
+    final amountRaw = payload['amount'];
+    final amount = amountRaw is num ? amountRaw.toDouble() : 0.0;
+    if (companyId.isEmpty ||
+        storeId.isEmpty ||
+        customerId.isEmpty ||
+        title.isEmpty) {
+      throw ArgumentError(
+        'legacy_credit_create: company_id, store_id, customer_id et title requis',
+      );
+    }
+    if (amount <= 0) {
+      throw ArgumentError('legacy_credit_create: montant invalide');
+    }
+    await _legacyCreditRepo.create(
+      companyId: companyId,
+      storeId: storeId,
+      customerId: customerId,
+      title: title,
+      amount: amount,
+      dueAtIso: (dueAtIso == null || dueAtIso.isEmpty) ? null : dueAtIso,
+      internalNote: internalNote,
+    );
+  }
+
+  Future<void> _pushLegacyCreditAppendPayment(
+    Map<String, dynamic> payload,
+  ) async {
+    final creditId = (payload['credit_id'] as String?)?.trim() ?? '';
+    final method = (payload['method'] as String?)?.trim() ?? '';
+    final reference = payload['reference'] as String?;
+    final amountRaw = payload['amount'];
+    final amount = amountRaw is num ? amountRaw.toDouble() : 0.0;
+    if (creditId.isEmpty || method.isEmpty) {
+      throw ArgumentError(
+        'legacy_credit_append_payment: credit_id et method requis',
+      );
+    }
+    if (amount <= 0) {
+      throw ArgumentError('legacy_credit_append_payment: montant invalide');
+    }
+    await _legacyCreditRepo.appendPayment(
+      creditId: creditId,
+      method: method,
+      amount: amount,
+      reference: reference,
+    );
+  }
+
+  Future<void> _pushLegacyCreditDelete(Map<String, dynamic> payload) async {
+    final creditId = (payload['credit_id'] as String?)?.trim() ?? '';
+    if (creditId.isEmpty) {
+      throw ArgumentError('legacy_credit_delete: credit_id requis');
+    }
+    await _legacyCreditRepo.delete(creditId: creditId);
+  }
+
+  Future<void> _pushWarehouseDispatchAppendPayment(
+    Map<String, dynamic> payload,
+  ) async {
+    final companyId = (payload['company_id'] as String?)?.trim() ?? '';
+    final invoiceId = (payload['invoice_id'] as String?)?.trim() ?? '';
+    final method = (payload['method'] as String?)?.trim() ?? '';
+    final mobileProvider = payload['mobile_provider'] as String?;
+    final amountRaw = payload['amount'];
+    final amount = amountRaw is num ? amountRaw.toDouble() : null;
+    if (companyId.isEmpty || invoiceId.isEmpty || method.isEmpty) {
+      throw ArgumentError(
+        'warehouse_dispatch_append_payment: company_id, invoice_id et method requis',
+      );
+    }
+    await _warehouseRepo.appendDispatchPayment(
+      companyId: companyId,
+      invoiceId: invoiceId,
+      method: method,
+      amount: amount,
+      mobileProvider: mobileProvider,
+    );
   }
 
   bool _isRetryDue(int pendingId, int? updatedAtEpochMs) {

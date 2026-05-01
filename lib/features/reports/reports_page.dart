@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:excel/excel.dart';
@@ -22,6 +21,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/utils/share_csv.dart';
 import '../../../shared/utils/save_bytes_file.dart';
@@ -68,11 +68,13 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   @override
   void initState() {
     super.initState();
+    // Initialisation synchrone : le premier [build] peut arriver avant le post-frame
+    // (évite LateInitializationError sur _fromDate / _toDate).
+    final range = getDefaultDateRange(_period);
+    _fromDate = range.from;
+    _toDate = range.to;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final range = getDefaultDateRange(_period);
-      _fromDate = range.from;
-      _toDate = range.to;
       _loadCompaniesIfNeeded();
       _loadFromOffline();
       _runSyncThenRefresh();
@@ -1160,6 +1162,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                           getDrawingHorizontalLine: (v) => FlLine(color: theme.dividerColor.withValues(alpha: 0.4), strokeWidth: 1),
                         ),
                         barTouchData: BarTouchData(
+                          enabled: salesByDay.length > 1,
                           touchTooltipData: BarTouchTooltipData(
                             getTooltipColor: (_) => theme.colorScheme.surfaceContainerHighest,
                             tooltipRoundedRadius: 8,
@@ -1590,57 +1593,55 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
     if (sales == null) return;
     final company = context.read<CompanyProvider>();
     final storeName = company.currentStore?.name ?? '';
-    final lines = <List<String>>[];
+    final rows = <List<CsvCell>>[];
 
-    lines.add(['Rapport FasoStock']);
-    lines.add(['Période', _fromDate, _toDate]);
-    if (storeName.isNotEmpty) lines.add(['Boutique', storeName]);
-    lines.add([]);
-    lines.add(['KPIs']);
-    lines.add(['Chiffre d\'affaires', sales.salesSummary.totalAmount.toStringAsFixed(2)]);
-    lines.add(['Nombre de ventes', '${sales.salesSummary.count}']);
-    lines.add(['Ticket moyen', sales.ticketAverage.toStringAsFixed(2)]);
-    lines.add(['Articles vendus', '${sales.salesSummary.itemsSold}']);
-    lines.add(['Marge', sales.salesSummary.margin.toStringAsFixed(2)]);
-    lines.add([]);
+    rows.add(['Contexte', 'Période début', _fromDate, '', '']);
+    rows.add(['Contexte', 'Période fin', _toDate, '', '']);
+    if (storeName.isNotEmpty) rows.add(['Contexte', 'Boutique', storeName, '', '']);
 
-    lines.add(['Ventes par catégorie', 'CA', 'Qté']);
+    rows.add(['Synthèse', 'CA ventes', formatCsvMoney(sales.salesSummary.totalAmount), '', '']);
+    rows.add(['Synthèse', 'Nb ventes', sales.salesSummary.count, '', '']);
+    rows.add(['Synthèse', 'Panier moyen', formatCsvMoney(sales.ticketAverage), '', '']);
+    rows.add(['Synthèse', 'Articles vendus', sales.salesSummary.itemsSold, '', '']);
+    rows.add(['Synthèse', 'Marge', formatCsvMoney(sales.salesSummary.margin), '', '']);
+
+    rows.add(['Catégories', 'Catégorie', 'CA', 'Qté', '']);
     for (final c in sales.salesByCategory) {
-      lines.add([c.categoryName, c.revenue.toStringAsFixed(2), '${c.quantity}']);
+      rows.add(['Catégories', c.categoryName, formatCsvMoney(c.revenue), c.quantity, '']);
     }
-    lines.add([]);
 
-    lines.add(['Top produits', 'Qté', 'CA', 'Marge']);
+    rows.add(['Top produits', 'Produit', 'CA', 'Qté', 'Marge']);
     for (final p in sales.topProducts) {
-      lines.add([p.productName, '${p.quantitySold}', p.revenue.toStringAsFixed(2), p.margin.toStringAsFixed(2)]);
+      rows.add([
+        'Top produits',
+        p.productName,
+        formatCsvMoney(p.revenue),
+        p.quantitySold,
+        formatCsvMoney(p.margin),
+      ]);
     }
-    lines.add([]);
 
     if (_stockAlerts != null) {
-      lines.add(['Stock - Ruptures', 'Qté', 'Seuil']);
+      rows.add(['Stock', 'Rupture', 'Qté', 'Seuil', '']);
       for (final p in _stockAlerts!.outOfStock) {
-        lines.add([p.productName, '${p.quantity}', '${p.threshold}']);
+        rows.add(['Stock', p.productName, p.quantity, p.threshold, '']);
       }
-      lines.add([]);
-      lines.add(['Stock - Faibles', 'Qté', 'Seuil']);
+      rows.add(['Stock', 'Faible', 'Qté', 'Seuil', '']);
       for (final p in _stockAlerts!.lowStock) {
-        lines.add([p.productName, '${p.quantity}', '${p.threshold}']);
+        rows.add(['Stock', p.productName, p.quantity, p.threshold, '']);
       }
-      lines.add([]);
     }
 
-    final csv = lines.map((row) => row.map(_escapeCsv).join(',')).join('\n');
+    final csv = buildCsv(
+      headers: const ['Section', 'Indicateur', 'Valeur', 'Complément 1', 'Complément 2'],
+      rows: rows,
+      separator: ';',
+    );
     final ok = await saveCsvFile(
       filename: 'rapport-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.csv',
-      bytes: Uint8List.fromList(utf8.encode(csv)),
+      bytes: encodeCsv(csv),
     );
     if (ok && context.mounted) AppToast.success(context, 'CSV enregistré.');
-  }
-
-  String _escapeCsv(String v) {
-    final needs = v.contains(',') || v.contains('"') || v.contains('\n');
-    if (!needs) return v;
-    return '"${v.replaceAll('"', '""')}"';
   }
 
   Future<void> _exportExcel(BuildContext context) async {

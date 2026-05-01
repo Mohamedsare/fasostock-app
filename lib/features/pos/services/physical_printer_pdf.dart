@@ -3,6 +3,24 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
+import '../../../core/errors/app_error_handler.dart';
+
+enum PrintDispatchMode { directPreferred, directAuto, systemDialog }
+
+class PrintDispatchResult {
+  const PrintDispatchResult({
+    required this.mode,
+    this.selectedPrinterName,
+    this.preferredPrinterName,
+  });
+
+  final PrintDispatchMode mode;
+  final String? selectedPrinterName;
+  final String? preferredPrinterName;
+
+  bool get usedSystemDialog => mode == PrintDispatchMode.systemDialog;
+  bool get usedPreferredPrinter => mode == PrintDispatchMode.directPreferred;
+}
 
 /// Détecte les pilotes « PDF / OneNote / XPS » qui ouvrent « Enregistrer sous » au lieu du papier.
 bool looksLikeVirtualDocumentSink(Printer p) {
@@ -38,7 +56,9 @@ bool looksLikeVirtualDocumentSink(Printer p) {
 }
 
 Printer? pickPhysicalPrinter(List<Printer> printers) {
-  final physical = printers.where((p) => !looksLikeVirtualDocumentSink(p)).toList();
+  final physical = printers
+      .where((p) => !looksLikeVirtualDocumentSink(p))
+      .toList();
   if (physical.isEmpty) return null;
   for (final p in physical) {
     if (p.isDefault) return p;
@@ -66,17 +86,37 @@ Printer? findPrinterNamed(List<Printer> printers, String name) {
 ///
 /// **UI :** ne pas `await` depuis un handler d’écran — utiliser `unawaited(...)` + toast
 /// pour ne pas bloquer l’interaction tant que le pilote / spooler travaille.
-Future<void> printPdfToPhysicalPrinter({
+Future<PrintDispatchResult> printPdfToPhysicalPrinter({
   required String jobName,
   required Future<Uint8List> Function(PdfPageFormat format) onLayout,
   String? preferredPrinterName,
 }) async {
   if (kIsWeb) {
     await Printing.layoutPdf(onLayout: onLayout);
-    return;
+    return PrintDispatchResult(
+      mode: PrintDispatchMode.systemDialog,
+      preferredPrinterName: preferredPrinterName?.trim(),
+    );
   }
 
-  final printers = await Printing.listPrinters();
+  List<Printer> printers;
+  try {
+    printers = await Printing.listPrinters();
+  } catch (e, st) {
+    // Offline-first: si le spooler / service d'énumération est indisponible,
+    // on garde la possibilité d'imprimer via la boîte système.
+    AppErrorHandler.logWithContext(
+      e,
+      stackTrace: st,
+      logSource: 'physical_printer_pdf',
+      logContext: const {'op': 'listPrinters'},
+    );
+    await Printing.layoutPdf(onLayout: onLayout);
+    return PrintDispatchResult(
+      mode: PrintDispatchMode.systemDialog,
+      preferredPrinterName: preferredPrinterName?.trim(),
+    );
+  }
   if (printers.isEmpty) {
     throw Exception('Aucune imprimante disponible.');
   }
@@ -92,12 +132,25 @@ Future<void> printPdfToPhysicalPrinter({
   printer ??= pickPhysicalPrinter(printers);
   if (printer == null) {
     await Printing.layoutPdf(onLayout: onLayout);
-    return;
+    return PrintDispatchResult(
+      mode: PrintDispatchMode.systemDialog,
+      preferredPrinterName: preferred,
+    );
   }
 
   await Printing.directPrintPdf(
     printer: printer,
     name: jobName,
     onLayout: onLayout,
+  );
+  return PrintDispatchResult(
+    mode:
+        (preferred != null &&
+            preferred.isNotEmpty &&
+            printer.name.trim().toLowerCase() == preferred.toLowerCase())
+        ? PrintDispatchMode.directPreferred
+        : PrintDispatchMode.directAuto,
+    selectedPrinterName: printer.name,
+    preferredPrinterName: preferred,
   );
 }

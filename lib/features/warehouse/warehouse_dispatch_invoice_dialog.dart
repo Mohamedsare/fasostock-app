@@ -24,7 +24,8 @@ import '../../shared/utils/format_currency.dart';
 import '../pos/pos_models.dart';
 import '../pos/widgets/pos_cart_panel.dart';
 import '../pos/widgets/pos_invoice_table_cart.dart';
-import '../pos/widgets/pos_main_area.dart' show PosMainArea, PosMainProductGridMode;
+import '../pos/widgets/pos_main_area.dart'
+    show PosMainArea, PosMainProductGridMode;
 import '../pos_quick/pos_quick_constants.dart';
 import 'warehouse_ui_helpers.dart';
 
@@ -56,7 +57,9 @@ class WarehouseDispatchInvoiceDialog extends ConsumerStatefulWidget {
       _WarehouseDispatchInvoiceDialogState();
 }
 
-class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispatchInvoiceDialog> {
+class _WarehouseDispatchInvoiceDialogState
+    extends ConsumerState<WarehouseDispatchInvoiceDialog> {
+  static const String _dispatchPaymentNotePrefix = '__PAYMENT_INFO__:';
   final CustomersRepository _customersRepo = CustomersRepository();
   final TextEditingController _searchController = TextEditingController();
   final _notesCtrl = TextEditingController();
@@ -72,9 +75,14 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
   bool _saving = false;
   bool _creatingCustomer = false;
   DateTime? _lastStockLimitToastAt;
+  _DispatchPaymentMode? _paymentMode;
+  String _cashPaidDraft = '';
+  _DispatchMobileProvider? _mobileProvider;
 
   List<Product> get _activeProducts =>
-      widget.products.where((p) => p.isActive && p.isAvailableInWarehouse).toList()
+      widget.products
+          .where((p) => p.isActive && p.isAvailableInWarehouse)
+          .toList()
         ..sort((a, b) => a.name.compareTo(b.name));
 
   List<Customer> get _customers =>
@@ -101,7 +109,8 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
 
   double get _grandTotal => _cart.fold(0.0, (s, c) => s + c.total);
 
-  int _effectiveStock(String productId) => widget.warehouseQuantities[productId] ?? 0;
+  int _effectiveStock(String productId) =>
+      widget.warehouseQuantities[productId] ?? 0;
 
   bool _isProductShownInWarehouse(Product p) {
     if (!p.isActive) return false;
@@ -141,7 +150,8 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     for (final c in _cart) {
       _qtyControllers.putIfAbsent(
         c.productId,
-        () => TextEditingController(text: c.quantity == 0 ? '' : '${c.quantity}'),
+        () =>
+            TextEditingController(text: c.quantity == 0 ? '' : '${c.quantity}'),
       );
       _puControllers.putIfAbsent(
         c.productId,
@@ -216,7 +226,9 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
             quantity: 1,
             unitPrice: p.salePrice,
             total: p.salePrice,
-            imageUrl: p.productImages?.isNotEmpty == true ? p.productImages!.first.url : null,
+            imageUrl: p.productImages?.isNotEmpty == true
+                ? p.productImages!.first.url
+                : null,
           ),
         );
       }
@@ -234,7 +246,11 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     });
   }
 
-  void _updateQty(String productId, int delta, Map<String, int> stockByProductId) {
+  void _updateQty(
+    String productId,
+    int delta,
+    Map<String, int> stockByProductId,
+  ) {
     final stock = stockByProductId[productId] ?? 0;
     int? newQty;
     setState(() {
@@ -279,20 +295,20 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     final requested = value.clamp(0, 999);
     if (stock >= 0 && requested > stock) {
       _showStockLimitToast();
-      _qtyControllers[productId]?.text = current.quantity == 0 ? '' : '${current.quantity}';
+      _qtyControllers[productId]?.text = current.quantity == 0
+          ? ''
+          : '${current.quantity}';
       return;
     }
 
     final clamped = requested;
     setState(() {
-      _cart = _cart
-          .map((c) {
-            if (c.productId != productId) return c;
-            c.quantity = clamped;
-            c.total = clamped * c.unitPrice;
-            return c;
-          })
-          .toList();
+      _cart = _cart.map((c) {
+        if (c.productId != productId) return c;
+        c.quantity = clamped;
+        c.total = clamped * c.unitPrice;
+        return c;
+      }).toList();
     });
   }
 
@@ -328,7 +344,9 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
       final company = context.read<CompanyProvider>();
       final uid = auth.user?.id;
       if (uid == null) return;
-      await ref.read(syncServiceV2Provider).sync(
+      await ref
+          .read(syncServiceV2Provider)
+          .sync(
             userId: uid,
             companyId: company.currentCompanyId ?? widget.companyId,
             storeId: null,
@@ -365,7 +383,9 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                   final customerId = c.id;
                   return ListTile(
                     leading: Icon(
-                      selected ? Icons.check_circle_rounded : Icons.person_outline_rounded,
+                      selected
+                          ? Icons.check_circle_rounded
+                          : Icons.person_outline_rounded,
                       color: selected ? theme.colorScheme.primary : null,
                     ),
                     title: Text(c.name, overflow: TextOverflow.ellipsis),
@@ -383,7 +403,10 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                   );
                 }),
                 ListTile(
-                  leading: Icon(Icons.person_add_rounded, color: theme.colorScheme.primary),
+                  leading: Icon(
+                    Icons.person_add_rounded,
+                    color: theme.colorScheme.primary,
+                  ),
                   title: const Text('Créer un client'),
                   minVerticalPadding: 14,
                   onTap: () {
@@ -467,7 +490,10 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
         });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          AppToast.success(context, 'Client enregistré. Il sera envoyé à la reconnexion.');
+          AppToast.success(
+            context,
+            'Client enregistré. Il sera envoyé à la reconnexion.',
+          );
         });
         Future.microtask(_syncAfterCustomerChange);
         return;
@@ -489,12 +515,72 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        AppToast.success(context, 'Client ajouté. Vous pouvez continuer le bon.');
+        AppToast.success(
+          context,
+          'Client ajouté. Vous pouvez continuer le bon.',
+        );
       });
       Future.microtask(_syncAfterCustomerChange);
       return;
     } catch (e, st) {
       WarehouseUi.logOp('dispatch_invoice_create_customer', e, st);
+      final shouldFallbackOffline =
+          ErrorMapper.isNetworkError(e) ||
+          !ConnectivityService.instance.isOnline;
+      if (shouldFallbackOffline) {
+        try {
+          final companyId = widget.companyId;
+          final db = ref.read(appDatabaseProvider);
+          final localId = 'cust_${DateTime.now().millisecondsSinceEpoch}';
+          await db.enqueuePendingAction(
+            'customer',
+            jsonEncode({
+              'local_id': localId,
+              'company_id': companyId,
+              'name': name,
+              'type': CustomerType.individual.value,
+              'phone': phone,
+            }),
+          );
+          final now = DateTime.now().toUtc().toIso8601String();
+          await db.upsertLocalCustomers([
+            LocalCustomersCompanion.insert(
+              id: 'pending:$localId',
+              companyId: companyId,
+              name: name,
+              type: Value(CustomerType.individual.value),
+              phone: Value(phone),
+              createdAt: now,
+              updatedAt: now,
+            ),
+          ]);
+          final pending = Customer(
+            id: 'pending:$localId',
+            companyId: companyId,
+            name: name,
+            type: CustomerType.individual,
+            phone: phone,
+          );
+          if (mounted) {
+            setState(() {
+              _pendingCustomers.add(pending);
+              _customerId = pending.id;
+            });
+            AppToast.success(
+              context,
+              'Réseau indisponible: client enregistré localement et synchronisé à la reconnexion.',
+            );
+            Future.microtask(_syncAfterCustomerChange);
+          }
+          return;
+        } catch (e2, st2) {
+          WarehouseUi.logOp(
+            'dispatch_invoice_create_customer_offline_fallback',
+            e2,
+            st2,
+          );
+        }
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         AppErrorHandler.show(context, e);
@@ -509,6 +595,9 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     _cart = [];
     _notesCtrl.clear();
     _customerId = '';
+    _paymentMode = null;
+    _cashPaidDraft = '';
+    _mobileProvider = null;
     _selectedCategoryId = null;
     _searchController.clear();
   }
@@ -534,6 +623,13 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
       AppToast.info(context, 'Ajoutez au moins un article depuis le bandeau.');
       return;
     }
+    if (_paymentMode == null) {
+      AppToast.info(
+        context,
+        'Choisissez d\'abord un mode de paiement (Espèces, Mobile money, Carte ou À crédit).',
+      );
+      return;
+    }
 
     final inputs = <WarehouseDispatchLineInput>[];
     final productById = {for (final p in widget.products) p.id: p};
@@ -545,7 +641,10 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
       }
       final qty = line.quantity;
       if (qty <= 0) {
-        AppToast.info(context, 'Indiquez une quantité correcte pour chaque article.');
+        AppToast.info(
+          context,
+          'Indiquez une quantité correcte pour chaque article.',
+        );
         return;
       }
       final price = line.unitPrice;
@@ -561,15 +660,95 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
         );
         return;
       }
-      inputs.add(WarehouseDispatchLineInput(productId: p.id, quantity: qty, unitPrice: price));
+      inputs.add(
+        WarehouseDispatchLineInput(
+          productId: p.id,
+          quantity: qty,
+          unitPrice: price,
+        ),
+      );
     }
+
+    var paidAmount = 0.0;
+    if (_paymentMode == _DispatchPaymentMode.cash) {
+      final raw = _cashPaidDraft.trim();
+      if (raw.isEmpty) {
+        AppToast.info(
+          context,
+          'Indiquez le montant reçu en espèces. Vous pouvez saisir un montant partiel ou complet.',
+        );
+        return;
+      }
+      final parsed = double.tryParse(raw.replaceAll(',', '.'));
+      if (parsed == null || parsed < 0) {
+        AppToast.info(
+          context,
+          'Montant espèces invalide. Entrez un nombre valide (ex: 5000).',
+        );
+        return;
+      }
+      paidAmount = parsed > _grandTotal ? _grandTotal : parsed;
+      if (parsed > _grandTotal) {
+        AppToast.info(
+          context,
+          'Montant espèces ajusté au total de la facture.',
+        );
+      }
+    } else if (_paymentMode == _DispatchPaymentMode.mobileMoney ||
+        _paymentMode == _DispatchPaymentMode.card) {
+      if (_paymentMode == _DispatchPaymentMode.mobileMoney &&
+          _mobileProvider == null) {
+        AppToast.info(
+          context,
+          'Choisissez l\'opérateur Mobile money (Orange Money, Moov Money ou Wave).',
+        );
+        return;
+      }
+      paidAmount = _grandTotal;
+    } else {
+      paidAmount = 0;
+    }
+
+    final paymentInfo = <String, dynamic>{
+      'mode': _paymentMode!.value,
+      'paid_amount': paidAmount.round(),
+      'mobile_provider': _paymentMode == _DispatchPaymentMode.mobileMoney
+          ? _mobileProvider!.value
+          : null,
+    };
 
     setState(() => _saving = true);
     try {
+      final customerPendingSync = customer.id.startsWith('pending:');
+      final canEnqueueOffline = widget.onOfflineEnqueue != null;
+      if ((customerPendingSync || !ConnectivityService.instance.isOnline) &&
+          canEnqueueOffline) {
+        await widget.onOfflineEnqueue!({
+          'company_id': widget.companyId,
+          'customer_id': customer.id,
+          'notes': '$_dispatchPaymentNotePrefix${jsonEncode(paymentInfo)}',
+          'lines': inputs.map((e) => e.toJson()).toList(),
+        });
+        if (mounted) {
+          AppToast.success(
+            context,
+            customerPendingSync
+                ? 'Client en attente de synchronisation: bon enregistré localement.'
+                : 'Enregistré. Envoi dès que la connexion revient.',
+          );
+          await widget.onSuccess();
+          if (!mounted) return;
+          setState(() {
+            _saving = false;
+            _resetDispatchForm();
+          });
+        }
+        return;
+      }
       final res = await widget.warehouseRepo.createDispatchInvoice(
         companyId: widget.companyId,
         customerId: customer.id,
-        notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+        notes: '$_dispatchPaymentNotePrefix${jsonEncode(paymentInfo)}',
         lines: inputs,
       );
       if (!mounted) return;
@@ -586,11 +765,14 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
         await widget.onOfflineEnqueue!({
           'company_id': widget.companyId,
           'customer_id': customer.id,
-          'notes': _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+          'notes': '$_dispatchPaymentNotePrefix${jsonEncode(paymentInfo)}',
           'lines': inputs.map((e) => e.toJson()).toList(),
         });
         if (mounted) {
-          AppToast.success(context, 'Enregistré. Envoi dès que la connexion revient.');
+          AppToast.success(
+            context,
+            'Enregistré. Envoi dès que la connexion revient.',
+          );
           await widget.onSuccess();
           if (!mounted) return;
           setState(() {
@@ -624,7 +806,12 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     final filtered = _filteredProducts(stockByProductId);
     final hasCustomers = _customersForUi.isNotEmpty;
     final canSubmit =
-        !_saving && !_creatingCustomer && hasCustomers && _customerId.isNotEmpty && _cart.isNotEmpty;
+        !_saving &&
+        !_creatingCustomer &&
+        hasCustomers &&
+        _customerId.isNotEmpty &&
+        _paymentMode != null &&
+        _cart.isNotEmpty;
 
     _ensureQtyControllersForCart();
 
@@ -639,9 +826,7 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
         elevation: 0.5,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: theme.dividerColor.withValues(alpha: 0.4),
-          ),
+          side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.4)),
         ),
         child: PosMainArea(
           searchController: _searchController,
@@ -686,7 +871,10 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
           scrollBodyWithFooter: true,
           cartListBody: _cart.isEmpty
               ? Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 32,
+                  ),
                   child: Center(
                     child: Text(
                       'Ajoutez des produits depuis le bandeau ci‑dessus.\n'
@@ -706,7 +894,8 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                   puControllers: _puControllers,
                   onQtyDelta: (productId, delta) =>
                       _updateQty(productId, delta, stockByProductId),
-                  onSetQty: (productId, v) => _setQty(productId, v, stockByProductId),
+                  onSetQty: (productId, v) =>
+                      _setQty(productId, v, stockByProductId),
                   onSetUnitPrice: _setUnitPrice,
                   onUnitChange: _setUnit,
                   onRemove: _removeCartLine,
@@ -741,8 +930,10 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                     // Laisser assez de place au bandeau pour éviter un scroll vertical
                     // qui fait disparaître les miniatures quand l’écran le permet.
                     // Moitié bandeau / moitié tableau (zone utile sous le dialogue).
-                    final maxStripAlloc =
-                        (constraints.maxHeight * 0.5).clamp(200.0, constraints.maxHeight);
+                    final maxStripAlloc = (constraints.maxHeight * 0.5).clamp(
+                      200.0,
+                      constraints.maxHeight,
+                    );
                     final targetStripH = math.max(
                       stripH,
                       math.min(_kFactureStripContentIdealHeight, maxStripAlloc),
@@ -762,10 +953,7 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        SizedBox(
-                          height: targetStripH,
-                          child: stripHost,
-                        ),
+                        SizedBox(height: targetStripH, child: stripHost),
                         tablePanel,
                       ],
                     );
@@ -779,10 +967,7 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
     );
   }
 
-  Widget _dispatchFooter(
-    bool hasCustomers,
-    bool canSubmit,
-  ) {
+  Widget _dispatchFooter(bool hasCustomers, bool canSubmit) {
     return Material(
       elevation: 4,
       color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -807,6 +992,73 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                   isDense: true,
                 ),
               ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Mode de paiement',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  _paymentChip(_DispatchPaymentMode.cash, 'Espèces'),
+                  _paymentChip(
+                    _DispatchPaymentMode.mobileMoney,
+                    'Mobile money',
+                  ),
+                  _paymentChip(_DispatchPaymentMode.card, 'Carte'),
+                  _paymentChip(_DispatchPaymentMode.credit, 'À crédit'),
+                ],
+              ),
+              if (_paymentMode == _DispatchPaymentMode.cash) ...[
+                const SizedBox(height: 8),
+                TextField(
+                  enabled: !_saving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (v) => setState(() => _cashPaidDraft = v),
+                  decoration: InputDecoration(
+                    labelText: 'Montant reçu (espèces)',
+                    hintText: '0 à ${_grandTotal.round()}',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Vous pouvez saisir un montant partiel ou complet.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              if (_paymentMode == _DispatchPaymentMode.mobileMoney) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _providerChip(
+                      _DispatchMobileProvider.orangeMoney,
+                      'Orange Money',
+                    ),
+                    _providerChip(
+                      _DispatchMobileProvider.moovMoney,
+                      'Moov Money',
+                    ),
+                    _providerChip(_DispatchMobileProvider.wave, 'Wave'),
+                  ],
+                ),
+              ],
               const SizedBox(height: 12),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -849,6 +1101,8 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
                     : Text(
                         !hasCustomers
                             ? 'Ajoutez d’abord un client'
+                            : _paymentMode == null
+                            ? 'Choisissez le mode de paiement'
                             : _cart.isEmpty
                             ? 'Ajoutez des articles'
                             : _customerId.isEmpty
@@ -866,6 +1120,87 @@ class _WarehouseDispatchInvoiceDialogState extends ConsumerState<WarehouseDispat
       ),
     );
   }
+
+  Widget _paymentChip(_DispatchPaymentMode mode, String label) {
+    final selected = _paymentMode == mode;
+    final enabled = !_saving;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: selected
+              ? Colors.white
+              : (enabled ? const Color(0xFF1F2937) : const Color(0xFF9CA3AF)),
+        ),
+      ),
+      selected: selected,
+      selectedColor: PosQuickColors.orangePrincipal,
+      backgroundColor: const Color(0xFFF3F4F6),
+      side: BorderSide(
+        color: selected
+            ? PosQuickColors.orangePrincipal
+            : const Color(0xFFD1D5DB),
+      ),
+      onSelected: _saving
+          ? null
+          : (_) => setState(() {
+              _paymentMode = mode;
+              if (mode != _DispatchPaymentMode.cash) _cashPaidDraft = '';
+              if (mode != _DispatchPaymentMode.mobileMoney) {
+                _mobileProvider = null;
+              }
+            }),
+      showCheckmark: false,
+    );
+  }
+
+  Widget _providerChip(_DispatchMobileProvider p, String label) {
+    final selected = _mobileProvider == p;
+    final enabled = !_saving;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: selected
+              ? Colors.white
+              : (enabled ? const Color(0xFF1F2937) : const Color(0xFF9CA3AF)),
+        ),
+      ),
+      selected: selected,
+      selectedColor: PosQuickColors.orangePrincipal,
+      backgroundColor: const Color(0xFFF3F4F6),
+      side: BorderSide(
+        color: selected
+            ? PosQuickColors.orangePrincipal
+            : const Color(0xFFD1D5DB),
+      ),
+      onSelected: _saving ? null : (_) => setState(() => _mobileProvider = p),
+      showCheckmark: false,
+    );
+  }
+}
+
+enum _DispatchPaymentMode { cash, mobileMoney, card, credit }
+
+extension on _DispatchPaymentMode {
+  String get value => switch (this) {
+    _DispatchPaymentMode.cash => 'cash',
+    _DispatchPaymentMode.mobileMoney => 'mobile_money',
+    _DispatchPaymentMode.card => 'card',
+    _DispatchPaymentMode.credit => 'credit',
+  };
+}
+
+enum _DispatchMobileProvider { orangeMoney, moovMoney, wave }
+
+extension on _DispatchMobileProvider {
+  String get value => switch (this) {
+    _DispatchMobileProvider.orangeMoney => 'orange_money',
+    _DispatchMobileProvider.moovMoney => 'moov_money',
+    _DispatchMobileProvider.wave => 'wave',
+  };
 }
 
 /// Données renvoyées par [_NewCustomerDialog] ; les [TextEditingController] y sont gérés
@@ -929,8 +1264,9 @@ class _NewCustomerDialogState extends State<_NewCustomerDialog> {
                   border: OutlineInputBorder(),
                   hintText: 'Ex. : Amadou Diallo',
                 ),
-                validator: (v) =>
-                    (v == null || v.trim().length < 2) ? 'Au moins 2 lettres' : null,
+                validator: (v) => (v == null || v.trim().length < 2)
+                    ? 'Au moins 2 lettres'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(

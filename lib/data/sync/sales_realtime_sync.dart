@@ -13,7 +13,8 @@ import 'sync_service_v2.dart';
 /// Pousse les changements `sales` Supabase (Realtime + RLS) vers Drift.
 /// Complète le sync périodique (offline-first intact : hors ligne, pas d’événements ; la sync refera le pull).
 class SalesRealtimeSync {
-  SalesRealtimeSync(this._db, {SyncServiceV2? syncService}) : _syncService = syncService;
+  SalesRealtimeSync(this._db, {SyncServiceV2? syncService})
+    : _syncService = syncService;
 
   final AppDatabase _db;
   final SyncServiceV2? _syncService;
@@ -60,10 +61,7 @@ class SalesRealtimeSync {
 
     if (_channel != null) return;
 
-    _channel = client.channel(
-      'fasostock-sales-$uid',
-      opts: _channelConfig,
-    );
+    _channel = client.channel('fasostock-sales-$uid', opts: _channelConfig);
     _channel!
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
@@ -117,25 +115,39 @@ class SalesRealtimeSync {
     if (_reconnectTimer != null) return;
     final attempt = _reconnectAttempt;
     final powSeconds = 1 << (attempt > 5 ? 5 : attempt); // 1,2,4,8,16,32
-    final seconds = powSeconds > _maxReconnectBackoffSeconds ? _maxReconnectBackoffSeconds : powSeconds;
+    final seconds = powSeconds > _maxReconnectBackoffSeconds
+        ? _maxReconnectBackoffSeconds
+        : powSeconds;
     // Petit jitter pour éviter que plusieurs channels reconnectent exactement en même temps.
     final jitterMs = DateTime.now().millisecond % 400;
-    _reconnectTimer = Timer(Duration(seconds: seconds, milliseconds: jitterMs), () async {
-      _reconnectTimer = null;
-      if (_stopped) return;
-      _reconnectAttempt = _reconnectAttempt + 1;
-      final c = _channel;
-      _channel = null;
-      if (c != null) {
-        try {
-          await Supabase.instance.client.removeChannel(c);
-        } catch (_) {}
-      }
-      if (kDebugMode) {
-        debugPrint('[SalesRealtime] reconnect attempt=$_reconnectAttempt reason=$reason');
-      }
-      await start();
-    });
+    _reconnectTimer = Timer(
+      Duration(seconds: seconds, milliseconds: jitterMs),
+      () async {
+        _reconnectTimer = null;
+        if (_stopped) return;
+        _reconnectAttempt = _reconnectAttempt + 1;
+        final c = _channel;
+        _channel = null;
+        if (c != null) {
+          try {
+            await Supabase.instance.client.removeChannel(c);
+          } catch (e, st) {
+            AppErrorHandler.logWithContext(
+              e,
+              stackTrace: st,
+              logSource: 'sales_realtime',
+              logContext: const {'op': 'removeChannel_reconnect'},
+            );
+          }
+        }
+        if (kDebugMode) {
+          debugPrint(
+            '[SalesRealtime] reconnect attempt=$_reconnectAttempt reason=$reason',
+          );
+        }
+        await start();
+      },
+    );
   }
 
   Future<void> _onPayload(PostgresChangePayload payload) async {
@@ -175,7 +187,9 @@ class SalesRealtimeSync {
       'id': _asIsoString(raw['id']),
       'company_id': _asIsoString(raw['company_id']),
       'store_id': _asIsoString(raw['store_id']),
-      'customer_id': raw['customer_id'] == null ? null : _asIsoString(raw['customer_id']),
+      'customer_id': raw['customer_id'] == null
+          ? null
+          : _asIsoString(raw['customer_id']),
       'sale_number': _asIsoString(raw['sale_number']),
       'status': raw['status'] == null ? 'draft' : _asIsoString(raw['status']),
       'subtotal': raw['subtotal'],
@@ -185,11 +199,18 @@ class SalesRealtimeSync {
       'created_by': _asIsoString(raw['created_by']),
       'created_at': _asIsoString(raw['created_at']),
       'updated_at': _asIsoString(raw['updated_at']),
-      'sale_mode': raw['sale_mode'] == null ? null : _asIsoString(raw['sale_mode']),
-      'document_type': raw['document_type'] == null ? null : _asIsoString(raw['document_type']),
-      'credit_due_at': raw['credit_due_at'] == null ? null : _asIsoString(raw['credit_due_at']),
-      'credit_internal_note':
-          raw['credit_internal_note'] == null ? null : _asIsoString(raw['credit_internal_note']),
+      'sale_mode': raw['sale_mode'] == null
+          ? null
+          : _asIsoString(raw['sale_mode']),
+      'document_type': raw['document_type'] == null
+          ? null
+          : _asIsoString(raw['document_type']),
+      'credit_due_at': raw['credit_due_at'] == null
+          ? null
+          : _asIsoString(raw['credit_due_at']),
+      'credit_internal_note': raw['credit_internal_note'] == null
+          ? null
+          : _asIsoString(raw['credit_internal_note']),
     };
   }
 
@@ -254,7 +275,10 @@ class SalesRealtimeSync {
         final now = DateTime.now().toUtc().toIso8601String();
         await _db.replaceLocalSalePaymentsFromModels(sale.id, pays, now);
       } catch (e2, st2) {
-        AppErrorHandler.log('SalesRealtime.fetchPayments id=${sale.id}: $e2', st2);
+        AppErrorHandler.log(
+          'SalesRealtime.fetchPayments id=${sale.id}: $e2',
+          st2,
+        );
       }
     } catch (e, st) {
       AppErrorHandler.log('SalesRealtime.fetchItems id=${sale.id}: $e', st);
@@ -263,7 +287,9 @@ class SalesRealtimeSync {
     // Même réactivité que l’annulation locale (pull + Drift) : tous les caissiers voient
     // le stock rétabli sans attendre uniquement les événements `store_inventory` ou le poll 2 s.
     final statusRaw = raw['status'];
-    final statusStr = statusRaw == null ? '' : statusRaw.toString().toLowerCase();
+    final statusStr = statusRaw == null
+        ? ''
+        : statusRaw.toString().toLowerCase();
     if (statusStr == 'cancelled') {
       final sid = _uuid(raw['store_id']);
       if (sid != null && sid.isNotEmpty) {

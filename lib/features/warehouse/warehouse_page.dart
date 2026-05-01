@@ -6,7 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import '../../core/breakpoints.dart';
 import '../../core/config/routes.dart';
@@ -30,6 +33,7 @@ import '../../providers/company_provider.dart';
 import '../../providers/offline_providers.dart';
 import '../../providers/permissions_provider.dart';
 import '../../shared/utils/format_currency.dart';
+import '../../shared/utils/save_bytes_file.dart';
 import 'warehouse_adjustment_dialog.dart';
 import 'warehouse_dispatch_invoice_dialog.dart';
 import 'warehouse_dispatch_history_dialog.dart';
@@ -51,6 +55,18 @@ const Map<String, String> kWarehousePackagingLabels = {
   'autre': 'Autre',
 };
 
+pw.Widget _pdfCell(String text, {pw.TextAlign align = pw.TextAlign.left}) {
+  return pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+    child: pw.Text(
+      text,
+      textAlign: align,
+      style: const pw.TextStyle(fontSize: 10),
+      maxLines: 1,
+    ),
+  );
+}
+
 /// Module **Magasin** — dépôt central par entreprise (owner). Stock **distinct** du stock de chaque boutique.
 class WarehousePage extends ConsumerStatefulWidget {
   const WarehousePage({super.key});
@@ -71,8 +87,11 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   static const int _autoSyncCooldownMs = 90000;
 
   bool _syncing = false;
+  bool _exportingProductsPdf = false;
   String? _error;
   String? _lastLoadedCompanyId;
+  final Map<String, double> _dispatchTotalsByInvoiceId = <String, double>{};
+  final Set<String> _dispatchTotalsLoading = <String>{};
 
   @override
   void initState() {
@@ -84,6 +103,56 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  double _dispatchPaidAmountFromNotes(String? notes) {
+    if (notes == null || notes.trim().isEmpty) return 0;
+    const marker = '__PAYMENT_INFO__::';
+    final text = notes.trim();
+    if (!text.startsWith(marker)) return 0;
+    try {
+      final payload = text.substring(marker.length).trim();
+      final decoded = jsonDecode(payload);
+      if (decoded is! Map) return 0;
+      final paidRaw = decoded['paid_amount'];
+      if (paidRaw is num) return paidRaw.toDouble();
+      return 0;
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'warehouse_page',
+        logContext: const {'phase': 'dispatch_paid_amount_from_notes'},
+      );
+      return 0;
+    }
+  }
+
+  void _ensureDispatchTotalsLoaded(List<WarehouseDispatchInvoiceSummary> rows) {
+    for (final r in rows) {
+      if (_dispatchTotalsByInvoiceId.containsKey(r.id) ||
+          _dispatchTotalsLoading.contains(r.id)) {
+        continue;
+      }
+      _dispatchTotalsLoading.add(r.id);
+      _repo
+          .getDispatchInvoiceDetails(r.id)
+          .then((d) {
+            if (!mounted) return;
+            setState(() => _dispatchTotalsByInvoiceId[r.id] = d.subtotal);
+          })
+          .catchError((e, st) {
+            AppErrorHandler.logWithContext(
+              e,
+              stackTrace: st,
+              logSource: 'warehouse_page',
+              logContext: {'phase': 'load_dispatch_total', 'invoice_id': r.id},
+            );
+          })
+          .whenComplete(() {
+            _dispatchTotalsLoading.remove(r.id);
+          });
+    }
   }
 
   /// [silent] : sync en arrière-plan — pas de `_syncing` ni toast d’erreur (logs conservés).
@@ -131,7 +200,10 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
           _syncing = false;
         });
         // Offline-first: garde l'écran local lisible même si la sync réseau échoue.
-        AppToast.info(context, 'Mode hors ligne: affichage local. La synchronisation reprendra à la reconnexion.');
+        AppToast.info(
+          context,
+          'Mode hors ligne: affichage local. La synchronisation reprendra à la reconnexion.',
+        );
       }
     }
   }
@@ -186,6 +258,145 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     );
   }
 
+  Future<Uint8List?> _loadImageBytes(String? url) async {
+    if (url == null || url.trim().isEmpty) return null;
+    try {
+      final uri = Uri.tryParse(url.trim());
+      if (uri == null || !uri.hasScheme) return null;
+      final res = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        return res.bodyBytes;
+      }
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'warehouse_page',
+        logContext: {'phase': 'load_image_bytes', 'has_url': true},
+      );
+    }
+    return null;
+  }
+
+  Future<void> _exportWarehouseProductsPdf({
+    required List<WarehouseStockLine> inventory,
+    required String companyName,
+  }) async {
+    if (_exportingProductsPdf) return;
+    setState(() => _exportingProductsPdf = true);
+    try {
+      final rows = inventory.where((l) => l.quantity > 0).toList()
+        ..sort((a, b) => a.productName.compareTo(b.productName));
+
+      final imageByProductId = <String, Uint8List?>{};
+      await Future.wait(
+        rows.map((r) async {
+          imageByProductId[r.productId] = await _loadImageBytes(r.imageUrl);
+        }),
+      );
+
+      final doc = pw.Document();
+      doc.addPage(
+        pw.MultiPage(
+          margin: const pw.EdgeInsets.all(24),
+          build: (_) => [
+            pw.Text(
+              companyName,
+              style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              'Produits du dépôt (miniature + nom)',
+              style: const pw.TextStyle(fontSize: 11),
+            ),
+            pw.SizedBox(height: 12),
+            if (rows.isEmpty)
+              pw.Text('Aucun produit en stock.')
+            else
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300),
+                columnWidths: {
+                  0: const pw.FixedColumnWidth(44),
+                  1: const pw.FlexColumnWidth(4),
+                  2: const pw.FlexColumnWidth(2),
+                  3: const pw.FlexColumnWidth(2),
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(
+                      color: PdfColors.grey200,
+                    ),
+                    children: [
+                      _pdfCell('Mini'),
+                      _pdfCell('Produit'),
+                      _pdfCell('SKU'),
+                      _pdfCell('Qté', align: pw.TextAlign.right),
+                    ],
+                  ),
+                  ...rows.map((r) {
+                    final imgBytes = imageByProductId[r.productId];
+                    return pw.TableRow(
+                      children: [
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.all(4),
+                          child: pw.SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: imgBytes != null
+                                ? pw.Image(
+                                    pw.MemoryImage(imgBytes),
+                                    fit: pw.BoxFit.cover,
+                                  )
+                                : pw.Container(
+                                    color: PdfColors.grey300,
+                                    child: pw.Center(
+                                      child: pw.Text(
+                                        '—',
+                                        style: const pw.TextStyle(fontSize: 10),
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        _pdfCell(r.productName),
+                        _pdfCell(
+                          (r.sku?.trim().isNotEmpty ?? false)
+                              ? r.sku!.trim()
+                              : '—',
+                        ),
+                        _pdfCell('${r.quantity}', align: pw.TextAlign.right),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+          ],
+        ),
+      );
+      final bytes = Uint8List.fromList(await doc.save());
+      final saved = await saveBytesFile(
+        dialogTitle: 'Enregistrer le PDF',
+        filename:
+            'produits-depot-${DateFormat('yyyy-MM-dd').format(DateTime.now())}.pdf',
+        bytes: bytes,
+        allowedExtensions: const ['pdf'],
+      );
+      if (!mounted) return;
+      if (saved) {
+        AppToast.success(context, 'PDF des produits exporté.');
+      }
+    } catch (e, st) {
+      if (!mounted) return;
+      AppErrorHandler.log(e, st);
+      AppToast.error(
+        context,
+        AppErrorHandler.toUserMessage(e, fallback: 'Export PDF impossible.'),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingProductsPdf = false);
+    }
+  }
+
   Future<void> _showAdjustmentDialog(WarehouseStockLine line) async {
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     if (companyId == null) return;
@@ -222,13 +433,14 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
       stores = company.stores;
     }
     if (stores.isEmpty) {
-      AppToast.info(context, 'Aucune boutique disponible pour recevoir le transfert.');
+      AppToast.info(
+        context,
+        'Aucune boutique disponible pour recevoir le transfert.',
+      );
       return;
     }
-    final inv = ref
-            .read(warehouseInventoryStreamProvider(companyId))
-            .valueOrNull ??
-        [];
+    final inv =
+        ref.read(warehouseInventoryStreamProvider(companyId)).valueOrNull ?? [];
     final warehouseQty = {for (final l in inv) l.productId: l.quantity};
     final userId = context.read<AuthProvider>().user?.id;
     if (!mounted) return;
@@ -257,11 +469,9 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
           ref.invalidate(transfersStreamProvider(companyId));
           if (userId != null && ConnectivityService.instance.isOnline) {
             unawaited(
-              ref.read(syncServiceV2Provider).sync(
-                    userId: userId,
-                    companyId: companyId,
-                    storeId: null,
-                  ),
+              ref
+                  .read(syncServiceV2Provider)
+                  .sync(userId: userId, companyId: companyId, storeId: null),
             );
           }
         },
@@ -280,7 +490,8 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     if (companyId == null) return;
     final isPendingLocal = t.id.startsWith('pending:');
-    final canDelete = isPendingLocal ||
+    final canDelete =
+        isPendingLocal ||
         t.status == TransferStatus.draft ||
         t.status == TransferStatus.cancelled;
     if (!canDelete) return;
@@ -289,14 +500,16 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
-          isPendingLocal ? 'Supprimer ce brouillon ?' : 'Supprimer ce transfert ?',
+          isPendingLocal
+              ? 'Supprimer ce brouillon ?'
+              : 'Supprimer ce transfert ?',
         ),
         content: Text(
           isPendingLocal
               ? 'Ce transfert n’a pas encore été synchronisé. Il sera définitivement retiré.'
               : t.status == TransferStatus.cancelled
-                  ? 'Le transfert annulé sera définitivement supprimé de l’historique.'
-                  : 'Le brouillon sera définitivement supprimé.',
+              ? 'Le transfert annulé sera définitivement supprimé de l’historique.'
+              : 'Le brouillon sera définitivement supprimé.',
         ),
         actions: [
           TextButton(
@@ -319,15 +532,29 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
       if (isPendingLocal) {
         await _removePendingTransferLocal(t.id);
       } else {
-        await _transfersRepo.deletePermanently(t.id);
-        await ref.read(appDatabaseProvider).deleteLocalTransfer(t.id);
+        if (ConnectivityService.instance.isOnline) {
+          await _transfersRepo.deletePermanently(t.id);
+          await ref.read(appDatabaseProvider).deleteLocalTransfer(t.id);
+        } else {
+          await ref
+              .read(appDatabaseProvider)
+              .enqueuePendingAction(
+                'transfer_delete',
+                jsonEncode({'transfer_id': t.id}),
+              );
+          await ref.read(appDatabaseProvider).deleteLocalTransfer(t.id);
+        }
       }
       ref.invalidate(transfersStreamProvider(companyId));
       await _load(force: true, silent: true);
       if (mounted) {
         AppToast.success(
           context,
-          isPendingLocal ? 'Brouillon supprimé' : 'Transfert supprimé',
+          isPendingLocal
+              ? 'Brouillon supprimé'
+              : (ConnectivityService.instance.isOnline
+                    ? 'Transfert supprimé'
+                    : 'Suppression enregistrée hors ligne. Synchronisation à la reconnexion.'),
         );
       }
     } catch (e, st) {
@@ -340,7 +567,8 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     final company = context.read<CompanyProvider>();
     final companyId = company.currentCompanyId ?? '';
     if (companyId.isEmpty) return;
-    var stores = ref.read(storesStreamProvider(companyId)).valueOrNull ?? <Store>[];
+    var stores =
+        ref.read(storesStreamProvider(companyId)).valueOrNull ?? <Store>[];
     if (stores.isEmpty && company.stores.isNotEmpty) {
       stores = company.stores;
     }
@@ -382,63 +610,66 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   Future<void> _openActionsMenu() async {
     final companyId = context.read<CompanyProvider>().currentCompanyId;
     if (companyId == null) return;
-    final actions = <({
-      String id,
-      IconData icon,
-      String title,
-      String subtitle,
-      Color color,
-    })>[
-      (
-        id: 'entry',
-        icon: Icons.add_circle_outline_rounded,
-        title: 'Réception au dépôt',
-        subtitle: 'Arrivées, quantités, prix d’achat',
-        color: WarehouseUi.accentEmerald,
-      ),
-      (
-        id: 'products',
-        icon: Icons.category_rounded,
-        title: 'Catalogue produits',
-        subtitle: 'Créer ou modifier des articles (dépôt et boutiques)',
-        color: WarehouseUi.accentViolet,
-      ),
-      (
-        id: 'transfer',
-        icon: Icons.swap_horiz_rounded,
-        title: 'Transfert vers une boutique',
-        subtitle: 'Envoyer du stock du dépôt vers une boutique',
-        color: WarehouseUi.accentBlue,
-      ),
-      (
-        id: 'sales',
-        icon: Icons.point_of_sale_rounded,
-        title: 'Ventes en caisse',
-        subtitle: 'Nouvelles ventes en boutique',
-        color: WarehouseUi.accentOrange,
-      ),
-      (
-        id: 'dispatch',
-        icon: Icons.receipt_long_rounded,
-        title: 'Facture / bon de sortie dépôt',
-        subtitle: 'Sortie de produits avec document',
-        color: WarehouseUi.accentTeal,
-      ),
-      (
-        id: 'dispatch_history',
-        icon: Icons.article_rounded,
-        title: 'Historique des bons',
-        subtitle: 'Voir les bons/factures et imprimer en A4',
-        color: WarehouseUi.accentBlue,
-      ),
-      (
-        id: 'exit',
-        icon: Icons.link_rounded,
-        title: 'Rattacher une vente déjà validée',
-        subtitle: 'Cas exceptionnel : sortie dépôt après coup',
-        color: WarehouseUi.accentRose,
-      ),
-    ];
+    final actions =
+        <
+          ({
+            String id,
+            IconData icon,
+            String title,
+            String subtitle,
+            Color color,
+          })
+        >[
+          (
+            id: 'entry',
+            icon: Icons.add_circle_outline_rounded,
+            title: 'Réception au dépôt',
+            subtitle: 'Arrivées, quantités, prix d’achat',
+            color: WarehouseUi.accentEmerald,
+          ),
+          (
+            id: 'products',
+            icon: Icons.category_rounded,
+            title: 'Catalogue produits',
+            subtitle: 'Créer ou modifier des articles (dépôt et boutiques)',
+            color: WarehouseUi.accentViolet,
+          ),
+          (
+            id: 'transfer',
+            icon: Icons.swap_horiz_rounded,
+            title: 'Transfert vers une boutique',
+            subtitle: 'Envoyer du stock du dépôt vers une boutique',
+            color: WarehouseUi.accentBlue,
+          ),
+          (
+            id: 'sales',
+            icon: Icons.point_of_sale_rounded,
+            title: 'Ventes en caisse',
+            subtitle: 'Nouvelles ventes en boutique',
+            color: WarehouseUi.accentOrange,
+          ),
+          (
+            id: 'dispatch',
+            icon: Icons.receipt_long_rounded,
+            title: 'Facture / bon de sortie dépôt',
+            subtitle: 'Sortie de produits avec document',
+            color: WarehouseUi.accentTeal,
+          ),
+          (
+            id: 'dispatch_history',
+            icon: Icons.article_rounded,
+            title: 'Historiques des bons',
+            subtitle: 'Voir les bons/factures et imprimer en A4',
+            color: WarehouseUi.accentBlue,
+          ),
+          (
+            id: 'exit',
+            icon: Icons.link_rounded,
+            title: 'Rattacher une vente déjà validée',
+            subtitle: 'Cas exceptionnel : sortie dépôt après coup',
+            color: WarehouseUi.accentRose,
+          ),
+        ];
     final choice = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -455,7 +686,9 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
           return DecoratedBox(
             decoration: BoxDecoration(
               color: scheme.surface,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
             ),
             child: ListView(
               controller: scrollController,
@@ -571,11 +804,9 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
               companyId,
               () async {
                 if (uid == null) return;
-                await ref.read(syncServiceV2Provider).sync(
-                      userId: uid,
-                      companyId: companyId,
-                      storeId: null,
-                    );
+                await ref
+                    .read(syncServiceV2Provider)
+                    .sync(userId: uid, companyId: companyId, storeId: null);
               },
             );
           },
@@ -600,7 +831,8 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
   Widget build(BuildContext context) {
     final permissions = context.watch<PermissionsProvider>();
     final company = context.watch<CompanyProvider>();
-    final warehouseModuleOn = company.currentCompany?.warehouseFeatureEnabled ?? true;
+    final warehouseModuleOn =
+        company.currentCompany?.warehouseFeatureEnabled ?? true;
     if (permissions.hasLoaded && !permissions.canManageWarehouse) {
       return Scaffold(
         appBar: AppBar(
@@ -644,7 +876,9 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
         ),
       );
     }
-    if (permissions.hasLoaded && permissions.canManageWarehouse && !warehouseModuleOn) {
+    if (permissions.hasLoaded &&
+        permissions.canManageWarehouse &&
+        !warehouseModuleOn) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('Magasin'),
@@ -691,15 +925,18 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     final companyId = company.currentCompanyId ?? '';
     final invAsync = ref.watch(warehouseInventoryStreamProvider(companyId));
     final movAsync = ref.watch(warehouseMovementsStreamProvider(companyId));
+    final dispatchAsync = ref.watch(
+      warehouseDispatchInvoicesStreamProvider(companyId),
+    );
     final transfersAsync = ref.watch(transfersStreamProvider(companyId));
     final inventory = invAsync.valueOrNull ?? [];
     final movements = movAsync.valueOrNull ?? [];
     final warehouseTransfers = (transfersAsync.valueOrNull ?? [])
         .where((t) => t.fromWarehouse)
         .toList();
-    final storeNamesById = {
-      for (final s in company.stores) s.id: s.name,
-    };
+    final dispatchRows = dispatchAsync.valueOrNull ?? [];
+    _ensureDispatchTotalsLoaded(dispatchRows);
+    final storeNamesById = {for (final s in company.stores) s.id: s.name};
     final streamErr = invAsync.error ?? movAsync.error;
     final dashboard = companyId.isEmpty
         ? null
@@ -734,9 +971,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                 fontSize: 15,
               ),
               indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(
-                color: const Color(0xFFF97316),
-              ),
+              indicator: BoxDecoration(color: const Color(0xFFF97316)),
               dividerHeight: 0,
               overlayColor: const WidgetStatePropertyAll(Colors.transparent),
               tabs: const [
@@ -775,9 +1010,16 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                     controller: _tabController,
                     children: [
                       RefreshIndicator(
-                                onRefresh: () => _load(force: true),
+                        onRefresh: () => _load(force: true),
                         child: _DashboardTab(
                           summary: dashboard,
+                          inventory: inventory,
+                          movements: movements,
+                          warehouseTransfers: warehouseTransfers,
+                          dispatchRows: dispatchRows,
+                          dispatchTotalsByInvoiceId: _dispatchTotalsByInvoiceId,
+                          dispatchPaidAmountFromNotes:
+                              _dispatchPaidAmountFromNotes,
                           onOpenShortcuts: () =>
                               context.go(AppRoutes.purchases),
                           onOpenReception: () {
@@ -787,11 +1029,19 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                             _openDispatchDialog();
                           },
                           onOpenProducts: () => _tabController.animateTo(1),
+                          onOpenProductsPdf: () => _exportWarehouseProductsPdf(
+                            inventory: inventory,
+                            companyName:
+                                company.currentCompany?.name ?? 'Entreprise',
+                          ),
+                          exportingProductsPdf: _exportingProductsPdf,
                           onOpenTransfers: _openWarehouseTransferDialog,
+                          onOpenDispatchHistory: () =>
+                              _tabController.animateTo(4),
                         ),
                       ),
                       RefreshIndicator(
-                                onRefresh: () => _load(force: true),
+                        onRefresh: () => _load(force: true),
                         child: _StockTab(
                           lines: inventory,
                           onEditThreshold: companyId.isEmpty
@@ -803,7 +1053,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                         ),
                       ),
                       RefreshIndicator(
-                                onRefresh: () => _load(force: true),
+                        onRefresh: () => _load(force: true),
                         child: _MovementsTab(
                           movements: movements,
                           companyId: companyId,
@@ -842,23 +1092,23 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
               _error == null &&
               streamErr == null
           ? (MediaQuery.sizeOf(context).width < 900
-              ? FloatingActionButton(
-                  onPressed: _openActionsMenu,
-                  backgroundColor: const Color(0xFFF97316),
-                  foregroundColor: Colors.white,
-                  elevation: 4,
-                  highlightElevation: 8,
-                  child: const Icon(Icons.add),
-                )
-              : FloatingActionButton.extended(
-                  onPressed: _openActionsMenu,
-                  backgroundColor: const Color(0xFFF97316),
-                  foregroundColor: Colors.white,
-                  elevation: 4,
-                  highlightElevation: 8,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Gérer le dépôt'),
-                ))
+                ? FloatingActionButton(
+                    onPressed: _openActionsMenu,
+                    backgroundColor: const Color(0xFFF97316),
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    highlightElevation: 8,
+                    child: const Icon(Icons.add),
+                  )
+                : FloatingActionButton.extended(
+                    onPressed: _openActionsMenu,
+                    backgroundColor: const Color(0xFFF97316),
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    highlightElevation: 8,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Gérer le dépôt'),
+                  ))
           : null,
     );
   }
@@ -957,7 +1207,7 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
       _lastLoadedCompanyId = cid;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-          if (context.read<CompanyProvider>().currentCompanyId == cid) _load();
+        if (context.read<CompanyProvider>().currentCompanyId == cid) _load();
       });
     }
   }
@@ -968,12 +1218,16 @@ class _WarehouseHubCard extends StatelessWidget {
     required this.onReception,
     required this.onInvoice,
     required this.onProducts,
+    required this.onProductsPdf,
+    required this.exportingProductsPdf,
     required this.onTransfers,
   });
 
   final VoidCallback onReception;
   final VoidCallback onInvoice;
   final VoidCallback onProducts;
+  final VoidCallback onProductsPdf;
+  final bool exportingProductsPdf;
   final VoidCallback onTransfers;
 
   @override
@@ -1033,9 +1287,20 @@ class _WarehouseHubCard extends StatelessWidget {
                   foregroundColor: const Color(0xFF7C3AED),
                 ),
                 _WarehouseHubActionPill(
+                  onPressed: exportingProductsPdf ? null : onProductsPdf,
+                  icon: exportingProductsPdf
+                      ? Icons.hourglass_top_rounded
+                      : Icons.picture_as_pdf_rounded,
+                  label: exportingProductsPdf
+                      ? 'Export PDF...'
+                      : 'Produits PDF',
+                  backgroundColor: const Color(0xFFFEE2E2),
+                  foregroundColor: const Color(0xFFB91C1C),
+                ),
+                _WarehouseHubActionPill(
                   onPressed: onTransfers,
                   icon: Icons.swap_horiz_rounded,
-                  label: 'Transferts',
+                  label: 'Transfert',
                   backgroundColor: const Color(0xFFDCE5F3),
                   foregroundColor: const Color(0xFF2563EB),
                 ),
@@ -1057,7 +1322,7 @@ class _WarehouseHubActionPill extends StatelessWidget {
     required this.foregroundColor,
   });
 
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final IconData icon;
   final String label;
   final Color backgroundColor;
@@ -1070,22 +1335,29 @@ class _WarehouseHubActionPill extends StatelessWidget {
       icon: Icon(icon, size: 20, color: foregroundColor),
       label: Text(
         label,
-        style: TextStyle(
-          color: foregroundColor,
-          fontWeight: FontWeight.w700,
-        ),
+        style: TextStyle(color: foregroundColor, fontWeight: FontWeight.w700),
       ),
       style: OutlinedButton.styleFrom(
         backgroundColor: backgroundColor,
         side: BorderSide.none,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
     );
   }
 }
 
-class _WarehouseTransfersTab extends StatelessWidget {
+const Map<TransferStatus, String> _warehouseTransferStatusLabels = {
+  TransferStatus.draft: 'Brouillon',
+  TransferStatus.pending: 'En attente',
+  TransferStatus.approved: 'Approuvé',
+  TransferStatus.shipped: 'Expédié',
+  TransferStatus.received: 'Réceptionné',
+  TransferStatus.rejected: 'Rejeté',
+  TransferStatus.cancelled: 'Annulé',
+};
+
+class _WarehouseTransfersTab extends StatefulWidget {
   const _WarehouseTransfersTab({
     required this.transfers,
     required this.storeNamesById,
@@ -1100,6 +1372,23 @@ class _WarehouseTransfersTab extends StatelessWidget {
   final void Function(StockTransfer transfer) onOpenTransfer;
   final void Function(StockTransfer transfer) onDeleteTransfer;
 
+  @override
+  State<_WarehouseTransfersTab> createState() => _WarehouseTransfersTabState();
+}
+
+class _WarehouseTransfersTabState extends State<_WarehouseTransfersTab> {
+  static const int _pageSize = 20;
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+  TransferStatus? _statusFilter;
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   static bool _canDeleteTransfer(StockTransfer t) {
     if (t.id.startsWith('pending:')) return true;
     return t.status == TransferStatus.draft ||
@@ -1108,7 +1397,7 @@ class _WarehouseTransfersTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (transfers.isEmpty) {
+    if (widget.transfers.isEmpty) {
       return ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [
@@ -1131,7 +1420,7 @@ class _WarehouseTransfersTab extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
-                    onPressed: onCreateTransfer,
+                    onPressed: widget.onCreateTransfer,
                     icon: const Icon(Icons.swap_horiz_rounded),
                     label: const Text('Nouveau transfert'),
                   ),
@@ -1143,57 +1432,199 @@ class _WarehouseTransfersTab extends StatelessWidget {
       );
     }
 
-    final sorted = [...transfers]
+    final sorted = [...widget.transfers]
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final q = _query.trim().toLowerCase();
+    final filtered = sorted.where((t) {
+      if (_statusFilter != null && t.status != _statusFilter) return false;
+      if (q.isEmpty) return true;
+      final toName = widget.storeNamesById[t.toStoreId]?.toLowerCase() ?? '';
+      final createdAt = _formatDate(t.createdAt).toLowerCase();
+      return toName.contains(q) || createdAt.contains(q);
+    }).toList();
+    final totalPages = filtered.isEmpty
+        ? 1
+        : ((filtered.length - 1) ~/ _pageSize) + 1;
+    final clampedPage = _page.clamp(0, totalPages - 1);
+    final start = clampedPage * _pageSize;
+    final end = (start + _pageSize).clamp(0, filtered.length);
+    final paged = filtered.sublist(start, end);
+
+    final hasPagination = filtered.isNotEmpty;
+    final itemCount = 1 + 1 + (hasPagination ? 1 : 0);
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-      itemCount: sorted.length + 1,
+      itemCount: itemCount,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, i) {
         if (i == 0) {
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: onCreateTransfer,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Nouveau transfert'),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: widget.onCreateTransfer,
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Nouveau transfert'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _searchCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'Rechercher boutique destination ou date',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+                onChanged: (v) => setState(() {
+                  _query = v;
+                  _page = 0;
+                }),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('Tous'),
+                    selected: _statusFilter == null,
+                    onSelected: (_) => setState(() {
+                      _statusFilter = null;
+                      _page = 0;
+                    }),
+                  ),
+                  ...TransferStatus.values.map(
+                    (s) => ChoiceChip(
+                      label: Text(_warehouseTransferStatusLabels[s] ?? s.value),
+                      selected: _statusFilter == s,
+                      onSelected: (_) => setState(() {
+                        _statusFilter = s;
+                        _page = 0;
+                      }),
+                    ),
+                  ),
+                  if (_query.isNotEmpty || _statusFilter != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() {
+                          _query = '';
+                          _statusFilter = null;
+                          _page = 0;
+                        });
+                      },
+                      icon: const Icon(Icons.clear_all_rounded, size: 18),
+                      label: const Text('Réinitialiser'),
+                    ),
+                ],
+              ),
+              if (filtered.length != widget.transfers.length)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    '${filtered.length} transfert(s) sur ${widget.transfers.length}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+            ],
+          );
+        }
+        if (hasPagination && i == itemCount - 1) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: _WarehousePager(
+              page: clampedPage,
+              totalPages: totalPages,
+              start: start,
+              end: end,
+              totalItems: filtered.length,
+              onPrev: clampedPage > 0
+                  ? () => setState(() => _page = clampedPage - 1)
+                  : null,
+              onNext: clampedPage < totalPages - 1
+                  ? () => setState(() => _page = clampedPage + 1)
+                  : null,
             ),
           );
         }
-        final t = sorted[i - 1];
-        final toName = storeNamesById[t.toStoreId] ?? 'Boutique';
-        return Card(
-          child: ListTile(
-            leading: const Icon(Icons.local_shipping_outlined),
-            title: Text('Dépôt magasin → $toName'),
-            subtitle: Text(
-              _transferCardSubtitle(t),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _StatusBadge(status: t.status),
-                if (_canDeleteTransfer(t)) ...[
-                  const SizedBox(width: 4),
-                  IconButton(
-                    tooltip: 'Supprimer',
-                    icon: Icon(
-                      Icons.delete_outline_rounded,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    onPressed: () => onDeleteTransfer(t),
-                  ),
-                ],
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: Theme.of(context).colorScheme.outline,
+        if (i == 1) {
+          if (filtered.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Aucun transfert ne correspond au filtre.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-              ],
+              ),
+            );
+          }
+          return Card(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(
+                  Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                ),
+                columns: const [
+                  DataColumn(label: Text('Date')),
+                  DataColumn(label: Text('Destination')),
+                  DataColumn(label: Text('Statut')),
+                  DataColumn(label: Text('Articles')),
+                  DataColumn(label: Text('Actions')),
+                ],
+                rows: paged.map((t) {
+                  final toName =
+                      widget.storeNamesById[t.toStoreId] ?? 'Boutique';
+                  final itemsCount = t.items?.length ?? 0;
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(_formatDate(t.createdAt))),
+                      DataCell(
+                        SizedBox(
+                          width: 180,
+                          child: Text(
+                            'Dépôt magasin → $toName',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      DataCell(_StatusBadge(status: t.status)),
+                      DataCell(Text('$itemsCount')),
+                      DataCell(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Ouvrir',
+                              icon: const Icon(Icons.open_in_new_rounded),
+                              onPressed: () => widget.onOpenTransfer(t),
+                            ),
+                            if (_canDeleteTransfer(t))
+                              IconButton(
+                                tooltip: 'Supprimer',
+                                icon: Icon(
+                                  Icons.delete_outline_rounded,
+                                  color: Theme.of(context).colorScheme.error,
+                                ),
+                                onPressed: () => widget.onDeleteTransfer(t),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
             ),
-            onTap: () => onOpenTransfer(t),
-          ),
-        );
+          );
+        }
+        return const SizedBox.shrink();
       },
     );
   }
@@ -1202,29 +1633,15 @@ class _WarehouseTransfersTab extends StatelessWidget {
     try {
       final dt = DateTime.parse(iso).toLocal();
       return DateFormat('dd/MM/yyyy HH:mm').format(dt);
-    } catch (_) {
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'warehouse_page',
+        logContext: const {'phase': 'format_transfer_date'},
+      );
       return '—';
     }
-  }
-
-  String _transferCardSubtitle(StockTransfer t) {
-    final parts = <String>['Créé le ${_formatDate(t.createdAt)}'];
-    final items = t.items;
-    if (items != null && items.isNotEmpty) {
-      final names = items
-          .map((i) => i.productName?.trim())
-          .whereType<String>()
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (names.isNotEmpty) {
-        final shown = names.take(2).join(', ');
-        final extra = items.length > 2 ? ' (+${items.length - 2})' : '';
-        parts.add('$shown$extra');
-      } else {
-        parts.add('${items.length} article(s)');
-      }
-    }
-    return parts.join(' · ');
   }
 }
 
@@ -1236,13 +1653,34 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      TransferStatus.draft => ('Brouillon', Colors.blueGrey),
-      TransferStatus.pending => ('En attente', Colors.orange),
-      TransferStatus.approved => ('Approuvé', Colors.indigo),
-      TransferStatus.shipped => ('Expédié', Colors.blue),
-      TransferStatus.received => ('Reçu', Colors.green),
-      TransferStatus.rejected => ('Rejeté', Colors.red),
-      TransferStatus.cancelled => ('Annulé', Colors.grey),
+      TransferStatus.draft => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.blueGrey,
+      ),
+      TransferStatus.pending => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.orange,
+      ),
+      TransferStatus.approved => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.indigo,
+      ),
+      TransferStatus.shipped => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.blue,
+      ),
+      TransferStatus.received => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.green,
+      ),
+      TransferStatus.rejected => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.red,
+      ),
+      TransferStatus.cancelled => (
+        _warehouseTransferStatusLabels[status]!,
+        Colors.grey,
+      ),
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1264,38 +1702,151 @@ class _StatusBadge extends StatelessWidget {
 class _DashboardTab extends StatelessWidget {
   const _DashboardTab({
     required this.summary,
+    required this.inventory,
+    required this.movements,
+    required this.warehouseTransfers,
+    required this.dispatchRows,
+    required this.dispatchTotalsByInvoiceId,
+    required this.dispatchPaidAmountFromNotes,
     required this.onOpenShortcuts,
     required this.onOpenReception,
     required this.onOpenDispatch,
     required this.onOpenProducts,
+    required this.onOpenProductsPdf,
+    required this.exportingProductsPdf,
     required this.onOpenTransfers,
+    required this.onOpenDispatchHistory,
   });
 
   final WarehouseDashboardSummary? summary;
+  final List<WarehouseStockLine> inventory;
+  final List<WarehouseMovement> movements;
+  final List<StockTransfer> warehouseTransfers;
+  final List<WarehouseDispatchInvoiceSummary> dispatchRows;
+  final Map<String, double> dispatchTotalsByInvoiceId;
+  final double Function(String? notes) dispatchPaidAmountFromNotes;
   final VoidCallback onOpenShortcuts;
   final VoidCallback onOpenReception;
   final VoidCallback onOpenDispatch;
   final VoidCallback onOpenProducts;
+  final VoidCallback onOpenProductsPdf;
+  final bool exportingProductsPdf;
   final VoidCallback onOpenTransfers;
+  final VoidCallback onOpenDispatchHistory;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final s = summary;
-    if (s == null) {
-      return const WarehouseEmptyState(
-        icon: Icons.analytics_outlined,
-        title: 'Aucune donnée agrégée',
-        subtitle:
-            'Synchronisez ou enregistrez des mouvements au dépôt pour voir les indicateurs.',
-      );
-    }
+    final s =
+        summary ??
+        const WarehouseDashboardSummary(
+          valueAtPurchasePrice: 0,
+          valueAtSalePrice: 0,
+          skuCount: 0,
+          lowStockCount: 0,
+          movementsEntries30d: 0,
+          movementsExits30d: 0,
+          chartDayLabels: <String>[],
+          chartEntriesQty: <int>[],
+          chartExitsQty: <int>[],
+        );
 
     final maxChart = [
       ...s.chartEntriesQty,
       ...s.chartExitsQty,
     ].fold<int>(0, (a, b) => a > b ? a : b);
     final maxY = (maxChart * 1.2).clamp(4.0, double.infinity);
+    int thresholdOf(WarehouseStockLine l) =>
+        (l.stockMinWarehouse > 0 ? l.stockMinWarehouse : l.stockMin).clamp(
+          0,
+          1000000,
+        );
+    final lowLines =
+        inventory
+            .map((l) {
+              final threshold = thresholdOf(l);
+              final missingQty = (threshold - l.quantity).clamp(0, 1000000);
+              final estimatedRefillCost =
+                  missingQty * (l.avgUnitCost ?? l.purchasePrice);
+              return (
+                line: l,
+                threshold: threshold,
+                missingQty: missingQty,
+                estimatedRefillCost: estimatedRefillCost,
+              );
+            })
+            .where((x) => x.missingQty > 0)
+            .toList()
+          ..sort(
+            (a, b) => b.estimatedRefillCost.compareTo(a.estimatedRefillCost),
+          );
+    final lowCount = lowLines.length;
+    final healthPct = inventory.isEmpty
+        ? 100
+        : (((inventory.length - lowCount) / inventory.length) * 100)
+              .round()
+              .clamp(0, 100);
+    final netFlow30 = s.movementsEntries30d - s.movementsExits30d;
+    final now = DateTime.now();
+    final sevenDaysAgo = now.subtract(const Duration(days: 7));
+    final dispatchRows7d = dispatchRows.where((r) {
+      final dt = DateTime.tryParse(r.createdAt);
+      if (dt == null) return false;
+      return !dt.isBefore(sevenDaysAgo);
+    }).toList();
+    var dispatchAmount7d = 0.0;
+    var dispatchOutstandingTotal = 0.0;
+    var dispatchPaidTotal = 0.0;
+    var dispatchOpenCount = 0;
+    var dispatchOpen7d = 0.0;
+    for (final d in dispatchRows) {
+      final totalRaw = dispatchTotalsByInvoiceId[d.id];
+      if (totalRaw == null) continue;
+      final total = totalRaw.roundToDouble();
+      final paid = dispatchPaidAmountFromNotes(
+        d.notes,
+      ).clamp(0, total).toDouble();
+      final rem = (total - paid).clamp(0, double.infinity).toDouble();
+      dispatchPaidTotal += paid;
+      dispatchOutstandingTotal += rem;
+      if (rem > 0.005) dispatchOpenCount += 1;
+      final createdAt = DateTime.tryParse(d.createdAt);
+      if (createdAt != null && !createdAt.isBefore(sevenDaysAgo)) {
+        dispatchAmount7d += total;
+        dispatchOpen7d += rem;
+      }
+    }
+    final topLowFiltered = lowLines.take(5).toList();
+    final pendingTransfersCount = warehouseTransfers
+        .where(
+          (t) =>
+              t.status == TransferStatus.draft ||
+              t.status == TransferStatus.pending ||
+              t.status == TransferStatus.approved ||
+              t.status == TransferStatus.shipped,
+        )
+        .length;
+    final movedProductIds30d = movements
+        .where((m) {
+          final dt = m.createdAt == null
+              ? null
+              : DateTime.tryParse(m.createdAt!);
+          return dt != null &&
+              !dt.isBefore(now.subtract(const Duration(days: 30)));
+        })
+        .map((m) => m.productId)
+        .toSet();
+    final dormantTop =
+        inventory
+            .where(
+              (l) =>
+                  !movedProductIds30d.contains(l.productId) && l.quantity > 0,
+            )
+            .toList()
+          ..sort(
+            (a, b) =>
+                (b.quantity * b.salePrice).compareTo(a.quantity * a.salePrice),
+          );
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -1305,6 +1856,8 @@ class _DashboardTab extends StatelessWidget {
           onReception: onOpenReception,
           onInvoice: onOpenDispatch,
           onProducts: onOpenProducts,
+          onProductsPdf: onOpenProductsPdf,
+          exportingProductsPdf: exportingProductsPdf,
           onTransfers: onOpenTransfers,
         ),
         const SizedBox(height: 16),
@@ -1515,6 +2068,273 @@ class _DashboardTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 760;
+            return GridView.count(
+              crossAxisCount: isWide ? 3 : 1,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: isWide ? 2.2 : 3.8,
+              children: [
+                _MiniDecisionCard(
+                  title: 'Sante stock',
+                  value: '$healthPct%',
+                  subtitle: lowCount > 0
+                      ? '$lowCount reference(s) sous seuil'
+                      : 'Aucune alerte de seuil',
+                  valueColor: theme.colorScheme.primary,
+                ),
+                _MiniDecisionCard(
+                  title: 'Pression flux 30 j',
+                  value: '${netFlow30 > 0 ? '+' : ''}$netFlow30',
+                  subtitle: netFlow30 < 0
+                      ? 'Sorties > entrees : risque rupture'
+                      : 'Couverture stable',
+                  valueColor: netFlow30 < 0
+                      ? theme.colorScheme.error
+                      : WarehouseUi.accentEmerald,
+                ),
+                _MiniDecisionCard(
+                  title: 'Sorties 7 j',
+                  value: '${dispatchRows7d.length}',
+                  subtitle: formatCurrency(dispatchAmount7d),
+                  valueColor: theme.colorScheme.onSurface,
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Credit bons de sortie (Magasin)',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: onOpenDispatchHistory,
+                      child: const Text('Ouvrir Historique'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _MiniMetricChip(
+                      label: 'Restant a encaisser',
+                      value: formatCurrency(dispatchOutstandingTotal),
+                      bg: const Color(0xFFFFEDD5),
+                      fg: const Color(0xFFB45309),
+                    ),
+                    _MiniMetricChip(
+                      label: 'Deja encaisse',
+                      value: formatCurrency(dispatchPaidTotal),
+                      bg: const Color(0xFFD1FAE5),
+                      fg: const Color(0xFF047857),
+                    ),
+                    _MiniMetricChip(
+                      label: 'Dossiers ouverts',
+                      value: '$dispatchOpenCount',
+                      bg: const Color(0xFFDBEAFE),
+                      fg: const Color(0xFF1D4ED8),
+                    ),
+                    _MiniMetricChip(
+                      label: 'Reste 7 jours',
+                      value: formatCurrency(dispatchOpen7d),
+                      bg: const Color(0xFFFEF3C7),
+                      fg: const Color(0xFFB45309),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Priorites de reapprovisionnement',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (topLowFiltered.isNotEmpty)
+                      TextButton(
+                        onPressed: onOpenProducts,
+                        child: const Text('Voir stock depot'),
+                      ),
+                  ],
+                ),
+                if (topLowFiltered.isEmpty)
+                  Text(
+                    'Aucune priorite immediate. Les seuils sont couverts.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  )
+                else
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Produit')),
+                        DataColumn(label: Text('Qte'), numeric: true),
+                        DataColumn(label: Text('Seuil'), numeric: true),
+                        DataColumn(label: Text('Manquant'), numeric: true),
+                        DataColumn(label: Text('Budget estime'), numeric: true),
+                      ],
+                      rows: topLowFiltered.map((x) {
+                        final l = x.line;
+                        final threshold = x.threshold;
+                        final missing = x.missingQty;
+                        final budget = x.estimatedRefillCost;
+                        return DataRow(
+                          cells: [
+                            DataCell(
+                              SizedBox(
+                                width: 220,
+                                child: Text(
+                                  l.productName,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            DataCell(Text('${l.quantity}')),
+                            DataCell(Text('$threshold')),
+                            DataCell(
+                              Text(
+                                '$missing',
+                                style: TextStyle(
+                                  color: theme.colorScheme.error,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            DataCell(Text(formatCurrency(budget))),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 760;
+            return GridView.count(
+              crossAxisCount: isWide ? 2 : 1,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              mainAxisSpacing: 8,
+              crossAxisSpacing: 8,
+              childAspectRatio: isWide ? 2.4 : 3.8,
+              children: [
+                _MiniDecisionCard(
+                  title: 'Transferts a traiter',
+                  value: '$pendingTransfersCount',
+                  subtitle: 'Brouillons / en attente / approuves / expedies',
+                  valueColor: theme.colorScheme.onSurface,
+                  actionLabel: 'Ouvrir Transfert',
+                  onTap: onOpenTransfers,
+                ),
+                Card(
+                  elevation: 0,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Stock dormant (30 j)',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (dormantTop.isEmpty)
+                          Text(
+                            'Aucun article dormant significatif detecte.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          )
+                        else
+                          ...dormantTop.take(3).map((l) {
+                            final amount = l.quantity * l.salePrice;
+                            return Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(top: 6),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.4),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      l.productName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    formatCurrency(amount),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        const SizedBox(height: 12),
         OutlinedButton.icon(
           onPressed: onOpenShortcuts,
           icon: const Icon(Icons.local_shipping_rounded),
@@ -1543,6 +2363,113 @@ class _LegendDot extends StatelessWidget {
         const SizedBox(width: 6),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
+    );
+  }
+}
+
+class _MiniDecisionCard extends StatelessWidget {
+  const _MiniDecisionCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.valueColor,
+    this.actionLabel,
+    this.onTap,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+  final Color valueColor;
+  final String? actionLabel;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: valueColor,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (actionLabel != null && onTap != null) ...[
+              const SizedBox(height: 4),
+              TextButton(onPressed: onTap, child: Text(actionLabel!)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniMetricChip extends StatelessWidget {
+  const _MiniMetricChip({
+    required this.label,
+    required this.value,
+    required this.bg,
+    required this.fg,
+  });
+
+  final String label;
+  final String value;
+  final Color bg;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 180),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: fg.withValues(alpha: 0.85)),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: fg,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1641,6 +2568,80 @@ class _StockTabState extends State<_StockTab> {
     super.dispose();
   }
 
+  Future<void> _openImagePreview(String imageUrl) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(16),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              minScale: 0.7,
+              maxScale: 4,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) => SizedBox(
+                  width: 320,
+                  height: 240,
+                  child: Center(
+                    child: Text(
+                      'Image indisponible',
+                      style: Theme.of(ctx).textTheme.bodyMedium,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton.filledTonal(
+                onPressed: () => Navigator.of(ctx).pop(),
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Fermer',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stockThumb(String? imageUrl) {
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(Icons.image_not_supported_outlined, size: 16),
+      );
+    }
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => _openImagePreview(imageUrl),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.network(
+          imageUrl,
+          width: 30,
+          height: 30,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => Container(
+            width: 30,
+            height: 30,
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const Icon(Icons.broken_image_outlined, size: 16),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.lines.isEmpty) {
@@ -1665,14 +2666,16 @@ class _StockTabState extends State<_StockTab> {
       return l.productName.toLowerCase().contains(q) ||
           (l.sku ?? '').toLowerCase().contains(q);
     }).toList();
-    final totalPages = filtered.isEmpty ? 1 : ((filtered.length - 1) ~/ _pageSize) + 1;
+    final totalPages = filtered.isEmpty
+        ? 1
+        : ((filtered.length - 1) ~/ _pageSize) + 1;
     final clampedPage = _page.clamp(0, totalPages - 1);
     final start = clampedPage * _pageSize;
     final end = (start + _pageSize).clamp(0, filtered.length);
     final paged = filtered.sublist(start, end);
 
     final hasPagination = filtered.isNotEmpty;
-    final itemCount = 1 + paged.length + (hasPagination ? 1 : 0);
+    final itemCount = 1 + 1 + (hasPagination ? 1 : 0);
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
       itemCount: itemCount,
@@ -1708,75 +2711,67 @@ class _StockTabState extends State<_StockTab> {
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: _filter == _StockFilter.all
-                          ? Theme.of(context).colorScheme.onPrimaryContainer
-                          : Theme.of(context).colorScheme.onSurface,
+                          ? Colors.white
+                          : const Color(0xFF1F2937),
                     ),
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHigh,
-                    selectedColor: Theme.of(
-                      context,
-                    ).colorScheme.primaryContainer,
+                    backgroundColor: const Color(0xFFF3F4F6),
+                    selectedColor: const Color(0xFFF97316),
                     side: BorderSide(
                       color: _filter == _StockFilter.all
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.outlineVariant,
+                          ? const Color(0xFFEA580C)
+                          : const Color(0xFFD1D5DB),
                     ),
-                    checkmarkColor: Theme.of(context).colorScheme.primary,
+                    checkmarkColor: _filter == _StockFilter.all
+                        ? Colors.white
+                        : const Color(0xFF6B7280),
                   ),
                   ChoiceChip(
                     label: const Text('En alerte'),
                     selected: _filter == _StockFilter.lowOnly,
-                    onSelected: (_) =>
-                        setState(() {
-                          _filter = _StockFilter.lowOnly;
-                          _page = 0;
-                        }),
+                    onSelected: (_) => setState(() {
+                      _filter = _StockFilter.lowOnly;
+                      _page = 0;
+                    }),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: _filter == _StockFilter.lowOnly
-                          ? Theme.of(context).colorScheme.onErrorContainer
-                          : Theme.of(context).colorScheme.onSurface,
+                          ? Colors.white
+                          : const Color(0xFF1F2937),
                     ),
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHigh,
-                    selectedColor: Theme.of(
-                      context,
-                    ).colorScheme.errorContainer,
+                    backgroundColor: const Color(0xFFFFF1F2),
+                    selectedColor: const Color(0xFFDC2626),
                     side: BorderSide(
                       color: _filter == _StockFilter.lowOnly
-                          ? Theme.of(context).colorScheme.error
-                          : Theme.of(context).colorScheme.outlineVariant,
+                          ? const Color(0xFFB91C1C)
+                          : const Color(0xFFFECACA),
                     ),
-                    checkmarkColor: Theme.of(context).colorScheme.error,
+                    checkmarkColor: _filter == _StockFilter.lowOnly
+                        ? Colors.white
+                        : const Color(0xFFB91C1C),
                   ),
                   ChoiceChip(
                     label: const Text('Stock OK'),
                     selected: _filter == _StockFilter.okOnly,
-                    onSelected: (_) =>
-                        setState(() {
-                          _filter = _StockFilter.okOnly;
-                          _page = 0;
-                        }),
+                    onSelected: (_) => setState(() {
+                      _filter = _StockFilter.okOnly;
+                      _page = 0;
+                    }),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.w700,
                       color: _filter == _StockFilter.okOnly
-                          ? Theme.of(context).colorScheme.onTertiaryContainer
-                          : Theme.of(context).colorScheme.onSurface,
+                          ? Colors.white
+                          : const Color(0xFF1F2937),
                     ),
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHigh,
-                    selectedColor: Theme.of(
-                      context,
-                    ).colorScheme.tertiaryContainer,
+                    backgroundColor: const Color(0xFFECFDF5),
+                    selectedColor: const Color(0xFF059669),
                     side: BorderSide(
                       color: _filter == _StockFilter.okOnly
-                          ? Theme.of(context).colorScheme.tertiary
-                          : Theme.of(context).colorScheme.outlineVariant,
+                          ? const Color(0xFF047857)
+                          : const Color(0xFFA7F3D0),
                     ),
-                    checkmarkColor: Theme.of(context).colorScheme.tertiary,
+                    checkmarkColor: _filter == _StockFilter.okOnly
+                        ? Colors.white
+                        : const Color(0xFF047857),
                   ),
                   if (_query.isNotEmpty || _filter != _StockFilter.all)
                     TextButton.icon(
@@ -1824,170 +2819,133 @@ class _StockTabState extends State<_StockTab> {
             ),
           );
         }
-        final l = paged[i - 1];
-        final threshold = l.stockMinWarehouse > 0
-            ? l.stockMinWarehouse
-            : l.stockMin;
-        final th = l.stockMinWarehouse > 0
-            ? 'Seuil magasin ${l.stockMinWarehouse}'
-            : 'Seuil produit ${l.stockMin}';
-        final theme = Theme.of(context);
-        final sub =
-            '${l.quantity} ${l.unit}${l.sku != null && l.sku!.isNotEmpty ? ' · SKU ${l.sku}' : ''} · $th';
-        return Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(WarehouseUi.radiusMd),
-            side: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 6, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    WarehouseProductThumbnail(imageUrl: l.imageUrl),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            l.productName,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 17,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            sub,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              height: 1.2,
-                              fontSize: 12,
-                            ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (widget.onAdjustStock != null)
-                      IconButton(
-                        tooltip: 'Ajuster le stock',
-                        icon: const Icon(Icons.balance_rounded, size: 20),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => widget.onAdjustStock!(l),
-                      ),
-                    if (widget.onEditThreshold != null)
-                      IconButton(
-                        tooltip: 'Seuil magasin',
-                        icon: const Icon(Icons.tune_rounded, size: 20),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => widget.onEditThreshold!(l),
-                      ),
-                  ],
+        if (i == 1) {
+          if (filtered.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Aucun produit ne correspond au filtre.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  alignment: WrapAlignment.spaceBetween,
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: l.isLowStock
-                            ? const Color(0xFFFDECEC)
-                            : const Color(0xFFEAF7EC),
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(
-                          color: l.isLowStock
-                              ? const Color(0xFFF5B2B2)
-                              : const Color(0xFFA8DBB0),
+              ),
+            );
+          }
+          return Card(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(
+                  Theme.of(
+                    context,
+                  ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                ),
+                columns: const [
+                  DataColumn(label: Text('Produit', softWrap: false)),
+                  DataColumn(label: Text('SKU', softWrap: false)),
+                  DataColumn(
+                    label: Text('Qté', softWrap: false),
+                    numeric: true,
+                  ),
+                  DataColumn(
+                    label: Text('Seuil', softWrap: false),
+                    numeric: true,
+                  ),
+                  DataColumn(label: Text('PA', softWrap: false), numeric: true),
+                  DataColumn(label: Text('PV', softWrap: false), numeric: true),
+                  DataColumn(label: Text('Statut', softWrap: false)),
+                  DataColumn(label: Text('Actions', softWrap: false)),
+                ],
+                rows: paged.map((l) {
+                  final threshold = l.stockMinWarehouse > 0
+                      ? l.stockMinWarehouse
+                      : l.stockMin;
+                  return DataRow(
+                    cells: [
+                      DataCell(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _stockThumb(l.imageUrl),
+                            const SizedBox(width: 8),
+                            Text(l.productName, softWrap: false),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            l.isLowStock
-                                ? Icons.warning_amber_rounded
-                                : Icons.check_circle_rounded,
-                            size: 16,
+                      DataCell(
+                        Text(
+                          l.sku ?? '—',
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      DataCell(Text('${l.quantity}', softWrap: false)),
+                      DataCell(
+                        Text(
+                          '${threshold < 0 ? 0 : threshold}',
+                          softWrap: false,
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          formatCurrency(l.valueAtCost),
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          formatCurrency(l.valueAtSale),
+                          maxLines: 1,
+                          softWrap: false,
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          l.isLowStock ? 'Alerte' : 'OK',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
                             color: l.isLowStock
-                                ? const Color(0xFFB42318)
-                                : const Color(0xFF1E7D34),
+                                ? Theme.of(context).colorScheme.error
+                                : Colors.green.shade700,
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            l.isLowStock ? 'Alerte stock' : 'Stock OK',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: l.isLowStock
-                                  ? const Color(0xFF7A271A)
-                                  : const Color(0xFF14532D),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '${l.quantity} / seuil ${threshold < 0 ? 0 : threshold}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: l.isLowStock
-                                  ? const Color(0xFF9A3412)
-                                  : const Color(0xFF166534),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            formatCurrency(l.valueAtCost),
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            'PV ${formatCurrency(l.valueAtSale)}',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontSize: 11,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                      DataCell(
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (widget.onAdjustStock != null)
+                              IconButton(
+                                tooltip: 'Ajuster le stock',
+                                icon: const Icon(
+                                  Icons.balance_rounded,
+                                  size: 20,
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => widget.onAdjustStock!(l),
+                              ),
+                            if (widget.onEditThreshold != null)
+                              IconButton(
+                                tooltip: 'Seuil magasin',
+                                icon: const Icon(Icons.tune_rounded, size: 20),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => widget.onEditThreshold!(l),
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  );
+                }).toList(),
+              ),
             ),
-          ),
-        );
+          );
+        }
+        return const SizedBox.shrink();
       },
     );
   }
@@ -2008,11 +2966,11 @@ class _MovementsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _MovementsTabPaged(
-        movements: movements,
-        companyId: companyId,
-        warehouseRepo: warehouseRepo,
-        onRefresh: onRefresh,
-      );
+    movements: movements,
+    companyId: companyId,
+    warehouseRepo: warehouseRepo,
+    onRefresh: onRefresh,
+  );
 }
 
 class _MovementsTabPaged extends StatefulWidget {
@@ -2035,8 +2993,18 @@ class _MovementsTabPaged extends StatefulWidget {
 class _MovementsTabPagedState extends State<_MovementsTabPaged> {
   static const int _pageSize = 20;
   int _page = 0;
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+  bool? _entryFilter;
+
   /// Id du bon en cours d’annulation (un seul à la fois).
   String? _voidingInvoiceId;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _confirmVoidDispatchFromMovement(WarehouseMovement m) async {
     final invoiceId = m.referenceId;
@@ -2096,159 +3064,278 @@ class _MovementsTabPagedState extends State<_MovementsTabPaged> {
         subtitle: 'Les entrées, sorties et ajustements apparaîtront ici.',
       );
     }
-    final totalPages = ((movements.length - 1) ~/ _pageSize) + 1;
+    final q = _query.trim().toLowerCase();
+    final filtered = movements.where((m) {
+      if (_entryFilter != null && m.isEntry != _entryFilter) return false;
+      if (q.isEmpty) return true;
+      final product = (m.productName ?? '').toLowerCase();
+      final ref = (m.referenceType).toLowerCase();
+      final date = (m.createdAt ?? '').toLowerCase();
+      return product.contains(q) || ref.contains(q) || date.contains(q);
+    }).toList();
+
+    final totalPages = filtered.isEmpty
+        ? 1
+        : ((filtered.length - 1) ~/ _pageSize) + 1;
     final clampedPage = _page.clamp(0, totalPages - 1);
     final start = clampedPage * _pageSize;
-    final end = (start + _pageSize).clamp(0, movements.length);
-    final paged = movements.sublist(start, end);
+    final end = (start + _pageSize).clamp(0, filtered.length);
+    final paged = filtered.sublist(start, end);
+    final hasPagination = filtered.isNotEmpty;
+    final itemCount = 1 + 1 + (hasPagination ? 1 : 0);
 
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            itemCount: paged.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, i) {
-              final m = paged[i];
-        final dt = m.createdAt != null ? DateTime.tryParse(m.createdAt!) : null;
-        final dateStr = dt != null
-            ? DateFormat('dd/MM/yyyy HH:mm', 'fr_FR').format(dt.toLocal())
-            : '—';
-        final kindLabel = m.isEntry ? 'Entrée' : 'Sortie';
-        final kindColor = m.isEntry
-            ? WarehouseUi.accentEmerald
-            : WarehouseUi.accentOrange;
-        final refLabel = m.referenceType == 'sale'
-            ? 'Vente POS'
-            : m.referenceType == 'stock_transfer'
-            ? 'Transfert boutique'
-            : m.referenceType == 'warehouse_dispatch'
-            ? 'Bon / facture dépôt'
-            : m.referenceType == 'adjustment'
-            ? 'Ajustement inventaire'
-            : (m.referenceType == 'manual' ? 'Manuel' : m.referenceType);
-        final pack =
-            kWarehousePackagingLabels[m.packagingType] ?? m.packagingType;
-        final unitExtra = m.unitCost != null
-            ? (m.isEntry
-                  ? ' · PA ${formatCurrency(m.unitCost!)}'
-                  : m.referenceType == 'warehouse_dispatch'
-                  ? ' · PU ${formatCurrency(m.unitCost!)}'
-                  : '')
-            : '';
-        final line2 =
-            '$dateStr · $kindLabel · ${m.quantity} u. · $pack${m.packsQuantity != 1 ? ' ×${m.packsQuantity}' : ''}';
-        final line3 = '$refLabel$unitExtra';
-        final canVoidBon = m.referenceType == 'warehouse_dispatch' &&
-            m.referenceId != null &&
-            m.referenceId!.isNotEmpty &&
-            widget.companyId.isNotEmpty;
-        final voidingThis = _voidingInvoiceId == m.referenceId;
-
-              return Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(WarehouseUi.radiusMd),
-            side: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.45),
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: kindColor.withValues(alpha: 0.14),
-                  child: Icon(
-                    m.isEntry
-                        ? Icons.south_west_rounded
-                        : Icons.north_east_rounded,
-                    color: kindColor,
-                    size: 20,
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      itemCount: itemCount,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _searchCtrl,
+                decoration: const InputDecoration(
+                  hintText: 'Rechercher produit, référence, date',
+                  prefixIcon: Icon(Icons.search_rounded),
+                ),
+                onChanged: (v) => setState(() {
+                  _query = v;
+                  _page = 0;
+                }),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: Text(
+                      'Tous',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _entryFilter == null
+                            ? Colors.white
+                            : const Color(0xFF1F2937),
+                      ),
+                    ),
+                    selected: _entryFilter == null,
+                    selectedColor: PosQuickColors.orangePrincipal,
+                    backgroundColor: const Color(0xFFF3F4F6),
+                    side: BorderSide(
+                      color: _entryFilter == null
+                          ? PosQuickColors.orangePrincipal
+                          : const Color(0xFFD1D5DB),
+                    ),
+                    onSelected: (_) => setState(() {
+                      _entryFilter = null;
+                      _page = 0;
+                    }),
+                  ),
+                  ChoiceChip(
+                    label: Text(
+                      'Entrées',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _entryFilter == true
+                            ? Colors.white
+                            : const Color(0xFF1F2937),
+                      ),
+                    ),
+                    selected: _entryFilter == true,
+                    selectedColor: PosQuickColors.orangePrincipal,
+                    backgroundColor: const Color(0xFFF3F4F6),
+                    side: BorderSide(
+                      color: _entryFilter == true
+                          ? PosQuickColors.orangePrincipal
+                          : const Color(0xFFD1D5DB),
+                    ),
+                    onSelected: (_) => setState(() {
+                      _entryFilter = true;
+                      _page = 0;
+                    }),
+                  ),
+                  ChoiceChip(
+                    label: Text(
+                      'Sorties',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _entryFilter == false
+                            ? Colors.white
+                            : const Color(0xFF1F2937),
+                      ),
+                    ),
+                    selected: _entryFilter == false,
+                    selectedColor: PosQuickColors.orangePrincipal,
+                    backgroundColor: const Color(0xFFF3F4F6),
+                    side: BorderSide(
+                      color: _entryFilter == false
+                          ? PosQuickColors.orangePrincipal
+                          : const Color(0xFFD1D5DB),
+                    ),
+                    onSelected: (_) => setState(() {
+                      _entryFilter = false;
+                      _page = 0;
+                    }),
+                  ),
+                  if (_query.isNotEmpty || _entryFilter != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() {
+                          _query = '';
+                          _entryFilter = null;
+                          _page = 0;
+                        });
+                      },
+                      icon: const Icon(Icons.clear_all_rounded, size: 18),
+                      label: const Text('Réinitialiser'),
+                    ),
+                ],
+              ),
+              if (filtered.length != movements.length)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${filtered.length} mouvement(s) sur ${movements.length}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        m.productName ?? 'Produit',
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        line2,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          height: 1.35,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        line3,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          height: 1.35,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                if (canVoidBon)
-                  IconButton(
-                    tooltip: 'Annuler ce bon (réintègre le stock)',
-                    onPressed: (_voidingInvoiceId != null && !voidingThis)
-                        ? null
-                        : () => _confirmVoidDispatchFromMovement(m),
-                    icon: voidingThis
-                        ? SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: theme.colorScheme.error,
-                            ),
-                          )
-                        : Icon(
-                            Icons.delete_outline_rounded,
-                            color: theme.colorScheme.error,
-                          ),
-                  ),
-              ],
-            ),
-          ),
-        );
-            },
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-          child: _WarehousePager(
+            ],
+          );
+        }
+        if (hasPagination && i == itemCount - 1) {
+          return _WarehousePager(
             page: clampedPage,
             totalPages: totalPages,
             start: start,
             end: end,
-            totalItems: movements.length,
+            totalItems: filtered.length,
             onPrev: clampedPage > 0
                 ? () => setState(() => _page = clampedPage - 1)
                 : null,
             onNext: clampedPage < totalPages - 1
                 ? () => setState(() => _page = clampedPage + 1)
                 : null,
-          ),
-        ),
-      ],
+          );
+        }
+        if (i == 1) {
+          if (filtered.isEmpty) {
+            return Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                'Aucun mouvement ne correspond au filtre.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            );
+          }
+          return Card(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowColor: WidgetStateProperty.all(
+                  theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.5,
+                  ),
+                ),
+                columns: const [
+                  DataColumn(label: Text('Date')),
+                  DataColumn(label: Text('Produit')),
+                  DataColumn(label: Text('Type')),
+                  DataColumn(label: Text('Qté'), numeric: true),
+                  DataColumn(label: Text('Référence')),
+                  DataColumn(label: Text('Actions')),
+                ],
+                rows: paged.map((m) {
+                  final dt = m.createdAt != null
+                      ? DateTime.tryParse(m.createdAt!)
+                      : null;
+                  final dateStr = dt != null
+                      ? DateFormat(
+                          'dd/MM/yyyy HH:mm',
+                          'fr_FR',
+                        ).format(dt.toLocal())
+                      : '—';
+                  final typeLabel = m.isEntry ? 'Entrée' : 'Sortie';
+                  final refLabel = m.referenceType == 'sale'
+                      ? 'Vente POS'
+                      : m.referenceType == 'stock_transfer'
+                      ? 'Transfert boutique'
+                      : m.referenceType == 'warehouse_dispatch'
+                      ? 'Bon / facture dépôt'
+                      : m.referenceType == 'adjustment'
+                      ? 'Ajustement inventaire'
+                      : (m.referenceType == 'manual'
+                            ? 'Manuel'
+                            : m.referenceType);
+                  final canVoidBon =
+                      m.referenceType == 'warehouse_dispatch' &&
+                      m.referenceId != null &&
+                      m.referenceId!.isNotEmpty &&
+                      widget.companyId.isNotEmpty;
+                  final voidingThis = _voidingInvoiceId == m.referenceId;
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(dateStr)),
+                      DataCell(
+                        SizedBox(
+                          width: 220,
+                          child: Text(
+                            m.productName ?? 'Produit',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      DataCell(Text(typeLabel)),
+                      DataCell(
+                        Text(
+                          '${m.quantity}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: m.isEntry
+                                ? Colors.green.shade700
+                                : theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+                      DataCell(Text(refLabel)),
+                      DataCell(
+                        canVoidBon
+                            ? IconButton(
+                                tooltip: 'Annuler ce bon (réintègre le stock)',
+                                onPressed:
+                                    (_voidingInvoiceId != null && !voidingThis)
+                                    ? null
+                                    : () => _confirmVoidDispatchFromMovement(m),
+                                icon: voidingThis
+                                    ? SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: theme.colorScheme.error,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.delete_outline_rounded,
+                                        color: theme.colorScheme.error,
+                                      ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            ),
+          );
+        }
+        return const SizedBox.shrink();
+      },
     );
   }
 }
@@ -2299,8 +3386,12 @@ class _WarehousePager extends StatelessWidget {
               onPressed: onPrev,
               icon: const Icon(Icons.chevron_left_rounded, size: 26),
               style: IconButton.styleFrom(
-                backgroundColor: onPrev != null ? theme.colorScheme.primary : null,
-                foregroundColor: onPrev != null ? theme.colorScheme.onPrimary : null,
+                backgroundColor: onPrev != null
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: onPrev != null
+                    ? theme.colorScheme.onPrimary
+                    : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -2315,8 +3406,12 @@ class _WarehousePager extends StatelessWidget {
               onPressed: onNext,
               icon: const Icon(Icons.chevron_right_rounded, size: 26),
               style: IconButton.styleFrom(
-                backgroundColor: onNext != null ? theme.colorScheme.primary : null,
-                foregroundColor: onNext != null ? theme.colorScheme.onPrimary : null,
+                backgroundColor: onNext != null
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: onNext != null
+                    ? theme.colorScheme.onPrimary
+                    : null,
               ),
             ),
             if (isNarrow) ...[
@@ -2385,11 +3480,9 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
     final uid = auth.user?.id;
     if (uid == null) return;
     try {
-      await ref.read(syncServiceV2Provider).sync(
-            userId: uid,
-            companyId: widget.companyId,
-            storeId: null,
-          );
+      await ref
+          .read(syncServiceV2Provider)
+          .sync(userId: uid, companyId: widget.companyId, storeId: null);
     } catch (e, st) {
       WarehouseUi.logOp('warehouse_entry_refresh', e, st);
     }
@@ -2526,7 +3619,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
 
     final filtered = products
         .where((p) {
-          if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId) {
+          if (_selectedCategoryId != null &&
+              p.categoryId != _selectedCategoryId) {
             return false;
           }
           if (_filter.isEmpty) return true;
@@ -2575,9 +3669,9 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
           child: Text(
             'Aucun produit pour le moment. Tirez pour actualiser ou attendez la connexion.',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
           ),
         ),
       );
@@ -2592,7 +3686,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
               searching: _searching,
               categories: categories,
               selectedCategoryId: _selectedCategoryId,
-              onCategorySelected: (id) => setState(() => _selectedCategoryId = id),
+              onCategorySelected: (id) =>
+                  setState(() => _selectedCategoryId = id),
               onSearchChanged: _onSearchChanged,
               filteredProducts: filtered,
               selected: _selected,
@@ -2615,7 +3710,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
               packsCtrl: _packsCtrl,
               notesCtrl: _notesCtrl,
               packaging: _packaging,
-              onPackagingChanged: (v) => setState(() => _packaging = v ?? 'unite'),
+              onPackagingChanged: (v) =>
+                  setState(() => _packaging = v ?? 'unite'),
               onFieldsChanged: () => setState(() {}),
               productPreview: productPreview,
               qtyPreview: qtyPreview,
@@ -2639,7 +3735,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
                 searching: _searching,
                 categories: categories,
                 selectedCategoryId: _selectedCategoryId,
-                onCategorySelected: (id) => setState(() => _selectedCategoryId = id),
+                onCategorySelected: (id) =>
+                    setState(() => _selectedCategoryId = id),
                 onSearchChanged: _onSearchChanged,
                 filteredProducts: filtered,
                 selected: _selected,
@@ -2661,7 +3758,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
               packsCtrl: _packsCtrl,
               notesCtrl: _notesCtrl,
               packaging: _packaging,
-              onPackagingChanged: (v) => setState(() => _packaging = v ?? 'unite'),
+              onPackagingChanged: (v) =>
+                  setState(() => _packaging = v ?? 'unite'),
               onFieldsChanged: () => setState(() {}),
               productPreview: productPreview,
               qtyPreview: qtyPreview,
@@ -2691,7 +3789,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
             children: [
               WarehousePosQuickHeader(
                 title: 'Réception au dépôt',
-                subtitle: 'Comme la caisse rapide — choisissez un produit puis les quantités',
+                subtitle:
+                    'Comme la caisse rapide — choisissez un produit puis les quantités',
                 closeEnabled: !_saving,
                 onClose: () => Navigator.pop(context),
               ),
@@ -2709,8 +3808,9 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               OutlinedButton(
-                                onPressed:
-                                    _saving ? null : () => Navigator.pop(context),
+                                onPressed: _saving
+                                    ? null
+                                    : () => Navigator.pop(context),
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 14,
@@ -2723,7 +3823,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
                               ),
                               const SizedBox(height: 10),
                               FilledButton(
-                                onPressed: (listLoading ||
+                                onPressed:
+                                    (listLoading ||
                                         listError != null ||
                                         products.isEmpty ||
                                         _saving)
@@ -2782,7 +3883,8 @@ class _WarehouseEntryDialogState extends ConsumerState<_WarehouseEntryDialog> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: FilledButton(
-                                  onPressed: (listLoading ||
+                                  onPressed:
+                                      (listLoading ||
                                           listError != null ||
                                           products.isEmpty ||
                                           _saving)
@@ -2882,7 +3984,11 @@ class _WarehouseEntryLeftPanel extends StatelessWidget {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         )
-                      : const Icon(Icons.search_rounded, color: PosQuickColors.orangePrincipal, size: 24),
+                      : const Icon(
+                          Icons.search_rounded,
+                          color: PosQuickColors.orangePrincipal,
+                          size: 24,
+                        ),
                 ),
               ),
             ),
@@ -2964,7 +4070,9 @@ class _WarehouseEntryProductGrid extends StatelessWidget {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: sel ? PosQuickColors.orangePrincipal : Colors.transparent,
+                  color: sel
+                      ? PosQuickColors.orangePrincipal
+                      : Colors.transparent,
                   width: sel ? 3 : 0,
                 ),
               ),
@@ -2983,10 +4091,7 @@ class _WarehouseEntryProductGrid extends StatelessWidget {
       return grid;
     }
 
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      child: grid,
-    );
+    return RefreshIndicator(onRefresh: onRefresh, child: grid);
   }
 }
 
@@ -3071,7 +4176,9 @@ class _WarehouseEntryRightPanel extends StatelessWidget {
                       labelText: "Prix d'achat unitaire",
                       suffixText: 'FCFA',
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     onChanged: (_) => onFieldsChanged(),
                   ),
                 ),
@@ -3109,7 +4216,9 @@ class _WarehouseEntryRightPanel extends StatelessWidget {
                       labelText: 'Colis / lots',
                       hintText: '1',
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     onChanged: (_) => onFieldsChanged(),
                   ),
                 ),
@@ -3137,7 +4246,11 @@ class _WarehouseEntryRightPanel extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.receipt_long_rounded, size: 16, color: PosQuickColors.orangePrincipal),
+                      const Icon(
+                        Icons.receipt_long_rounded,
+                        size: 16,
+                        color: PosQuickColors.orangePrincipal,
+                      ),
                       const SizedBox(width: 8),
                       const Expanded(
                         child: Text(
@@ -3164,7 +4277,9 @@ class _WarehouseEntryRightPanel extends StatelessWidget {
                   Text(
                     'Quantité: $qtyPreview $unitPreview · Conditionnement: $packagingPreview · Colis/lots: $packsPreview',
                     style: TextStyle(
-                      color: PosQuickColors.textePrincipal.withValues(alpha: 0.65),
+                      color: PosQuickColors.textePrincipal.withValues(
+                        alpha: 0.65,
+                      ),
                       fontSize: 12,
                     ),
                   ),

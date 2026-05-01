@@ -1,13 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:convert';
 import '../../../core/config/routes.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
@@ -21,6 +19,7 @@ import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../providers/sales_page_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
 import '../../../shared/utils/share_csv.dart';
@@ -85,7 +84,13 @@ String _formatDateTime(String iso) {
   try {
     final d = DateTime.parse(iso);
     return DateFormat('dd/MM/yyyy HH:mm', 'fr_FR').format(d.toLocal());
-  } catch (_) {
+  } catch (e, st) {
+    AppErrorHandler.logWithContext(
+      e,
+      stackTrace: st,
+      logSource: 'sales_page',
+      logContext: {'phase': 'format_datetime', 'raw': iso},
+    );
     return iso;
   }
 }
@@ -234,15 +239,23 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               companyId: company.currentCompanyId,
               storeId: company.currentStoreId,
             );
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'sales_page',
+          logContext: const {'phase': 'manual_refresh_sync'},
+        );
+      }
     }
   }
 
-  void _openDetail(String saleId) {
+  void _openDetail(Sale sale) {
     showDialog<void>(
       context: context,
       builder: (ctx) => SaleDetailDialog(
-        saleId: saleId,
+        saleId: sale.id,
+        initialSale: sale,
         onClose: () => Navigator.of(ctx).pop(),
       ),
     );
@@ -342,7 +355,16 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 'Cette vente était déjà dans un état non annulable sur le serveur. Liste mise à jour.',
               );
             }
-          } catch (_) {
+          } catch (e2, st2) {
+            AppErrorHandler.logWithContext(
+              e2,
+              stackTrace: st2,
+              logSource: 'sales_page',
+              logContext: {
+                'phase': 'cancel_sale_reconcile_after_p0001',
+                'sale_id': sale.id,
+              },
+            );
             if (mounted) AppErrorHandler.show(context, e);
           }
         } else {
@@ -413,7 +435,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final csv = salesToCsv(sales);
     final date = DateTime.now().toIso8601String().substring(0, 10);
     final filename = 'ventes-$date.csv';
-    final bytes = Uint8List.fromList(utf8.encode(csv));
+    final bytes = encodeCsv(csv);
     saveCsvFile(filename: filename, bytes: bytes).then((saved) {
       if (!mounted) return;
       if (saved) AppToast.success(context, 'CSV enregistré');
@@ -556,11 +578,14 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final currentStoreId = company.currentStoreId;
     final stores = company.stores;
     Store? currentStore;
-    try {
-      currentStore = currentStoreId != null
-          ? stores.firstWhere((s) => s.id == currentStoreId)
-          : null;
-    } catch (_) {}
+    if (currentStoreId != null) {
+      for (final s in stores) {
+        if (s.id == currentStoreId) {
+          currentStore = s;
+          break;
+        }
+      }
+    }
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     if (company.loading && company.companies.isEmpty) {
@@ -584,7 +609,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 if (!isWide) ...[
                   Text(
                     'Ventes',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -1446,7 +1473,7 @@ class _SalesTable extends StatelessWidget {
   });
 
   final List<Sale> sales;
-  final void Function(String saleId) onView;
+  final void Function(Sale sale) onView;
   final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
   final Future<void> Function(Sale sale)? onPurgeCancelled;
@@ -1524,7 +1551,7 @@ class _SalesTable extends StatelessWidget {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.visibility_rounded, size: 20),
-                        onPressed: () => onView(s.id),
+                        onPressed: () => onView(s),
                         tooltip: 'Voir le détail',
                       ),
                       if (s.status == SaleStatus.completed && onEdit != null)
@@ -1580,7 +1607,7 @@ class _SalesCardList extends StatelessWidget {
   });
 
   final List<Sale> sales;
-  final void Function(String saleId) onView;
+  final void Function(Sale sale) onView;
   final void Function(Sale sale)? onEdit;
   final void Function(Sale sale) onCancel;
   final Future<void> Function(Sale sale)? onPurgeCancelled;
@@ -1605,7 +1632,7 @@ class _SalesCardList extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
             child: InkWell(
-              onTap: () => onView(s.id),
+              onTap: () => onView(s),
               borderRadius: BorderRadius.circular(12),
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -1683,8 +1710,11 @@ class _SalesCardList extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              icon: const Icon(Icons.open_in_new_rounded, size: 20),
-                              onPressed: () => onView(s.id),
+                              icon: const Icon(
+                                Icons.open_in_new_rounded,
+                                size: 20,
+                              ),
+                              onPressed: () => onView(s),
                               tooltip: 'Voir le détail',
                               style: IconButton.styleFrom(
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1693,7 +1723,8 @@ class _SalesCardList extends StatelessWidget {
                                 minimumSize: const Size(36, 36),
                               ),
                             ),
-                            if (s.status == SaleStatus.completed && onEdit != null)
+                            if (s.status == SaleStatus.completed &&
+                                onEdit != null)
                               IconButton(
                                 icon: Icon(
                                   Icons.edit_outlined,
@@ -1703,7 +1734,8 @@ class _SalesCardList extends StatelessWidget {
                                 onPressed: () => onEdit!(s),
                                 tooltip: 'Modifier la vente',
                                 style: IconButton.styleFrom(
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                   visualDensity: VisualDensity.compact,
                                   padding: const EdgeInsets.all(6),
                                   minimumSize: const Size(36, 36),
@@ -1719,7 +1751,8 @@ class _SalesCardList extends StatelessWidget {
                                 onPressed: () => onCancel(s),
                                 tooltip: 'Annuler la vente',
                                 style: IconButton.styleFrom(
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                   visualDensity: VisualDensity.compact,
                                   padding: const EdgeInsets.all(6),
                                   minimumSize: const Size(36, 36),
@@ -1736,7 +1769,8 @@ class _SalesCardList extends StatelessWidget {
                                 onPressed: () => onPurgeCancelled!(s),
                                 tooltip: 'Purger (propriétaire)',
                                 style: IconButton.styleFrom(
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
                                   visualDensity: VisualDensity.compact,
                                   padding: const EdgeInsets.all(6),
                                   minimumSize: const Size(36, 36),

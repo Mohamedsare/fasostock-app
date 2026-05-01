@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:provider/provider.dart';
@@ -16,6 +15,7 @@ import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../providers/products_page_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
 import '../../../shared/utils/share_csv.dart';
@@ -85,12 +85,25 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final company = context.read<CompanyProvider>();
     final companyId = company.currentCompanyId;
     final storeId = company.currentStoreId;
-    await context.read<ProductsPageProvider>().load(companyId, storeId, force: true);
+    await context.read<ProductsPageProvider>().load(
+      companyId,
+      storeId,
+      force: true,
+    );
     final userId = auth.user?.id;
     if (userId != null) {
       try {
-        await ref.read(syncServiceV2Provider).sync(userId: userId, companyId: companyId, storeId: storeId);
-      } catch (_) {}
+        await ref
+            .read(syncServiceV2Provider)
+            .sync(userId: userId, companyId: companyId, storeId: storeId);
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'products_page',
+          logContext: const {'phase': 'refresh_sync'},
+        );
+      }
     }
   }
 
@@ -105,10 +118,19 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       try {
         final list = await _repo.list(companyId);
         if (!mounted) return;
-        await ref.read(productsOfflineRepositoryProvider).upsertFromRemote(list);
+        await ref
+            .read(productsOfflineRepositoryProvider)
+            .upsertFromRemote(list);
         if (!mounted) return;
         ref.invalidate(productsStreamProvider(companyId));
-      } catch (_) {}
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'products_page',
+          logContext: const {'phase': 'import_upsert_local'},
+        );
+      }
       await _refresh();
     } finally {
       if (mounted) {
@@ -167,24 +189,31 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       if (search.isNotEmpty) {
         final matchName = p.name.toLowerCase().contains(search);
         final matchSku = p.sku?.toLowerCase().contains(search) ?? false;
-        final matchBarcode = p.barcode?.contains(_searchController.text.trim()) ?? false;
+        final matchBarcode =
+            p.barcode?.contains(_searchController.text.trim()) ?? false;
         if (!matchName && !matchSku && !matchBarcode) return false;
       }
-      if (_filterCategoryId.isNotEmpty && p.categoryId != _filterCategoryId) return false;
-      if (_filterBrandId.isNotEmpty && p.brandId != _filterBrandId) return false;
+      if (_filterCategoryId.isNotEmpty && p.categoryId != _filterCategoryId) {
+        return false;
+      }
+      if (_filterBrandId.isNotEmpty && p.brandId != _filterBrandId) {
+        return false;
+      }
       return true;
     }).toList();
   }
 
-  void _openCreate() {
-    final provider = context.read<ProductsPageProvider>();
+  void _openCreate({
+    required List<Category> categories,
+    required List<Brand> brands,
+  }) {
     showDialog<void>(
       context: context,
       builder: (ctx) => ProductFormDialog(
         companyId: context.read<CompanyProvider>().currentCompanyId!,
         currentStoreId: context.read<CompanyProvider>().currentStoreId,
-        categories: List<Category>.from(provider.categories),
-        brands: List<Brand>.from(provider.brands),
+        categories: List<Category>.from(categories),
+        brands: List<Brand>.from(brands),
         onCategoriesChanged: _refresh,
         onBrandsChanged: _refresh,
         onSuccess: (Product? saved) {
@@ -199,16 +228,19 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     );
   }
 
-  void _openEdit(Product product) {
-    final provider = context.read<ProductsPageProvider>();
+  void _openEdit(
+    Product product, {
+    required List<Category> categories,
+    required List<Brand> brands,
+  }) {
     showDialog<void>(
       context: context,
       builder: (ctx) => ProductFormDialog(
         companyId: product.companyId,
         currentStoreId: context.read<CompanyProvider>().currentStoreId,
         product: product,
-        categories: List<Category>.from(provider.categories),
-        brands: List<Brand>.from(provider.brands),
+        categories: List<Category>.from(categories),
+        brands: List<Brand>.from(brands),
         onCategoriesChanged: _refresh,
         onBrandsChanged: _refresh,
         onSuccess: (Product? saved) {
@@ -227,11 +259,16 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     try {
       await _repo.setActive(p.id, !p.isActive);
       if (!mounted) return;
-      await ref.read(appDatabaseProvider).updateLocalProductIsActive(p.id, !p.isActive);
+      await ref
+          .read(appDatabaseProvider)
+          .updateLocalProductIsActive(p.id, !p.isActive);
       if (!mounted) return;
       ref.invalidate(productsStreamProvider(p.companyId));
       context.read<ProductsPageProvider>().setProductActive(p.id, !p.isActive);
-      AppToast.success(context, p.isActive ? 'Produit désactivé' : 'Produit activé');
+      AppToast.success(
+        context,
+        p.isActive ? 'Produit désactivé' : 'Produit activé',
+      );
       _runSyncInBackground();
     } catch (e) {
       if (mounted) AppErrorHandler.show(context, e);
@@ -243,7 +280,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final csv = productsToCsv(filtered);
     final date = DateTime.now().toIso8601String().substring(0, 10);
     final filename = 'produits-$date.csv';
-    final bytes = Uint8List.fromList(utf8.encode(csv));
+    final bytes = encodeCsv(csv);
     saveCsvFile(filename: filename, bytes: bytes).then((saved) {
       if (!mounted) return;
       if (saved) AppToast.success(context, 'CSV enregistré');
@@ -259,7 +296,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         currentStoreId: company.currentStoreId,
         onSuccess: _onImportSuccess,
         onOfflineImport: (payload) async {
-          await ref.read(appDatabaseProvider).enqueuePendingAction('product_import', jsonEncode(payload));
+          await ref
+              .read(appDatabaseProvider)
+              .enqueuePendingAction('product_import', jsonEncode(payload));
         },
       ),
     );
@@ -272,8 +311,17 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         title: const Text('Supprimer ce produit ?'),
         content: Text('« ${p.name} » sera supprimé (archivé).'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Annuler')),
-          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error), child: const Text('Supprimer')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Supprimer'),
+          ),
         ],
       ),
     );
@@ -305,8 +353,17 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final storeId = company.currentStoreId;
     Future.microtask(() async {
       try {
-        await ref.read(syncServiceV2Provider).sync(userId: userId, companyId: companyId, storeId: storeId);
-      } catch (_) {}
+        await ref
+            .read(syncServiceV2Provider)
+            .sync(userId: userId, companyId: companyId, storeId: storeId);
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'products_page',
+          logContext: const {'phase': 'background_sync'},
+        );
+      }
     });
   }
 
@@ -321,10 +378,20 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     ref.invalidate(productsStreamProvider(full.companyId));
     if (storeId != null && storeId.isNotEmpty) {
       try {
-        await ref
-            .read(syncServiceV2Provider)
-            .pullInventoryQuantitiesForStores([storeId]);
-      } catch (_) {}
+        await ref.read(syncServiceV2Provider).pullInventoryQuantitiesForStores([
+          storeId,
+        ]);
+      } catch (e, st) {
+        AppErrorHandler.logWithContext(
+          e,
+          stackTrace: st,
+          logSource: 'products_page',
+          logContext: {
+            'phase': 'pull_inventory_after_product_change',
+            'store_id': storeId,
+          },
+        );
+      }
       if (mounted) {
         ref.invalidate(inventoryQuantitiesStreamProvider(storeId));
       }
@@ -341,11 +408,20 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final companyId = company.currentCompanyId;
     final storeId = company.currentStoreId;
     final isWide = MediaQuery.sizeOf(context).width >= 600;
-    final canCreateProduct = permissions.hasPermission(Permissions.productsCreate);
-    final canUpdateProduct = permissions.hasPermission(Permissions.productsUpdate);
-    final canDeleteProduct = permissions.hasPermission(Permissions.productsDelete);
-    final canAccessProducts = permissions.hasPermission(Permissions.productsView) ||
-        canCreateProduct || canUpdateProduct || canDeleteProduct;
+    final canCreateProduct = permissions.hasPermission(
+      Permissions.productsCreate,
+    );
+    final canUpdateProduct = permissions.hasPermission(
+      Permissions.productsUpdate,
+    );
+    final canDeleteProduct = permissions.hasPermission(
+      Permissions.productsDelete,
+    );
+    final canAccessProducts =
+        permissions.hasPermission(Permissions.productsView) ||
+        canCreateProduct ||
+        canUpdateProduct ||
+        canDeleteProduct;
 
     if (permissions.hasLoaded && !canAccessProducts) {
       return Scaffold(
@@ -354,9 +430,17 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.lock_rounded, size: 64, color: Theme.of(context).colorScheme.error),
+              Icon(
+                Icons.lock_rounded,
+                size: 64,
+                color: Theme.of(context).colorScheme.error,
+              ),
               const SizedBox(height: 16),
-              Text("Vous n'avez pas accès à cette page.", textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyLarge),
+              Text(
+                "Vous n'avez pas accès à cette page.",
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
             ],
           ),
         ),
@@ -364,8 +448,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     }
 
     final asyncProducts = ref.watch(productsStreamProvider(companyId ?? ''));
-    final asyncInventory = ref.watch(inventoryQuantitiesStreamProvider(storeId ?? ''));
-    final asyncCategories = ref.watch(categoriesStreamProvider(companyId ?? ''));
+    final asyncInventory = ref.watch(
+      inventoryQuantitiesStreamProvider(storeId ?? ''),
+    );
+    final asyncCategories = ref.watch(
+      categoriesStreamProvider(companyId ?? ''),
+    );
     final asyncBrands = ref.watch(brandsStreamProvider(companyId ?? ''));
     final products = asyncProducts.valueOrNull ?? [];
     final stockByStore = asyncInventory.valueOrNull ?? {};
@@ -373,7 +461,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final brands = asyncBrands.valueOrNull ?? [];
     final productsLoading = asyncProducts.isLoading;
     final productsError = asyncProducts.hasError && asyncProducts.error != null
-        ? AppErrorHandler.toUserMessage(asyncProducts.error, fallback: 'Impossible de charger les produits.')
+        ? AppErrorHandler.toUserMessage(
+            asyncProducts.error,
+            fallback: 'Impossible de charger les produits.',
+          )
         : provider.error;
 
     if (company.loading && company.companies.isEmpty) {
@@ -401,7 +492,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 if (!wide900) ...[
                   Text(
                     'Produits',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -414,7 +507,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     }
 
     // Liste vide : déclencher une sync une fois pour remplir Drift (premier lancement ou base vide).
-    if (_tab == _ProductsTab.products && products.isEmpty && !productsLoading && productsError == null && !_syncTriggeredForEmpty) {
+    if (_tab == _ProductsTab.products &&
+        products.isEmpty &&
+        !productsLoading &&
+        productsError == null &&
+        !_syncTriggeredForEmpty) {
       _syncTriggeredForEmpty = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _runSyncInBackground();
@@ -437,10 +534,24 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Catalogue, catégories et marques', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-                        if (productsError != null && _tab == _ProductsTab.products) ...[
+                        Text(
+                          'Catalogue, catégories et marques',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        if (productsError != null &&
+                            _tab == _ProductsTab.products) ...[
                           const SizedBox(height: 8),
-                          Text(productsError, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                          Text(
+                            productsError,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                            ),
+                          ),
                           const SizedBox(height: 8),
                           TextButton.icon(
                             onPressed: _refresh,
@@ -465,17 +576,50 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                           selected: _tab == _ProductsTab.products,
                           onTap: () {
                             setState(() => _tab = _ProductsTab.products);
-                            if (context.read<CompanyProvider>().currentStoreId != null) _refresh();
+                            if (context
+                                    .read<CompanyProvider>()
+                                    .currentStoreId !=
+                                null) {
+                              _refresh();
+                            }
                           },
                         ),
-                        _TabChip(label: 'Catégories', icon: Icons.category, selected: _tab == _ProductsTab.categories, onTap: () => setState(() => _tab = _ProductsTab.categories)),
-                        _TabChip(label: 'Marques', icon: Icons.sell, selected: _tab == _ProductsTab.brands, onTap: () => setState(() => _tab = _ProductsTab.brands)),
+                        _TabChip(
+                          label: 'Catégories',
+                          icon: Icons.category,
+                          selected: _tab == _ProductsTab.categories,
+                          onTap: () =>
+                              setState(() => _tab = _ProductsTab.categories),
+                        ),
+                        _TabChip(
+                          label: 'Marques',
+                          icon: Icons.sell,
+                          selected: _tab == _ProductsTab.brands,
+                          onTap: () =>
+                              setState(() => _tab = _ProductsTab.brands),
+                        ),
                       ],
                     ),
                   ),
                 ),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
-                if (_tab == _ProductsTab.products) ..._buildProductsTab(context, provider, products, stockByStore, categories, brands, productsLoading, productsError, companyId, storeId, isWide, canUpdateProduct, canDeleteProduct, canCreateProduct),
+                if (_tab == _ProductsTab.products)
+                  ..._buildProductsTab(
+                    context,
+                    provider,
+                    products,
+                    stockByStore,
+                    categories,
+                    brands,
+                    productsLoading,
+                    productsError,
+                    companyId,
+                    storeId,
+                    isWide,
+                    canUpdateProduct,
+                    canDeleteProduct,
+                    canCreateProduct,
+                  ),
                 if (_tab == _ProductsTab.categories)
                   SliverPadding(
                     padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
@@ -487,7 +631,8 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                         readOnly: permissions.isCashier,
                         onCategoryCreated: (c) => _applyCategoryCreated(c),
                         onCategoryUpdated: (c) => _applyCategoryUpdated(c),
-                        onCategoryDeleted: (id) => _applyCategoryDeleted(id, companyId),
+                        onCategoryDeleted: (id) =>
+                            _applyCategoryDeleted(id, companyId),
                       ),
                     ),
                   ),
@@ -502,32 +647,36 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                         readOnly: permissions.isCashier,
                         onBrandCreated: (b) => _applyBrandCreated(b),
                         onBrandUpdated: (b) => _applyBrandUpdated(b),
-                        onBrandDeleted: (id) => _applyBrandDeleted(id, companyId),
+                        onBrandDeleted: (id) =>
+                            _applyBrandDeleted(id, companyId),
                       ),
                     ),
                   ),
               ],
             ),
           ),
-          floatingActionButton: _tab == _ProductsTab.products && canCreateProduct
+          floatingActionButton:
+              _tab == _ProductsTab.products && canCreateProduct
               ? (MediaQuery.sizeOf(context).width < 900
-                  ? FloatingActionButton(
-                      onPressed: _openCreate,
-                      backgroundColor: const Color(0xFFF97316),
-                      foregroundColor: Colors.white,
-                      elevation: 4,
-                      highlightElevation: 8,
-                      child: const Icon(Icons.add),
-                    )
-                  : FloatingActionButton.extended(
-                      onPressed: _openCreate,
-                      backgroundColor: const Color(0xFFF97316),
-                      foregroundColor: Colors.white,
-                      elevation: 4,
-                      highlightElevation: 8,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nouveau produit'),
-                    ))
+                    ? FloatingActionButton(
+                        onPressed: () =>
+                            _openCreate(categories: categories, brands: brands),
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: Colors.white,
+                        elevation: 4,
+                        highlightElevation: 8,
+                        child: const Icon(Icons.add),
+                      )
+                    : FloatingActionButton.extended(
+                        onPressed: () =>
+                            _openCreate(categories: categories, brands: brands),
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: Colors.white,
+                        elevation: 4,
+                        highlightElevation: 8,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Nouveau produit'),
+                      ))
               : null,
         ),
         if (_syncingCatalogAfterImport)
@@ -542,7 +691,10 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     child: Card(
                       elevation: 6,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 24,
+                        ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -554,14 +706,18 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                             const SizedBox(height: 20),
                             Text(
                               'Mise à jour du catalogue…',
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Récupération des produits, cache local et synchronisation.\n'
                               'Hors ligne : la file d’attente sera traitée à la reconnexion.',
-                              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -577,21 +733,47 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     );
   }
 
-  List<Widget> _buildProductsTab(BuildContext context, ProductsPageProvider provider, List<Product> products, Map<String, int> stockByStore, List<Category> categories, List<Brand> brands, bool productsLoading, String? productsError, String? companyId, String? storeId, bool isWide, bool canUpdateProduct, bool canDeleteProduct, bool canCreateProduct) {
-    if (companyId == null) return [const SliverFillRemaining(child: Center(child: Text('Choisissez une entreprise')))];
+  List<Widget> _buildProductsTab(
+    BuildContext context,
+    ProductsPageProvider provider,
+    List<Product> products,
+    Map<String, int> stockByStore,
+    List<Category> categories,
+    List<Brand> brands,
+    bool productsLoading,
+    String? productsError,
+    String? companyId,
+    String? storeId,
+    bool isWide,
+    bool canUpdateProduct,
+    bool canDeleteProduct,
+    bool canCreateProduct,
+  ) {
+    if (companyId == null) {
+      return [
+        const SliverFillRemaining(
+          child: Center(child: Text('Choisissez une entreprise')),
+        ),
+      ];
+    }
     final isMobileProducts =
         MediaQuery.sizeOf(context).width < Breakpoints.tablet;
     final filtered = _filteredProducts(products);
     final totalCount = filtered.length;
-    final pageCount = totalCount == 0 ? 0 : ((totalCount - 1) ~/ _productsPageSize) + 1;
-    final filterKey = '${_searchController.text}|$_filterCategoryId|$_filterBrandId';
+    final pageCount = totalCount == 0
+        ? 0
+        : ((totalCount - 1) ~/ _productsPageSize) + 1;
+    final filterKey =
+        '${_searchController.text}|$_filterCategoryId|$_filterBrandId';
     if (filterKey != _lastProductsFilterKey) {
       _lastProductsFilterKey = filterKey;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _currentProductsPage = 0);
       });
     }
-    final effectivePage = pageCount > 0 && _currentProductsPage >= pageCount ? pageCount - 1 : _currentProductsPage;
+    final effectivePage = pageCount > 0 && _currentProductsPage >= pageCount
+        ? pageCount - 1
+        : _currentProductsPage;
     if (effectivePage != _currentProductsPage) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) setState(() => _currentProductsPage = effectivePage);
@@ -600,10 +782,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final paginatedList = isMobileProducts
         ? filtered
         : filtered
-            .skip(effectivePage * _productsPageSize)
-            .take(_productsPageSize)
-            .toList();
-    final canModifyProducts = canUpdateProduct || canDeleteProduct || canCreateProduct;
+              .skip(effectivePage * _productsPageSize)
+              .take(_productsPageSize)
+              .toList();
+    final canModifyProducts =
+        canUpdateProduct || canDeleteProduct || canCreateProduct;
     return [
       SliverToBoxAdapter(
         child: Padding(
@@ -617,10 +800,15 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     final csvBtnStyle = OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 10,
+                      ),
                     );
                     final exportBtn = OutlinedButton.icon(
-                      onPressed: filtered.isEmpty ? null : () => _exportCsv(filtered),
+                      onPressed: filtered.isEmpty
+                          ? null
+                          : () => _exportCsv(filtered),
                       icon: const Icon(Icons.download, size: 18),
                       label: const Text('Enregistrer CSV'),
                       style: csvBtnStyle,
@@ -672,17 +860,29 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 builder: (context, constraints) {
                   final narrow = constraints.maxWidth < 340;
                   final seenCatIds = <String>{};
-                  final distinctCategories = categories.where((c) => seenCatIds.add(c.id)).toList();
-                  final categoryValue = _filterCategoryId.isNotEmpty &&
-                          distinctCategories.any((c) => c.id == _filterCategoryId)
+                  final distinctCategories = categories
+                      .where((c) => seenCatIds.add(c.id))
+                      .toList();
+                  final categoryValue =
+                      _filterCategoryId.isNotEmpty &&
+                          distinctCategories.any(
+                            (c) => c.id == _filterCategoryId,
+                          )
                       ? _filterCategoryId
                       : null;
                   final categoryDropdown = DropdownButtonFormField<String>(
                     initialValue: categoryValue,
                     isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Catégorie', border: OutlineInputBorder(), isDense: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Catégorie',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                     items: [
-                      const DropdownMenuItem<String>(value: null, child: Text('Toutes')),
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('Toutes'),
+                      ),
                       ...distinctCategories.map<DropdownMenuItem<String>>(
                         (c) => DropdownMenuItem<String>(
                           value: c.id,
@@ -690,20 +890,31 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                         ),
                       ),
                     ],
-                    onChanged: (v) => setState(() => _filterCategoryId = v ?? ''),
+                    onChanged: (v) =>
+                        setState(() => _filterCategoryId = v ?? ''),
                   );
                   final seenBrandIds = <String>{};
-                  final distinctBrands = brands.where((b) => seenBrandIds.add(b.id)).toList();
-                  final brandValue = _filterBrandId.isNotEmpty &&
+                  final distinctBrands = brands
+                      .where((b) => seenBrandIds.add(b.id))
+                      .toList();
+                  final brandValue =
+                      _filterBrandId.isNotEmpty &&
                           distinctBrands.any((b) => b.id == _filterBrandId)
                       ? _filterBrandId
                       : null;
                   final brandDropdown = DropdownButtonFormField<String>(
                     initialValue: brandValue,
                     isExpanded: true,
-                    decoration: const InputDecoration(labelText: 'Marque', border: OutlineInputBorder(), isDense: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Marque',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
                     items: [
-                      const DropdownMenuItem<String>(value: null, child: Text('Toutes')),
+                      const DropdownMenuItem<String>(
+                        value: null,
+                        child: Text('Toutes'),
+                      ),
                       ...distinctBrands.map<DropdownMenuItem<String>>(
                         (b) => DropdownMenuItem<String>(
                           value: b.id,
@@ -737,7 +948,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         ),
       ),
       if (productsLoading)
-        const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
+        const SliverFillRemaining(
+          child: Center(child: CircularProgressIndicator()),
+        )
       else if (filtered.isEmpty)
         SliverFillRemaining(
           child: Center(
@@ -747,7 +960,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    products.isEmpty ? 'Aucun produit pour le moment.' : 'Aucun résultat.',
+                    products.isEmpty
+                        ? 'Aucun produit pour le moment.'
+                        : 'Aucun résultat.',
                     style: Theme.of(context).textTheme.bodyLarge,
                     textAlign: TextAlign.center,
                   ),
@@ -755,7 +970,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     const SizedBox(height: 8),
                     Text(
                       'Tirez pour synchroniser ou créez un produit.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -768,31 +985,36 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final p = paginatedList[index];
-                final qty = storeId != null ? (stockByStore[p.id] ?? 0) : null;
-                final threshold = p.stockMin > 0 ? p.stockMin : provider.defaultStockThreshold;
-                return _ProductListTile(
-                  product: p,
-                  stockQuantity: qty,
-                  stockAlertThreshold: threshold,
-                  onEdit: () => _openEdit(p),
-                  onToggleActive: () => _toggleActive(p),
-                  onDelete: () => _deleteProduct(p),
-                  canEdit: canUpdateProduct,
-                  canDelete: canDeleteProduct,
-                );
-              },
-              childCount: paginatedList.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final p = paginatedList[index];
+              final qty = storeId != null ? (stockByStore[p.id] ?? 0) : null;
+              final threshold = p.stockMin > 0
+                  ? p.stockMin
+                  : provider.defaultStockThreshold;
+              return _ProductListTile(
+                product: p,
+                stockQuantity: qty,
+                stockAlertThreshold: threshold,
+                onEdit: () =>
+                    _openEdit(p, categories: categories, brands: brands),
+                onToggleActive: () => _toggleActive(p),
+                onDelete: () => _deleteProduct(p),
+                canEdit: canUpdateProduct,
+                canDelete: canDeleteProduct,
+              );
+            }, childCount: paginatedList.length),
           ),
         ),
         if (!isMobileProducts && pageCount > 1)
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-              child: _buildProductsPagination(context, totalCount, pageCount, effectivePage),
+              child: _buildProductsPagination(
+                context,
+                totalCount,
+                pageCount,
+                effectivePage,
+              ),
             ),
           )
         else
@@ -801,7 +1023,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     ];
   }
 
-  Widget _buildProductsPagination(BuildContext context, int totalCount, int pageCount, int currentPageIndex) {
+  Widget _buildProductsPagination(
+    BuildContext context,
+    int totalCount,
+    int pageCount,
+    int currentPageIndex,
+  ) {
     final theme = Theme.of(context);
     final start = currentPageIndex * _productsPageSize + 1;
     final end = (currentPageIndex + 1) * _productsPageSize;
@@ -820,36 +1047,54 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 padding: const EdgeInsets.only(right: 16),
                 child: Text(
                   '$start – $endClamped sur $totalCount',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             IconButton.filled(
-              onPressed: currentPageIndex > 0 ? () => setState(() => _currentProductsPage--) : null,
+              onPressed: currentPageIndex > 0
+                  ? () => setState(() => _currentProductsPage--)
+                  : null,
               icon: const Icon(Icons.chevron_left_rounded, size: 26),
               style: IconButton.styleFrom(
-                backgroundColor: currentPageIndex > 0 ? theme.colorScheme.primary : null,
-                foregroundColor: currentPageIndex > 0 ? theme.colorScheme.onPrimary : null,
+                backgroundColor: currentPageIndex > 0
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: currentPageIndex > 0
+                    ? theme.colorScheme.onPrimary
+                    : null,
               ),
             ),
             const SizedBox(width: 12),
             Text(
               'Page ${currentPageIndex + 1} / $pageCount',
-              style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(width: 12),
             IconButton.filled(
-              onPressed: currentPageIndex < pageCount - 1 ? () => setState(() => _currentProductsPage++) : null,
+              onPressed: currentPageIndex < pageCount - 1
+                  ? () => setState(() => _currentProductsPage++)
+                  : null,
               icon: const Icon(Icons.chevron_right_rounded, size: 26),
               style: IconButton.styleFrom(
-                backgroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.primary : null,
-                foregroundColor: currentPageIndex < pageCount - 1 ? theme.colorScheme.onPrimary : null,
+                backgroundColor: currentPageIndex < pageCount - 1
+                    ? theme.colorScheme.primary
+                    : null,
+                foregroundColor: currentPageIndex < pageCount - 1
+                    ? theme.colorScheme.onPrimary
+                    : null,
               ),
             ),
             if (isNarrow) ...[
               const SizedBox(width: 12),
               Text(
                 '$start – $endClamped / $totalCount',
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ],
           ],
@@ -860,7 +1105,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 }
 
 class _TabChip extends StatelessWidget {
-  const _TabChip({required this.label, required this.icon, required this.selected, required this.onTap});
+  const _TabChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
 
   final String label;
   final IconData icon;
@@ -919,11 +1169,63 @@ class _ProductListTile extends StatelessWidget {
   final bool canEdit;
   final bool canDelete;
 
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    final screenW = MediaQuery.sizeOf(context).width;
+    final previewSize = screenW >= 640 ? 170.0 : 140.0;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.30),
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(ctx).pop(),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                width: previewSize,
+                height: previewSize,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.black.withValues(alpha: 0.10),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.inventory_2,
+                    color: Theme.of(ctx).colorScheme.outline,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final firstImage = product.productImages?.isNotEmpty == true ? product.productImages!.first.url : null;
-    final subtitleText = '${product.sku ?? '—'} · ${formatCurrency(product.salePrice)} · ${product.category?.name ?? '—'} · ${product.brand?.name ?? '—'}';
+    final firstImage = product.productImages?.isNotEmpty == true
+        ? product.productImages!.first.url
+        : null;
+    final subtitleText =
+        '${product.sku ?? '—'} · ${formatCurrency(product.salePrice)} · ${product.category?.name ?? '—'} · ${product.brand?.name ?? '—'}';
 
     final tileActions = IconButton.styleFrom(
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -948,14 +1250,24 @@ class _ProductListTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: firstImage != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          firstImage,
-                          fit: BoxFit.cover,
-                          width: 48,
-                          height: 48,
-                          errorBuilder: (_, _, _) => Icon(Icons.inventory_2, color: theme.colorScheme.outline),
+                    ? Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => _openImagePreview(context, firstImage),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              firstImage,
+                              fit: BoxFit.cover,
+                              width: 48,
+                              height: 48,
+                              errorBuilder: (_, _, _) => Icon(
+                                Icons.inventory_2,
+                                color: theme.colorScheme.outline,
+                              ),
+                            ),
+                          ),
                         ),
                       )
                     : Icon(Icons.inventory_2, color: theme.colorScheme.outline),
@@ -975,7 +1287,9 @@ class _ProductListTile extends StatelessWidget {
                           product.name,
                           style: theme.textTheme.titleSmall?.copyWith(
                             fontWeight: FontWeight.w600,
-                            decoration: product.isActive ? null : TextDecoration.lineThrough,
+                            decoration: product.isActive
+                                ? null
+                                : TextDecoration.lineThrough,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1002,12 +1316,17 @@ class _ProductListTile extends StatelessWidget {
                               // Mobile / tablette : barre sur toute la largeur utile (inchangé).
                               // Desktop : plafond pour éviter une barre disproportionnée sur grands écrans.
                               if (!Breakpoints.isDesktop(screenW)) {
-                                return SizedBox(width: double.infinity, child: indicator);
+                                return SizedBox(
+                                  width: double.infinity,
+                                  child: indicator,
+                                );
                               }
                               return Align(
                                 alignment: Alignment.centerLeft,
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 280),
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 280,
+                                  ),
                                   child: indicator,
                                 ),
                               );
@@ -1029,15 +1348,29 @@ class _ProductListTile extends StatelessWidget {
                             style: tileActions,
                           ),
                           IconButton(
-                            icon: Icon(product.isActive ? Icons.toggle_on : Icons.toggle_off, size: 26),
+                            icon: Icon(
+                              product.isActive
+                                  ? Icons.toggle_on
+                                  : Icons.toggle_off,
+                              size: 26,
+                              color: product.isActive
+                                  ? const Color(0xFFF97316)
+                                  : null,
+                            ),
                             onPressed: onToggleActive,
-                            tooltip: product.isActive ? 'Désactiver' : 'Activer',
+                            tooltip: product.isActive
+                                ? 'Désactiver'
+                                : 'Activer',
                             style: tileActions,
                           ),
                         ],
                         if (canDelete)
                           IconButton(
-                            icon: Icon(Icons.delete_outline, size: 20, color: theme.colorScheme.error),
+                            icon: Icon(
+                              Icons.delete_outline,
+                              size: 20,
+                              color: theme.colorScheme.error,
+                            ),
                             onPressed: onDelete,
                             tooltip: 'Supprimer',
                             style: tileActions,

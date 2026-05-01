@@ -63,14 +63,14 @@ class PosInvoiceTableCart extends StatelessWidget {
               viewportW = screenW;
             }
             final ultraMobile = screenW < Breakpoints.tablet;
-            final tabletNeedsScroll = !ultraMobile &&
-                screenW < Breakpoints.shellDesktop;
+            final tabletNeedsScroll =
+                !ultraMobile && screenW < Breakpoints.shellDesktop;
             // Téléphone / tablette : minWidth > viewport → scroll horizontal, colonne Article et Qté lisibles.
             final tableMinWidth = ultraMobile
                 ? math.max(520.0, viewportW)
                 : tabletNeedsScroll
-                    ? math.max(640.0, viewportW * 1.1)
-                    : math.max(320.0, viewportW);
+                ? math.max(640.0, viewportW * 1.1)
+                : math.max(320.0, viewportW);
             final headerCompact = ultraMobile || tabletNeedsScroll;
 
             final table = Table(
@@ -109,247 +109,251 @@ class PosInvoiceTableCart extends StatelessWidget {
                   ],
                 ),
                 ...cart.map((c) {
-              final stock = effectiveStock(c.productId);
-              final lowStock = stock >= 0 && c.quantity > stock;
-              final controller = qtyControllers[c.productId]!;
-              final puController = puControllers[c.productId]!;
-              return TableRow(
-                decoration: BoxDecoration(
-                  color: lowStock
-                      ? Colors.red.shade50.withValues(alpha: 0.35)
-                      : null,
-                ),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
+                  final stock = effectiveStock(c.productId);
+                  final lowStock = stock >= 0 && c.quantity > stock;
+                  final controller = qtyControllers[c.productId]!;
+                  final puController = puControllers[c.productId]!;
+                  return TableRow(
+                    decoration: BoxDecoration(
+                      color: lowStock
+                          ? Colors.red.shade50.withValues(alpha: 0.35)
+                          : null,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          c.name,
-                          style: TextStyle(
-                            color: cs.onSurface,
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                            height: 1.25,
-                          ),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 8,
                         ),
-                        if (lowStock)
-                          Text(
-                            'Stock: $stock',
-                            style: TextStyle(
-                              color: cs.error,
-                              fontSize: 12,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              c.name,
+                              style: TextStyle(
+                                color: cs.onSurface,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                height: 1.25,
+                              ),
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
                             ),
+                            if (lowStock)
+                              Text(
+                                'Stock: $stock',
+                                style: TextStyle(color: cs.error, fontSize: 12),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 6,
+                        ),
+                        child: DropdownButtonFormField<String>(
+                          key: ValueKey<String>(
+                            '${c.productId}_${kInvoiceUnits.contains(c.unit) ? c.unit : 'pce'}',
                           ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 6,
-                    ),
-                    child: DropdownButtonFormField<String>(
-                      value: kInvoiceUnits.contains(c.unit) ? c.unit : 'pce',
-                      isDense: true,
-                      isExpanded: true,
-                      dropdownColor: cs.surfaceContainerHigh,
-                      style: TextStyle(color: cs.onSurface, fontSize: 13),
-                      decoration: PosInputTheme.dropdownDecoration(context),
-                      items: kInvoiceUnits
-                          .map(
-                            (u) => DropdownMenuItem(
-                              value: u,
-                              child: Text(
-                                u,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: cs.onSurface,
+                          initialValue: kInvoiceUnits.contains(c.unit)
+                              ? c.unit
+                              : 'pce',
+                          isDense: true,
+                          isExpanded: true,
+                          dropdownColor: cs.surfaceContainerHigh,
+                          style: TextStyle(color: cs.onSurface, fontSize: 13),
+                          decoration: PosInputTheme.dropdownDecoration(context),
+                          items: kInvoiceUnits
+                              .map(
+                                (u) => DropdownMenuItem(
+                                  value: u,
+                                  child: Text(
+                                    u,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: cs.onSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (v) {
-                        if (v != null) onUnitChange(c.productId, v);
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 8,
-                    ),
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.center,
-                      clipBehavior: Clip.none,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (showButtons)
-                            IconButton.filled(
-                              tooltip: 'Diminuer la quantité',
-                              onPressed: () {
-                                FocusScope.of(context).unfocus();
-                                onQtyDelta(c.productId, -1);
-                              },
-                              icon: const Icon(Icons.remove_rounded, size: 22),
-                              style: IconButton.styleFrom(
-                                shape: const CircleBorder(),
-                                fixedSize: const Size(
-                                  Breakpoints.minTouchTarget,
-                                  Breakpoints.minTouchTarget,
-                                ),
-                                minimumSize: const Size(
-                                  Breakpoints.minTouchTarget,
-                                  Breakpoints.minTouchTarget,
-                                ),
-                                padding: EdgeInsets.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                backgroundColor:
-                                    cs.surfaceContainerHighest,
-                                foregroundColor: cs.onSurface,
-                              ),
-                            ),
-                          if (showInput)
-                            SizedBox(
-                              width: 72,
-                              child: PosCartQtyField(
-                                controller: controller,
-                                currentQuantity: c.quantity,
-                                onCommit: (v) => onSetQty(c.productId, v),
-                              ),
-                            )
-                          else
-                            Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 6),
-                              child: Text(
-                                '${c.quantity}',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
-                                  color: cs.onSurface,
-                                ),
-                              ),
-                            ),
-                          if (showButtons)
-                            IconButton.filled(
-                              tooltip: 'Augmenter la quantité',
-                              onPressed: () {
-                                FocusScope.of(context).unfocus();
-                                onQtyDelta(c.productId, 1);
-                              },
-                              icon: const Icon(Icons.add_rounded, size: 22),
-                              style: IconButton.styleFrom(
-                                shape: const CircleBorder(),
-                                fixedSize: const Size(
-                                  Breakpoints.minTouchTarget,
-                                  Breakpoints.minTouchTarget,
-                                ),
-                                minimumSize: const Size(
-                                  Breakpoints.minTouchTarget,
-                                  Breakpoints.minTouchTarget,
-                                ),
-                                padding: EdgeInsets.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                backgroundColor: PosQuickColors.orangePrincipal,
-                                foregroundColor: Colors.white,
-                              ),
-                            ),
-                        ],
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) onUnitChange(c.productId, v);
+                          },
+                        ),
                       ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 6,
-                    ),
-                    child: SizedBox(
-                      width: math.min(104, math.max(72, screenW * 0.2)),
-                      child: PosCartUnitPriceField(
-                        controller: puController,
-                        currentUnitPrice: c.unitPrice,
-                        onCommit: (v) => onSetUnitPrice(c.productId, v),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 8,
+                        ),
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.center,
+                          clipBehavior: Clip.none,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (showButtons)
+                                IconButton.filled(
+                                  tooltip: 'Diminuer la quantité',
+                                  onPressed: () {
+                                    FocusScope.of(context).unfocus();
+                                    onQtyDelta(c.productId, -1);
+                                  },
+                                  icon: const Icon(
+                                    Icons.remove_rounded,
+                                    size: 22,
+                                  ),
+                                  style: IconButton.styleFrom(
+                                    shape: const CircleBorder(),
+                                    fixedSize: const Size(
+                                      Breakpoints.minTouchTarget,
+                                      Breakpoints.minTouchTarget,
+                                    ),
+                                    minimumSize: const Size(
+                                      Breakpoints.minTouchTarget,
+                                      Breakpoints.minTouchTarget,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    backgroundColor: cs.surfaceContainerHighest,
+                                    foregroundColor: cs.onSurface,
+                                  ),
+                                ),
+                              if (showInput)
+                                SizedBox(
+                                  width: 72,
+                                  child: PosCartQtyField(
+                                    controller: controller,
+                                    currentQuantity: c.quantity,
+                                    onCommit: (v) => onSetQty(c.productId, v),
+                                  ),
+                                )
+                              else
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
+                                  child: Text(
+                                    '${c.quantity}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 16,
+                                      color: cs.onSurface,
+                                    ),
+                                  ),
+                                ),
+                              if (showButtons)
+                                IconButton.filled(
+                                  tooltip: 'Augmenter la quantité',
+                                  onPressed: () {
+                                    FocusScope.of(context).unfocus();
+                                    onQtyDelta(c.productId, 1);
+                                  },
+                                  icon: const Icon(Icons.add_rounded, size: 22),
+                                  style: IconButton.styleFrom(
+                                    shape: const CircleBorder(),
+                                    fixedSize: const Size(
+                                      Breakpoints.minTouchTarget,
+                                      Breakpoints.minTouchTarget,
+                                    ),
+                                    minimumSize: const Size(
+                                      Breakpoints.minTouchTarget,
+                                      Breakpoints.minTouchTarget,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    backgroundColor:
+                                        PosQuickColors.orangePrincipal,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  _dCell(cs, formatCurrency(c.total), emphasis: true),
-                  Padding(
-                    padding: const EdgeInsets.only(right: 2),
-                    child: IconButton(
-                      onPressed: () => onRemove(c.productId),
-                      icon: Icon(
-                        Icons.delete_outline_rounded,
-                        size: 22,
-                        color: cs.error,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 6,
+                        ),
+                        child: SizedBox(
+                          width: math.min(104, math.max(72, screenW * 0.2)),
+                          child: PosCartUnitPriceField(
+                            controller: puController,
+                            currentUnitPrice: c.unitPrice,
+                            onCommit: (v) => onSetUnitPrice(c.productId, v),
+                          ),
+                        ),
                       ),
-                      tooltip: 'Supprimer',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(
-                        minWidth: 40,
-                        minHeight: 40,
+                      _dCell(cs, formatCurrency(c.total), emphasis: true),
+                      Padding(
+                        padding: const EdgeInsets.only(right: 2),
+                        child: IconButton(
+                          onPressed: () => onRemove(c.productId),
+                          icon: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 22,
+                            color: cs.error,
+                          ),
+                          tooltip: 'Supprimer',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                ],
-              );
-            }),
-          ],
-        );
+                    ],
+                  );
+                }),
+              ],
+            );
 
-        // Dans un parent déjà scrollable (ex. panier fusionné mobile), pas de scroll
-        // vertical ici — hauteur libre + scroll horizontal seulement.
-        if (!constraints.hasBoundedHeight) {
-          return SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: tableMinWidth),
-              child: table,
-            ),
-          );
-        }
-
-        return Scrollbar(
-          thumbVisibility: true,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.vertical,
-            primary: false,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              primary: false,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: tableMinWidth),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+            // Dans un parent déjà scrollable (ex. panier fusionné mobile), pas de scroll
+            // vertical ici — hauteur libre + scroll horizontal seulement.
+            if (!constraints.hasBoundedHeight) {
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minWidth: tableMinWidth),
                   child: table,
                 ),
+              );
+            }
+
+            return Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.vertical,
+                primary: false,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  primary: false,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: tableMinWidth),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      child: table,
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
-      },
-    );
       },
     );
   }
 
-  static Widget _hCell(
-    String text,
-    TextStyle? style, {
-    bool compact = false,
-  }) {
+  static Widget _hCell(String text, TextStyle? style, {bool compact = false}) {
     return Padding(
       padding: EdgeInsets.symmetric(
         horizontal: compact ? 6 : 10,
@@ -357,9 +361,7 @@ class PosInvoiceTableCart extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: style?.copyWith(
-          fontSize: compact ? 12 : 14,
-        ),
+        style: style?.copyWith(fontSize: compact ? 12 : 14),
         maxLines: 1,
         softWrap: false,
         overflow: TextOverflow.ellipsis,
@@ -381,9 +383,7 @@ class PosInvoiceTableCart extends StatelessWidget {
           style: TextStyle(
             fontSize: emphasis ? 16 : 14,
             fontWeight: emphasis ? FontWeight.w700 : FontWeight.w600,
-            color: emphasis
-                ? PosQuickColors.orangePrincipal
-                : cs.onSurface,
+            color: emphasis ? PosQuickColors.orangePrincipal : cs.onSurface,
           ),
         ),
       ),

@@ -18,7 +18,9 @@ class WarehouseOfflineRepository {
   /// Les miniatures (`imageUrl`) viennent de [LocalProduct.imageUrl] (rempli au pull produits) — pas du RPC stock dépôt.
   Stream<List<WarehouseStockLine>> watchStockLines(String companyId) {
     if (companyId.isEmpty) return Stream.value([]);
-    return _db.watchLocalWarehouseInventory(companyId).asyncMap((invRows) async {
+    return _db.watchLocalWarehouseInventory(companyId).asyncMap((
+      invRows,
+    ) async {
       if (invRows.isEmpty) return <WarehouseStockLine>[];
       final products = await _db.getLocalProducts(companyId);
       final byId = {for (final p in products) p.id: p};
@@ -42,9 +44,14 @@ class WarehouseOfflineRepository {
     });
   }
 
-  Stream<List<WarehouseMovement>> watchMovements(String companyId, {int limit = 200}) {
+  Stream<List<WarehouseMovement>> watchMovements(
+    String companyId, {
+    int limit = 200,
+  }) {
     if (companyId.isEmpty) return Stream.value([]);
-    return _db.watchLocalWarehouseMovements(companyId, limit: limit).asyncMap((rows) async {
+    return _db.watchLocalWarehouseMovements(companyId, limit: limit).asyncMap((
+      rows,
+    ) async {
       if (rows.isEmpty) return <WarehouseMovement>[];
       final products = await _db.getLocalProducts(companyId);
       final byId = {for (final p in products) p.id: p};
@@ -70,14 +77,18 @@ class WarehouseOfflineRepository {
   }
 
   /// Bons de sortie dépôt — cache Drift, mis à jour au pull sync.
-  Stream<List<WarehouseDispatchInvoiceSummary>> watchDispatchInvoices(String companyId) {
+  Stream<List<WarehouseDispatchInvoiceSummary>> watchDispatchInvoices(
+    String companyId,
+  ) {
     if (companyId.isEmpty) return Stream.value([]);
-    return _db.watchLocalWarehouseDispatchInvoices(companyId).map(
-          (rows) => rows.map(_mapDispatchSummary).toList(),
-        );
+    return _db
+        .watchLocalWarehouseDispatchInvoices(companyId)
+        .map((rows) => rows.map(_mapDispatchSummary).toList());
   }
 
-  static WarehouseDispatchInvoiceSummary _mapDispatchSummary(LocalWarehouseDispatchInvoice r) {
+  static WarehouseDispatchInvoiceSummary _mapDispatchSummary(
+    LocalWarehouseDispatchInvoice r,
+  ) {
     return WarehouseDispatchInvoiceSummary(
       id: r.id,
       companyId: r.companyId,
@@ -86,6 +97,7 @@ class WarehouseOfflineRepository {
       customerId: r.customerId,
       customerName: r.customerName,
       notes: r.notes,
+      createdBy: null,
     );
   }
 }

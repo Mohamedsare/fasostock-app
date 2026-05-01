@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
@@ -15,6 +14,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/utils/csv_export.dart';
 import 'utils/customers_csv.dart';
 import '../../../shared/utils/share_csv.dart';
 import 'widgets/create_customer_dialog.dart';
@@ -99,7 +99,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     final csv = customersToCsv(list);
     final date = DateTime.now().toIso8601String().substring(0, 10);
     final filename = 'clients-$date.csv';
-    final bytes = Uint8List.fromList(utf8.encode(csv));
+    final bytes = encodeCsv(csv);
     saveCsvFile(filename: filename, bytes: bytes).then((saved) {
       if (!mounted) return;
       if (saved) AppToast.success(context, 'CSV enregistré');

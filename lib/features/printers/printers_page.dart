@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async' show unawaited;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -6,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/config/routes.dart';
 import '../../core/constants/permissions.dart';
+import '../../core/errors/app_error_handler.dart';
 import '../../core/services/printer_association_storage.dart';
 import '../../core/utils/app_toast.dart';
 import '../../providers/auth_provider.dart';
@@ -26,7 +29,9 @@ class PrintersPage extends ConsumerStatefulWidget {
 }
 
 class _PrintersPageState extends ConsumerState<PrintersPage> {
+  static const String _printerSnapshotKey = 'fs_printers_snapshot_v1';
   List<Printer> _printers = [];
+  List<({String name, String url, bool isDefault})> _cachedPrinters = [];
   bool _loadingPrinters = true;
   String? _printerListError;
 
@@ -46,6 +51,53 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
   Future<void> _reloadAll() async {
     await _refreshPrinters();
     await _loadSavedForScope(_scope);
+  }
+
+  Future<void> _savePrinterSnapshot(List<Printer> printers) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final payload = printers
+          .map((p) => {'name': p.name, 'url': p.url, 'is_default': p.isDefault})
+          .toList();
+      await prefs.setString(_printerSnapshotKey, jsonEncode(payload));
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'printers',
+        logContext: const {'op': 'save_printer_snapshot'},
+      );
+    }
+  }
+
+  Future<List<({String name, String url, bool isDefault})>>
+  _loadPrinterSnapshot() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_printerSnapshotKey);
+      if (raw == null || raw.isEmpty) return const [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      final out = <({String name, String url, bool isDefault})>[];
+      for (final entry in decoded) {
+        if (entry is! Map) continue;
+        final row = Map<String, dynamic>.from(entry);
+        final name = (row['name'] ?? '').toString().trim();
+        final url = (row['url'] ?? '').toString().trim();
+        final isDefault = row['is_default'] == true;
+        if (name.isEmpty) continue;
+        out.add((name: name, url: url, isDefault: isDefault));
+      }
+      return out;
+    } catch (e, st) {
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'printers',
+        logContext: const {'op': 'load_printer_snapshot'},
+      );
+      return const [];
+    }
   }
 
   Future<void> _loadSavedForScope(PrinterStorageScope scope) async {
@@ -89,16 +141,30 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
     try {
       final list = await Printing.listPrinters();
       if (!mounted) return;
+      await _savePrinterSnapshot(list);
       setState(() {
         _printers = list;
+        _cachedPrinters = list
+            .map((p) => (name: p.name, url: p.url, isDefault: p.isDefault))
+            .toList();
         _loadingPrinters = false;
       });
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
+      AppErrorHandler.logWithContext(
+        e,
+        stackTrace: st,
+        logSource: 'printers',
+        logContext: const {'op': 'listPrinters'},
+      );
+      final snapshot = await _loadPrinterSnapshot();
       setState(() {
         _printers = [];
+        _cachedPrinters = snapshot;
         _loadingPrinters = false;
-        _printerListError = e.toString();
+        _printerListError = snapshot.isNotEmpty
+            ? 'Connexion imprimante indisponible. Dernière liste locale affichée.'
+            : AppErrorHandler.toUserMessage(e);
       });
     }
   }
@@ -132,7 +198,10 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
   Future<void> _testThermal() async {
     final p = _resolvePrinter(_thermalName);
     if (p == null) {
-      AppToast.error(context, 'Choisissez une imprimante pour le ticket caisse.');
+      AppToast.error(
+        context,
+        'Choisissez une imprimante pour le ticket caisse.',
+      );
       return;
     }
     try {
@@ -142,8 +211,16 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
         buildBytes: buildThermalTestPdf,
       );
       if (mounted) AppToast.success(context, 'Test ticket envoyé.');
-    } catch (e) {
-      if (mounted) AppToast.error(context, e.toString());
+    } catch (e, st) {
+      if (mounted) {
+        AppErrorHandler.show(
+          context,
+          e,
+          stackTrace: st,
+          logSource: 'printers',
+          logContext: const {'op': 'testThermal'},
+        );
+      }
     }
   }
 
@@ -160,8 +237,16 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
         buildBytes: buildA4TestPdf,
       );
       if (mounted) AppToast.success(context, 'Test facture A4 envoyé.');
-    } catch (e) {
-      if (mounted) AppToast.error(context, e.toString());
+    } catch (e, st) {
+      if (mounted) {
+        AppErrorHandler.show(
+          context,
+          e,
+          stackTrace: st,
+          logSource: 'printers',
+          logContext: const {'op': 'testA4'},
+        );
+      }
     }
   }
 
@@ -173,9 +258,7 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     if (!permissions.hasLoaded || auth.loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (permissions.isCashier) {
       Future<void>.delayed(const Duration(milliseconds: 50), () {
@@ -196,7 +279,11 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.lock_outline_rounded, size: 48, color: Colors.grey.shade600),
+                Icon(
+                  Icons.lock_outline_rounded,
+                  size: 48,
+                  color: Colors.grey.shade600,
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'Vous n’avez pas accès à cette section.',
@@ -210,7 +297,13 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
       );
     }
 
-    final names = _printers.map((e) => e.name).toList();
+    final names = <String>{
+      ..._cachedPrinters.map((e) => e.name),
+      ..._printers.map((e) => e.name),
+      if (_thermalName != null && _thermalName!.trim().isNotEmpty)
+        _thermalName!.trim(),
+      if (_a4Name != null && _a4Name!.trim().isNotEmpty) _a4Name!.trim(),
+    }.toList();
 
     return Scaffold(
       appBar: null,
@@ -224,9 +317,9 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
           children: [
             Text(
               'Imprimantes',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             TextButton.icon(
@@ -253,9 +346,8 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
                             _loadingPrinters
                                 ? 'Détection des imprimantes…'
                                 : 'Imprimantes détectées (${_printers.length})',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w600),
                           ),
                         ),
                         IconButton(
@@ -269,10 +361,15 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
                       const SizedBox(height: 8),
                       Text(
                         _printerListError!,
-                        style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 13),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
-                    if (!_loadingPrinters && names.isEmpty && _printerListError == null)
+                    if (!_loadingPrinters &&
+                        names.isEmpty &&
+                        _printerListError == null)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
@@ -287,15 +384,31 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: names.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (context, index) =>
+                            const Divider(height: 1),
                         itemBuilder: (ctx, i) {
                           final n = names[i];
-                          final pr = _printers[i];
-                          final def = pr.isDefault ? ' (par défaut)' : '';
+                          final live = _printers
+                              .where((p) => p.name == n)
+                              .toList();
+                          final cached = _cachedPrinters
+                              .where((p) => p.name == n)
+                              .toList();
+                          final url = live.isNotEmpty
+                              ? live.first.url
+                              : (cached.isNotEmpty ? cached.first.url : '');
+                          final isDefault = live.isNotEmpty
+                              ? live.first.isDefault
+                              : (cached.isNotEmpty && cached.first.isDefault);
+                          final def = isDefault ? ' (par défaut)' : '';
                           return ListTile(
                             dense: true,
                             title: Text(n),
-                            subtitle: Text('${pr.url}$def', maxLines: 1, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(
+                              '${url.isEmpty ? 'Source locale' : url}$def',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           );
                         },
                       ),
@@ -313,26 +426,25 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
                     Text(
                       'Enregistrer pour',
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    RadioListTile<PrinterStorageScope>(
-                      title: const Text('Mon compte (recommandé)'),
-                      value: PrinterStorageScope.user,
-                      groupValue: _scope,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        unawaited(_loadSavedForScope(v));
-                      },
-                    ),
-                    RadioListTile<PrinterStorageScope>(
-                      title: const Text('Cet appareil (tous les utilisateurs)'),
-                      value: PrinterStorageScope.device,
-                      groupValue: _scope,
-                      onChanged: (v) {
-                        if (v == null) return;
-                        unawaited(_loadSavedForScope(v));
+                    SegmentedButton<PrinterStorageScope>(
+                      segments: const [
+                        ButtonSegment<PrinterStorageScope>(
+                          value: PrinterStorageScope.user,
+                          label: Text('Mon compte (recommandé)'),
+                        ),
+                        ButtonSegment<PrinterStorageScope>(
+                          value: PrinterStorageScope.device,
+                          label: Text('Cet appareil (tous les utilisateurs)'),
+                        ),
+                      ],
+                      selected: {_scope},
+                      onSelectionChanged: (next) {
+                        if (next.isEmpty) return;
+                        unawaited(_loadSavedForScope(next.first));
                       },
                     ),
                   ],
@@ -347,9 +459,13 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
                     ? Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Expanded(child: _buildAssocCard(context, true, names)),
+                          Expanded(
+                            child: _buildAssocCard(context, true, names),
+                          ),
                           const SizedBox(width: 16),
-                          Expanded(child: _buildAssocCard(context, false, names)),
+                          Expanded(
+                            child: _buildAssocCard(context, false, names),
+                          ),
                         ],
                       )
                     : Column(
@@ -392,22 +508,32 @@ class _PrintersPageState extends ConsumerState<PrintersPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 4),
             Text(
               subtitle,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
+              key: ValueKey<String?>(
+                '${thermal}_${value != null && names.contains(value) ? value : 'null'}_${names.length}',
+              ),
               decoration: const InputDecoration(
                 labelText: 'Imprimante',
                 border: OutlineInputBorder(),
               ),
               isExpanded: true,
-              value: value != null && names.contains(value) ? value : null,
+              initialValue: value != null && names.contains(value)
+                  ? value
+                  : null,
               items: [
                 const DropdownMenuItem<String?>(
                   value: null,

@@ -32,7 +32,8 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   bool _sidebarCollapsed = false;
-  final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey =
+      GlobalKey<ScaffoldState>();
   static const _navItems = [
     (
       path: AppRoutes.dashboard,
@@ -95,11 +96,7 @@ class _AppShellState extends State<AppShell> {
       label: 'Intégrations API',
       icon: Icons.key_rounded,
     ),
-    (
-      path: AppRoutes.printers,
-      label: 'Imprimantes',
-      icon: Icons.print_rounded,
-    ),
+    (path: AppRoutes.printers, label: 'Imprimantes', icon: Icons.print_rounded),
     (
       path: AppRoutes.settings,
       label: 'Paramètres',
@@ -165,7 +162,8 @@ class _AppShellState extends State<AppShell> {
       final canReports =
           permissions.hasPermission(Permissions.reportsViewGlobal) ||
           permissions.hasPermission(Permissions.reportsViewStore);
-      final warehouseModuleOn = company.currentCompany?.warehouseFeatureEnabled ?? true;
+      final warehouseModuleOn =
+          company.currentCompany?.warehouseFeatureEnabled ?? true;
       final aiModuleOn = company.currentCompany?.aiPredictionsEnabled ?? false;
       final canAi =
           permissions.hasPermission(Permissions.aiInsightsView) && aiModuleOn;
@@ -295,14 +293,13 @@ class _AppShellState extends State<AppShell> {
                         child: Builder(
                           builder: (context) {
                             final path = GoRouterState.of(context).uri.path;
-                            final factureTabFullWidth =
-                                path.contains('/facture-tab');
+                            final factureTabFullWidth = path.contains(
+                              '/facture-tab',
+                            );
                             final shellW = MediaQuery.sizeOf(context).width;
                             final maxW = factureTabFullWidth
                                 ? double.infinity
-                                : Breakpoints.effectiveMaxContentWidth(
-                                    shellW,
-                                  );
+                                : Breakpoints.effectiveMaxContentWidth(shellW);
                             final padX = factureTabFullWidth && isWide
                                 ? 10.0
                                 : (isWide
@@ -350,8 +347,7 @@ class _AppShellState extends State<AppShell> {
                       preferredHeight: 58,
                       onMenuPressed: visibleNavItems.isEmpty
                           ? null
-                          : () =>
-                                _mobileScaffoldKey.currentState?.openDrawer(),
+                          : () => _mobileScaffoldKey.currentState?.openDrawer(),
                     ),
                     body: LayoutBuilder(
                       builder: (bodyContext, constraints) {
@@ -370,9 +366,7 @@ class _AppShellState extends State<AppShell> {
                                         : AppTheme.spaceXl));
                         final vertical = factureTabRoute
                             ? 4.0
-                            : (isMobile
-                                  ? AppTheme.spaceMdM
-                                  : AppTheme.spaceMd);
+                            : (isMobile ? AppTheme.spaceMdM : AppTheme.spaceMd);
                         /* La barre du shell est déjà sous la status bar : sans ça, chaque AppBar
                            interne avec primary=true réservait *deux fois* la marge → bande blanche. */
                         return MediaQuery.removePadding(
@@ -496,7 +490,12 @@ class _AppShellState extends State<AppShell> {
                         maxHeight: (h * 0.7).clamp(200.0, 520.0),
                       ),
                       child: SingleChildScrollView(
-                        padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + safeBottom),
+                        padding: EdgeInsets.fromLTRB(
+                          12,
+                          8,
+                          12,
+                          12 + safeBottom,
+                        ),
                         child: moreItems.isEmpty
                             ? Padding(
                                 padding: const EdgeInsets.symmetric(
@@ -524,14 +523,15 @@ class _AppShellState extends State<AppShell> {
                                   final aspect = cellW / tileHeight;
                                   return GridView.builder(
                                     shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
                                     gridDelegate:
                                         SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: crossAxisCount,
-                                      crossAxisSpacing: gap,
-                                      mainAxisSpacing: gap,
-                                      childAspectRatio: aspect,
-                                    ),
+                                          crossAxisCount: crossAxisCount,
+                                          crossAxisSpacing: gap,
+                                          mainAxisSpacing: gap,
+                                          childAspectRatio: aspect,
+                                        ),
                                     itemCount: moreItems.length,
                                     itemBuilder: (context, index) {
                                       final e = moreItems[index];
@@ -559,11 +559,11 @@ class _AppShellState extends State<AppShell> {
                                           splashColor: cs.primary.withValues(
                                             alpha: 0.12,
                                           ),
-                                          highlightColor: cs.primary
-                                              .withValues(alpha: 0.06),
+                                          highlightColor: cs.primary.withValues(
+                                            alpha: 0.06,
+                                          ),
                                           child: Padding(
-                                            padding: const EdgeInsets
-                                                .symmetric(
+                                            padding: const EdgeInsets.symmetric(
                                               horizontal: 2,
                                               vertical: 6,
                                             ),
@@ -578,17 +578,17 @@ class _AppShellState extends State<AppShell> {
                                                   decoration: BoxDecoration(
                                                     color: cs.primary
                                                         .withValues(
-                                                      alpha: 0.14,
-                                                    ),
+                                                          alpha: 0.14,
+                                                        ),
                                                     borderRadius:
                                                         BorderRadius.circular(
-                                                      8,
-                                                    ),
+                                                          8,
+                                                        ),
                                                     border: Border.all(
                                                       color: cs.primary
                                                           .withValues(
-                                                        alpha: 0.22,
-                                                      ),
+                                                            alpha: 0.22,
+                                                          ),
                                                     ),
                                                   ),
                                                   child: Icon(
@@ -601,13 +601,15 @@ class _AppShellState extends State<AppShell> {
                                                 Text(
                                                   e.label,
                                                   style: theme
-                                                      .textTheme.labelSmall
+                                                      .textTheme
+                                                      .labelSmall
                                                       ?.copyWith(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.w600,
-                                                    height: 1.25,
-                                                    color: cs.onSurface,
-                                                  ),
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        height: 1.25,
+                                                        color: cs.onSurface,
+                                                      ),
                                                   textAlign: TextAlign.center,
                                                   maxLines: 2,
                                                   overflow:
@@ -990,8 +992,10 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       _MobileToolbarBrandGlyph(
-                        logoUrl:
-                            context.watch<CompanyProvider>().currentCompany?.logoUrl,
+                        logoUrl: context
+                            .watch<CompanyProvider>()
+                            .currentCompany
+                            ?.logoUrl,
                         primary: primary,
                       ),
                       const SizedBox(width: 8),
@@ -1043,7 +1047,10 @@ class _MobileAppBar extends StatelessWidget implements PreferredSizeWidget {
 String _navDrawerEmailInitials(String email) {
   final local = email.split('@').first.trim();
   if (local.isEmpty) return '?';
-  final parts = local.split(RegExp(r'[._-]+')).where((p) => p.isNotEmpty).toList();
+  final parts = local
+      .split(RegExp(r'[._-]+'))
+      .where((p) => p.isNotEmpty)
+      .toList();
   if (parts.length >= 2 && parts[0].isNotEmpty && parts[1].isNotEmpty) {
     return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
   }
@@ -1069,6 +1076,19 @@ class _MobileNavigationDrawer extends StatelessWidget {
     final primary = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
     final drawerW = min(260.0, MediaQuery.sizeOf(context).width);
+    const webSidebarOrange = Color(0xFFF97316);
+    final drawerBg = isDark
+        ? const Color(0xFF3A1D0F)
+        : Color.alphaBlend(
+            webSidebarOrange.withValues(alpha: 0.34),
+            Colors.white,
+          );
+    final drawerBorderColor = isDark
+        ? const Color(0xFF7C3A12)
+        : Color.alphaBlend(
+            webSidebarOrange.withValues(alpha: 0.34),
+            Colors.black.withValues(alpha: 0.1),
+          );
 
     void closeDrawer() {
       Navigator.of(context).pop();
@@ -1080,30 +1100,11 @@ class _MobileNavigationDrawer extends StatelessWidget {
       elevation: 0,
       child: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDark
-                ? [
-                    theme.colorScheme.surfaceContainerLowest,
-                    theme.colorScheme.surfaceContainerLowest
-                        .withValues(alpha: 0.98),
-                  ]
-                : [
-                    theme.colorScheme.surfaceContainerLowest,
-                    theme.colorScheme.surfaceContainerLow
-                        .withValues(alpha: 0.5),
-                  ],
-          ),
-          border: Border(
-            right: BorderSide(
-              color: theme.dividerColor.withValues(alpha: isDark ? 0.15 : 0.08),
-              width: 1,
-            ),
-          ),
+          color: drawerBg,
+          border: Border(right: BorderSide(color: drawerBorderColor, width: 1)),
           boxShadow: [
             BoxShadow(
-              color: primary.withValues(alpha: isDark ? 0.08 : 0.03),
+              color: primary.withValues(alpha: isDark ? 0.1 : 0.04),
               blurRadius: 24,
               offset: const Offset(-2, 0),
             ),
@@ -1156,7 +1157,7 @@ class _MobileNavigationDrawer extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                'Gestion & caisse',
+                                'G.Commerciale',
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: theme.colorScheme.onSurfaceVariant
                                       .withValues(alpha: 0.9),
@@ -1268,8 +1269,9 @@ class _MobileDrawerMenuPill extends StatelessWidget {
                 Icon(
                   Icons.chevron_left_rounded,
                   size: 22,
-                  color: theme.colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.85),
+                  color: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.85,
+                  ),
                 ),
               ],
             ),
@@ -1429,34 +1431,30 @@ class _Sidebar extends StatelessWidget {
     final width = collapsed ? collapsedWidth : fullWidth;
     final primary = theme.colorScheme.primary;
     final isDark = theme.brightness == Brightness.dark;
+    const webSidebarOrange = Color(0xFFF97316);
+    final sidebarBg = isDark
+        ? const Color(0xFF3A1D0F)
+        : Color.alphaBlend(
+            webSidebarOrange.withValues(alpha: 0.34),
+            Colors.white,
+          );
+    final sidebarBorderColor = isDark
+        ? const Color(0xFF7C3A12)
+        : Color.alphaBlend(
+            webSidebarOrange.withValues(alpha: 0.34),
+            Colors.black.withValues(alpha: 0.1),
+          );
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 280),
       curve: Curves.easeInOutCubic,
       width: width,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [
-                  theme.colorScheme.surfaceContainerLowest,
-                  theme.colorScheme.surfaceContainerLowest.withValues(alpha: 0.98),
-                ]
-              : [
-                  theme.colorScheme.surfaceContainerLowest,
-                  theme.colorScheme.surfaceContainerLow.withValues(alpha: 0.5),
-                ],
-        ),
-        border: Border(
-          right: BorderSide(
-            color: theme.dividerColor.withValues(alpha: isDark ? 0.15 : 0.08),
-            width: 1,
-          ),
-        ),
+        color: sidebarBg,
+        border: Border(right: BorderSide(color: sidebarBorderColor, width: 1)),
         boxShadow: [
           BoxShadow(
-            color: primary.withValues(alpha: isDark ? 0.08 : 0.03),
+            color: primary.withValues(alpha: isDark ? 0.1 : 0.04),
             blurRadius: 24,
             offset: const Offset(-2, 0),
           ),
@@ -1519,7 +1517,7 @@ class _Sidebar extends StatelessWidget {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                             Text(
-                              isAdmin ? 'Plateforme' : 'Gestion & caisse',
+                              isAdmin ? 'Plateforme' : 'G.Commerciale',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant
                                     .withValues(alpha: 0.9),
@@ -1566,7 +1564,9 @@ class _Sidebar extends StatelessWidget {
                 child: Tooltip(
                   message: collapsed ? 'Agrandir le menu' : 'Réduire le menu',
                   child: Material(
-                    color: theme.colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
+                    color: theme.colorScheme.surfaceContainerHigh.withValues(
+                      alpha: 0.6,
+                    ),
                     borderRadius: BorderRadius.circular(AppTheme.radiusLg),
                     child: InkWell(
                       onTap: onToggleCollapse,
@@ -1632,6 +1632,7 @@ class _NavTile extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool collapsed;
+
   /// Ex. fermer le tiroir avant [context.go].
   final VoidCallback? onBeforeNavigate;
 
@@ -1646,6 +1647,11 @@ class _NavTile extends StatelessWidget {
     final theme = Theme.of(context);
     final isActive = _isActive(context);
     final primary = theme.colorScheme.primary;
+    final isDesktop = Breakpoints.isShellDesktop(
+      MediaQuery.sizeOf(context).width,
+    );
+    final collapsedIconSize = isDesktop ? 31.0 : 26.0;
+    final expandedIconSize = isDesktop ? 28.0 : 24.0;
 
     if (collapsed) {
       return Tooltip(
@@ -1673,7 +1679,7 @@ class _NavTile extends StatelessWidget {
                     child: Center(
                       child: Icon(
                         icon,
-                        size: 26,
+                        size: collapsedIconSize,
                         color: isActive
                             ? primary
                             : theme.colorScheme.onSurfaceVariant,
@@ -1707,7 +1713,9 @@ class _NavTile extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Material(
-            color: isActive ? primary.withValues(alpha: 0.1) : Colors.transparent,
+            color: isActive
+                ? primary.withValues(alpha: 0.1)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(AppTheme.radiusMd),
             child: InkWell(
               onTap: () {
@@ -1728,13 +1736,14 @@ class _NavTile extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: isActive
                             ? primary.withValues(alpha: 0.15)
-                            : theme.colorScheme.surfaceContainerHigh
-                                  .withValues(alpha: 0.5),
+                            : theme.colorScheme.surfaceContainerHigh.withValues(
+                                alpha: 0.5,
+                              ),
                         borderRadius: BorderRadius.circular(AppTheme.radiusSm),
                       ),
                       child: Icon(
                         icon,
-                        size: 24,
+                        size: expandedIconSize,
                         color: isActive
                             ? primary
                             : theme.colorScheme.onSurfaceVariant,
@@ -1748,11 +1757,14 @@ class _NavTile extends StatelessWidget {
                           fontWeight: isActive
                               ? FontWeight.w600
                               : FontWeight.w500,
-                          fontSize: 15,
+                          fontSize: 14,
                           color: isActive
                               ? primary
                               : theme.colorScheme.onSurface,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        softWrap: false,
                       ),
                     ),
                   ],
@@ -1840,7 +1852,9 @@ class _BottomNav extends StatelessWidget {
           color: surface.withValues(alpha: isMobile ? 0.965 : 0.95),
           border: Border(
             top: BorderSide(
-              color: theme.dividerColor.withValues(alpha: isMobile ? 0.055 : 0.06),
+              color: theme.dividerColor.withValues(
+                alpha: isMobile ? 0.055 : 0.06,
+              ),
             ),
           ),
           boxShadow: [
@@ -1983,7 +1997,9 @@ class _NavDestination extends StatelessWidget {
                   letterSpacing: isMobile ? -0.22 : -0.2,
                   color: isSelected
                       ? primary
-                      : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+                      : theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.75,
+                        ),
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

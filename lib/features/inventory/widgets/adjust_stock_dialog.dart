@@ -6,6 +6,7 @@ import '../../../core/utils/app_toast.dart';
 import '../../../data/repositories/inventory_repository.dart';
 
 enum _AdjustMode { delta, inventory }
+enum _DeltaDirection { add, subtract }
 
 /// Produit pour ajustement (même contrat que web AdjustStockDialog).
 class AdjustStockProduct {
@@ -13,12 +14,14 @@ class AdjustStockProduct {
     required this.id,
     required this.name,
     this.sku,
+    this.imageUrl,
     required this.unit,
     required this.currentQty,
   });
   final String id;
   final String name;
   final String? sku;
+  final String? imageUrl;
   final String unit;
   final int currentQty;
 }
@@ -59,6 +62,7 @@ class AdjustStockDialog extends StatefulWidget {
 class _AdjustStockDialogState extends State<AdjustStockDialog> {
   final InventoryRepository _repo = InventoryRepository();
   _AdjustMode _mode = _AdjustMode.delta;
+  _DeltaDirection _deltaDirection = _DeltaDirection.add;
   final TextEditingController _deltaController = TextEditingController();
   final TextEditingController _countedController = TextEditingController();
   final TextEditingController _reasonController = TextEditingController();
@@ -71,8 +75,9 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
       if (c != null && c >= 0) return c - widget.product.currentQty;
       return 0;
     }
-    final d = int.tryParse(_deltaController.text);
-    return d ?? 0;
+    final quantity = int.tryParse(_deltaController.text);
+    if (quantity == null || quantity <= 0) return 0;
+    return _deltaDirection == _DeltaDirection.add ? quantity : -quantity;
   }
 
   bool get _needsAdjust => _computedDelta != 0;
@@ -80,7 +85,7 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
   @override
   void initState() {
     super.initState();
-    _countedController.text = '${widget.product.currentQty}';
+    _reasonController.text = 'Ajustement manuel';
   }
 
   @override
@@ -161,6 +166,53 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
     }
   }
 
+  void _openImagePreview(BuildContext context, String imageUrl) {
+    final screenW = MediaQuery.sizeOf(context).width;
+    final previewSize = screenW >= 640 ? 170.0 : 140.0;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.30),
+      builder: (ctx) {
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => Navigator.of(ctx).pop(),
+          child: Center(
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                width: previewSize,
+                height: previewSize,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black.withValues(alpha: 0.10)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => Icon(
+                    Icons.inventory_2,
+                    color: Theme.of(ctx).colorScheme.outline,
+                    size: 48,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -187,7 +239,30 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                       color: theme.colorScheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(Icons.inventory_2_rounded, color: theme.colorScheme.onSurfaceVariant),
+                    clipBehavior: Clip.antiAlias,
+                    child: widget.product.imageUrl != null &&
+                            widget.product.imageUrl!.isNotEmpty
+                        ? Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () => _openImagePreview(
+                                context,
+                                widget.product.imageUrl!,
+                              ),
+                              child: Image.network(
+                                widget.product.imageUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Icon(
+                                  Icons.inventory_2_rounded,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                          )
+                        : Icon(
+                            Icons.inventory_2_rounded,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -225,21 +300,56 @@ class _AdjustStockDialogState extends State<AdjustStockDialog> {
                 setState(() {
                   _mode = s.first;
                   if (_mode == _AdjustMode.inventory) {
-                    _countedController.text = '${widget.product.currentQty}';
                     _reasonController.text = 'Inventaire';
+                  } else {
+                    _reasonController.text = 'Ajustement manuel';
                   }
                 });
               },
             ),
             const SizedBox(height: 16),
             if (_mode == _AdjustMode.delta) ...[
-              Text('Variation (positif = entrée, négatif = sortie)', style: theme.textTheme.labelMedium),
+              SegmentedButton<_DeltaDirection>(
+                segments: const [
+                  ButtonSegment(
+                    value: _DeltaDirection.add,
+                    label: Text('Ajouter'),
+                    icon: Icon(Icons.add_rounded, size: 18),
+                  ),
+                  ButtonSegment(
+                    value: _DeltaDirection.subtract,
+                    label: Text('Diminuer'),
+                    icon: Icon(Icons.remove_rounded, size: 18),
+                  ),
+                ],
+                selected: {_deltaDirection},
+                style: ButtonStyle(
+                  padding: WidgetStateProperty.all(
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  minimumSize: WidgetStateProperty.all(
+                    const Size(0, Breakpoints.minTouchTarget),
+                  ),
+                ),
+                onSelectionChanged: (s) {
+                  setState(() {
+                    _deltaDirection = s.first;
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _deltaDirection == _DeltaDirection.add
+                    ? 'Quantité à ajouter au stock'
+                    : 'Quantité à retirer du stock',
+                style: theme.textTheme.labelMedium,
+              ),
               const SizedBox(height: 6),
               TextField(
                 controller: _deltaController,
-                keyboardType: const TextInputType.numberWithOptions(signed: true),
+                keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
-                  hintText: 'Ex: 10 ou -5',
+                  hintText: 'Ex: 10',
                   border: OutlineInputBorder(),
                   contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 ),
