@@ -67,6 +67,11 @@ class AppErrorHandler {
     }
     if (s.contains('bad gateway') && s.contains('cloudflare')) return true;
     if (s.contains('connection closed before full header')) return true;
+    if (s.contains('connection terminated during handshake')) return true;
+    if (s.contains('handshakeexception')) return true;
+    if (s.contains('failed host lookup')) return true;
+    if (s.contains('socketexception')) return true;
+    if (s.contains('sémaphore') || s.contains('semaphore')) return true;
     if (s.contains('authretryablefetchexception')) return true;
     if (s.contains('invalidjwttoken') && s.contains('expired')) return true;
     if (s.contains('refresh_token_not_found')) return true;

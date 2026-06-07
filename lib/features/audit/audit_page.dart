@@ -8,6 +8,8 @@ import '../../../data/models/audit_log.dart';
 import '../../../data/repositories/audit_repository.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../core/breakpoints.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 
 /// Page Journal d'audit — liste des actions (produits, ventes, paramètres, etc.) pour l'entreprise.
 class AuditPage extends ConsumerStatefulWidget {
@@ -97,26 +99,54 @@ class _AuditPageState extends ConsumerState<AuditPage> {
 
     final theme = Theme.of(context);
     final dateFormat = DateFormat('dd/MM/yyyy HH:mm', 'fr_FR');
+    final shellMobile = Breakpoints.isMobile(MediaQuery.sizeOf(context).width);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Journal d\'audit'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.filter_list_rounded),
-            onPressed: () => _showFilterSheet(context),
-            tooltip: 'Filtres',
-          ),
-          IconButton(
-            icon: const Icon(Icons.refresh_rounded),
-            onPressed: () => _load(reset: true),
-            tooltip: 'Actualiser',
-          ),
-        ],
-      ),
+      appBar: shellMobile
+          ? null
+          : AppBar(
+              title: const Text('Journal d\'audit'),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.filter_list_rounded),
+                  onPressed: () => _showFilterSheet(context),
+                  tooltip: 'Filtres',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  onPressed: () => _load(reset: true),
+                  tooltip: 'Actualiser',
+                ),
+              ],
+            ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (shellMobile) ...[
+            const FsMobilePageHeader(
+              title: 'Journal d\'audit',
+              subtitle: 'Historique des actions sur votre entreprise',
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.filter_list_rounded),
+                    onPressed: () => _showFilterSheet(context),
+                    tooltip: 'Filtres',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh_rounded),
+                    onPressed: () => _load(reset: true),
+                    tooltip: 'Actualiser',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (_fromDate != null || _toDate != null || _filterAction != null || _filterEntityType != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),

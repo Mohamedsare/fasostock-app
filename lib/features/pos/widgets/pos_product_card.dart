@@ -47,8 +47,8 @@ class PosProductCard extends StatelessWidget {
             const hPad = 10.0;
             const vPad = 8.0;
             const gapBelowImage = 3.0;
-            // Réserve nom (2 lignes ~13px) + prix — évite overflow de ~1–2px sur grilles serrées.
-            const minTextBlock = 38.0;
+            // Réserve nom (2 lignes ~12px) + prix — évite overflow de ~1–2px sur grilles serrées.
+            const minTextBlock = 36.0;
             final maxImg = 98.0;
             final sideBudget = constraints.maxWidth - 2 * hPad;
             final heightBudget = constraints.maxHeight -
@@ -120,7 +120,7 @@ class PosProductCard extends StatelessWidget {
                             style: TextStyle(
                               color: cs.onSurface,
                               fontWeight: FontWeight.w600,
-                              fontSize: 13,
+                              fontSize: 12,
                               height: 1.2,
                             ),
                             maxLines: 2,
@@ -174,7 +174,7 @@ class PosProductCard extends StatelessWidget {
               final innerH = h - 2 * padV;
               final gapAfterThumb = innerH < 112 ? 2.0 : (innerH < 126 ? 3.0 : 4.0);
               final nameLines = innerH < 128 ? 1 : 2;
-              final nameFontSize = innerH < 112 ? 9.0 : (innerH < 124 ? 10.0 : 11.0);
+              final nameFontSize = innerH < 112 ? 8.0 : (innerH < 124 ? 9.0 : 10.0);
               final nameLineHeight = 1.12;
               final nameBlockH = nameFontSize * nameLineHeight * nameLines;
               const gapNameToPrice = 2.0;

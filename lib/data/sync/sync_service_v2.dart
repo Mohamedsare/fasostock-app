@@ -143,6 +143,8 @@ class SyncServiceV2 {
             await _pushWarehouseManualEntry(payload);
           } else if (kind == 'warehouse_dispatch_invoice') {
             await _pushWarehouseDispatchInvoice(payload, customerIdMap);
+          } else if (kind == 'warehouse_update_dispatch_invoice') {
+            await _pushWarehouseUpdateDispatchInvoice(payload, customerIdMap);
           } else if (kind == 'warehouse_dispatch_void') {
             await _pushWarehouseDispatchVoid(payload);
           } else if (kind == 'warehouse_adjustment') {
@@ -1056,6 +1058,56 @@ class SyncServiceV2 {
     );
   }
 
+  /// Mise à jour d’un bon de sortie déjà existant (même RPC que le formulaire en ligne).
+  Future<void> _pushWarehouseUpdateDispatchInvoice(
+    Map<String, dynamic> payload,
+    Map<String, String> customerIdMap,
+  ) async {
+    final companyId = payload['company_id'] as String?;
+    final invoiceId = (payload['invoice_id'] as String?)?.trim() ?? '';
+    if (companyId == null || companyId.isEmpty) {
+      throw StateError('warehouse_update_dispatch_invoice: company_id manquant');
+    }
+    if (invoiceId.isEmpty) {
+      throw StateError('warehouse_update_dispatch_invoice: invoice_id manquant');
+    }
+    var customerId = payload['customer_id'] as String?;
+    if (customerId != null && customerId.startsWith(_pendingCustomerPrefix)) {
+      final resolved = customerIdMap[customerId];
+      if (resolved == null || resolved.isEmpty) {
+        throw StateError(
+          'warehouse_update_dispatch_invoice: client en attente de synchronisation',
+        );
+      }
+      customerId = resolved;
+    }
+    final rawLines = payload['lines'];
+    if (rawLines is! List || rawLines.isEmpty) {
+      throw StateError(
+        'warehouse_update_dispatch_invoice: lines manquantes ou vides',
+      );
+    }
+    final lines = <WarehouseDispatchLineInput>[];
+    for (final e in rawLines) {
+      final m = Map<String, dynamic>.from(e as Map);
+      lines.add(
+        WarehouseDispatchLineInput(
+          productId: m['product_id'] as String,
+          quantity: _payloadInt(m['quantity']),
+          unitPrice: _payloadDouble(m['unit_price']),
+        ),
+      );
+    }
+    final cid = customerId?.trim();
+    await _warehouseRepo.updateDispatchInvoice(
+      companyId: companyId,
+      invoiceId: invoiceId,
+      customerId: cid == null || cid.isEmpty ? null : cid,
+      notes: payload['notes'] as String?,
+      lines: lines,
+    );
+  }
+
   Future<void> _pushWarehouseDispatchVoid(Map<String, dynamic> payload) async {
     final companyId = payload['company_id'] as String?;
     final invoiceId = payload['invoice_id'] as String?;
@@ -1149,6 +1201,9 @@ class SyncServiceV2 {
         m.contains('sale_payments_amount_check') ||
         m.contains(
           'warehouse_dispatch_invoice: client en attente de synchronisation',
+        ) ||
+        m.contains(
+          'warehouse_update_dispatch_invoice: client en attente de synchronisation',
         ) ||
         m.contains('warehouse_exit_sale: sale_id local en attente de sync');
   }

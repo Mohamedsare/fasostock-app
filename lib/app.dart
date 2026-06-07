@@ -13,7 +13,8 @@ import 'providers/theme_mode_provider.dart';
 import 'providers/pos_cart_settings_provider.dart';
 
 /// Point d'entrée UI — thème, Providers, GoRouter.
-/// Sur mobile (width < 600), thème et textScaler réduits pour tout afficher correctement.
+/// Sur mobile (width < 600), thème mobile Material 3 natif (tailles tactiles 48px,
+/// typo M3 mobile, transitions de page modernes Zoom/Cupertino).
 class FasoStockApp extends StatelessWidget {
   const FasoStockApp({
     super.key,
@@ -62,11 +63,18 @@ class FasoStockApp extends StatelessWidget {
             themeMode: themeModeProvider.themeMode,
             routerConfig: router,
             builder: (context, child) {
-              if (!isMobile) return child ?? const SizedBox.shrink();
+              /* Respect des préférences d'accessibilité du système (text scale),
+                 mais BORNAGE STRICT pour préserver la mise en page :
+                 - mobile : 0.9–1.05 (cap serré car les layouts sont denses)
+                 - desktop : 0.9–1.15 (plus de marge horizontale, peut absorber un peu)
+                 Sans ce clamp, un user avec préférence système 1.3x faisait éclater toutes les Rows. */
+              final mq = MediaQuery.of(context);
+              final clamped = mq.textScaler.clamp(
+                minScaleFactor: 0.9,
+                maxScaleFactor: isMobile ? 1.05 : 1.15,
+              );
               return MediaQuery(
-                data: MediaQuery.of(context).copyWith(
-                  textScaler: TextScaler.linear(0.92),
-                ),
+                data: mq.copyWith(textScaler: clamped),
                 child: child ?? const SizedBox.shrink(),
               );
             },

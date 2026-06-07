@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Même orange ; fond sombre pour cohérence avec Flutter dark + splash route -->
+    <color name="faso_splash_bg">#FF121212</color>
+    <color name="faso_splash_mark_fill">#33F97316</color>
+    <color name="faso_splash_mark_stroke">#CCF97316</color>
+</resources>

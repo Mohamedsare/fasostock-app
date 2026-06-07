@@ -29,6 +29,7 @@ import '../../../providers/permissions_provider.dart';
 import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
 import '../pos/services/receipt_thermal_print_service.dart';
 import '../pos/widgets/receipt_ticket_dialog.dart';
 import 'pos_quick_constants.dart';
@@ -608,22 +609,28 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       return;
     }
     if (_stockWarnings(stockByProductId).isNotEmpty) {
+      FsHaptic.warning();
       AppToast.error(context, 'Stock insuffisant pour certains articles.');
       return;
     }
     if (_paymentMethod == PaymentMethod.cash &&
         _amountReceivedTouched &&
         _amountReceived < _total) {
+      FsHaptic.warning();
       AppToast.error(context, 'Montant reçu insuffisant.');
       return;
     }
     if (_cart.any((c) => c.quantity <= 0)) {
+      FsHaptic.warning();
       AppToast.error(
         context,
         'Indiquez une quantité supérieure à 0 pour chaque ligne du panier.',
       );
       return;
     }
+    /* Haptique de validation : encaissement = action métier majeure → impact moyen,
+       feedback tactile fort sur Android/iOS. */
+    FsHaptic.medium();
 
     if (_activeEditSaleId != null) {
       if (!ConnectivityService.instance.isOnline) {
@@ -1871,47 +1878,86 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              /* Lignes de totaux : label à gauche (peut ellipser), montant à droite
+                 (FittedBox.scaleDown pour absorber les très grands nombres sans
+                 déborder de 6-7 px sur petits écrans). */
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Sous-total', style: TextStyle(color: cs.onSurface)),
-                  Text(
-                    formatCurrency(_subtotal),
-                    style: TextStyle(color: cs.onSurface),
+                  Expanded(
+                    child: Text(
+                      'Sous-total',
+                      style: TextStyle(color: cs.onSurface),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        formatCurrency(_subtotal),
+                        style: TextStyle(color: cs.onSurface),
+                      ),
+                    ),
                   ),
                 ],
               ),
               if (showDiscount || _discount > 0) ...[
                 const SizedBox(height: 4),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Remise', style: TextStyle(color: cs.onSurface)),
-                    Text(
-                      formatCurrency(_discount),
-                      style: TextStyle(color: cs.onSurface),
+                    Expanded(
+                      child: Text(
+                        'Remise',
+                        style: TextStyle(color: cs.onSurface),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          formatCurrency(_discount),
+                          style: TextStyle(color: cs.onSurface),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ],
               const SizedBox(height: 8),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'TOTAL',
-                    style: TextStyle(
-                      color: cs.onSurface,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 16,
+                  Expanded(
+                    child: Text(
+                      'TOTAL',
+                      style: TextStyle(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(
-                    formatCurrency(_total),
-                    style: const TextStyle(
-                      color: PosQuickColors.orangePrincipal,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 22,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        formatCurrency(_total),
+                        style: const TextStyle(
+                          color: PosQuickColors.orangePrincipal,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 22,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1996,21 +2042,31 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Monnaie à rendre',
-                    style: TextStyle(color: cs.onSurface),
+                  Expanded(
+                    child: Text(
+                      'Monnaie à rendre',
+                      style: TextStyle(color: cs.onSurface),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  Text(
-                    _amountReceived >= _total
-                        ? formatCurrency(_amountReceived - _total)
-                        : '—',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: _amountReceived >= _total
-                          ? PosQuickColors.orangePrincipal
-                          : Colors.red,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        _amountReceived >= _total
+                            ? formatCurrency(_amountReceived - _total)
+                            : '—',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: _amountReceived >= _total
+                              ? PosQuickColors.orangePrincipal
+                              : Colors.red,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -2047,7 +2103,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   child: Text(
-                    _activeEditSaleId != null ? 'Quitter' : 'Annuler vente',
+                    _activeEditSaleId != null ? 'Quitter' : 'Annuler',
                   ),
                 ),
               ),
@@ -2081,7 +2137,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                         ? 'Enregistrement...'
                         : (_activeEditSaleId != null
                               ? 'ENREGISTRER LA MODIFICATION'
-                              : 'VALIDER ET IMPRIMER'),
+                              : 'VALIDER'),
                   ),
                 ),
               ),
@@ -2178,24 +2234,23 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.shopping_cart_rounded,
-                                color: PosQuickColors.orangePrincipal,
+                          Icon(
+                            Icons.shopping_cart_rounded,
+                            color: PosQuickColors.orangePrincipal,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: sheetCs.onSurface,
+                                fontSize: 16,
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Panier • $_cartItemCount article${_cartItemCount != 1 ? 's' : ''}',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: sheetCs.onSurface,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           IconButton(
                             onPressed: () => Navigator.of(sheetContext).pop(),
@@ -2256,6 +2311,8 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     });
   }
 
+  /// Barre POS mobile native — grosse zone tactile pour caissier en mouvement.
+  /// Hauteurs généreuses (56), espacements aérés, haptique au tap, badge compteur d'articles.
   Widget _buildMobileBottomBar(
     ThemeData theme,
     Store? store,
@@ -2264,44 +2321,101 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     required bool showQuantityButtons,
   }) {
     final cs = theme.colorScheme;
+    final hasItems = _cartItemCount > 0;
+    void openCart() {
+      FsHaptic.selection();
+      _openCartSheet(
+        store,
+        stockByProductId,
+        showQuantityInput: showQuantityInput,
+        showQuantityButtons: showQuantityButtons,
+      );
+    }
+
     return Container(
       padding: EdgeInsets.fromLTRB(
         16,
-        12,
+        14,
         16,
-        12 + MediaQuery.paddingOf(context).bottom,
+        14 + MediaQuery.paddingOf(context).bottom,
       ),
       decoration: BoxDecoration(
         color: cs.surface,
         border: Border(
-          top: BorderSide(color: cs.outline.withValues(alpha: 0.4)),
+          top: BorderSide(color: cs.outline.withValues(alpha: 0.18)),
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -3),
+            spreadRadius: -4,
+          ),
+        ],
       ),
       child: Row(
         children: [
           Expanded(
             child: Material(
-              color: Colors.transparent,
+              color: cs.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(16),
               child: InkWell(
-                onTap: () => _openCartSheet(
-                  store,
-                  stockByProductId,
-                  showQuantityInput: showQuantityInput,
-                  showQuantityButtons: showQuantityButtons,
-                ),
-                borderRadius: BorderRadius.circular(12),
+                onTap: openCart,
+                borderRadius: BorderRadius.circular(16),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 48),
+                  constraints: const BoxConstraints(minHeight: 56),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.shopping_cart_rounded,
-                          color: PosQuickColors.orangePrincipal,
-                          size: 26,
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Icon(
+                              Icons.shopping_cart_rounded,
+                              color: PosQuickColors.orangePrincipal,
+                              size: 28,
+                            ),
+                            if (hasItems)
+                              Positioned(
+                                right: -6,
+                                top: -6,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: PosQuickColors.orangePrincipal,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: cs.surface,
+                                      width: 1.5,
+                                    ),
+                                  ),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 18,
+                                  ),
+                                  child: Text(
+                                    _cartItemCount > 99
+                                        ? '99+'
+                                        : '$_cartItemCount',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.1,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 14),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2311,17 +2425,24 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
                               Text(
                                 'Panier',
                                 style: theme.textTheme.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: FontWeight.w700,
                                   color: cs.onSurface,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
+                              const SizedBox(height: 2),
                               Text(
-                                '$_cartItemCount article${_cartItemCount != 1 ? 's' : ''} • ${formatCurrency(_total)}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                  fontSize: 12,
+                                hasItems
+                                    ? formatCurrency(_total)
+                                    : 'Aucun article',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: hasItems
+                                      ? PosQuickColors.orangePrincipal
+                                      : cs.onSurfaceVariant,
+                                  fontWeight: hasItems
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -2338,19 +2459,23 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
           ),
           const SizedBox(width: 12),
           SizedBox(
-            height: 48,
-            child: FilledButton(
-              onPressed: () => _openCartSheet(
-                store,
-                stockByProductId,
-                showQuantityInput: showQuantityInput,
-                showQuantityButtons: showQuantityButtons,
-              ),
+            height: 56,
+            child: FilledButton.icon(
+              onPressed: openCart,
               style: FilledButton.styleFrom(
                 backgroundColor: PosQuickColors.orangePrincipal,
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-              child: const Text('Voir / Payer'),
+              icon: const Icon(Icons.point_of_sale_rounded, size: 22),
+              label: const Text('Payer'),
             ),
           ),
         ],

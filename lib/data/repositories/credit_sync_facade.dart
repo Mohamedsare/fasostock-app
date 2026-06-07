@@ -6,6 +6,7 @@ import 'package:drift/drift.dart';
 import '../../core/connectivity/connectivity_service.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../local/drift/app_database.dart';
+import '../models/append_payment_result.dart';
 import '../models/sale.dart';
 import 'credit_repository.dart';
 import 'offline/sales_offline_repository.dart';
@@ -58,7 +59,7 @@ class CreditSyncFacade {
     }
   }
 
-  Future<void> appendSalePayment({
+  Future<AppendPaymentResult> appendSalePayment({
     required String saleId,
     required PaymentMethod method,
     required double amount,
@@ -72,7 +73,7 @@ class CreditSyncFacade {
     }
     if (_connectivity.isOnline) {
       try {
-        await _remote.appendSalePayment(
+        final result = await _remote.appendSalePayment(
           saleId: saleId,
           method: method,
           amount: amount,
@@ -90,6 +91,7 @@ class CreditSyncFacade {
             logContext: {'op': 'refreshPaymentsAfterRpc', 'sale_id': saleId},
           );
         }
+        return result;
       } catch (e, st) {
         AppErrorHandler.logWithContext(
           e,
@@ -99,7 +101,6 @@ class CreditSyncFacade {
         );
         rethrow;
       }
-      return;
     }
 
     final localPayId =
@@ -125,6 +126,10 @@ class CreditSyncFacade {
           'reference': reference,
           'local_payment_id': localPayId,
         }),
+      );
+      return AppendPaymentResult(
+        paymentId: localPayId,
+        createdAt: DateTime.parse(createdAt),
       );
     } catch (e, st) {
       AppErrorHandler.logWithContext(

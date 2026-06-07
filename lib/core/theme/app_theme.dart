@@ -26,19 +26,19 @@ class AppTheme {
   static const double radiusLg = 16;
   static const double radiusXl = 20;
 
-  /// Espacements MOBILE uniquement (tout réduire pour petit écran)
-  static const double spaceXsM = 3;
-  static const double spaceSmM = 6;
-  static const double spaceMdM = 8;
-  static const double spaceLgM = 10;
-  static const double spaceXlM = 14;
-  static const double spaceXxlM = 20;
+  /// Espacements MOBILE — design system natif Material 3 (4-pt grid).
+  static const double spaceXsM = 4;
+  static const double spaceSmM = 8;
+  static const double spaceMdM = 12;
+  static const double spaceLgM = 16;
+  static const double spaceXlM = 20;
+  static const double spaceXxlM = 28;
 
-  /// Rayons mobile (légèrement réduits)
-  static const double radiusSmM = 8;
-  static const double radiusMdM = 10;
-  static const double radiusLgM = 12;
-  static const double radiusXlM = 14;
+  /// Rayons mobile — alignés sur l'échelle Material 3 (XS:4, S:8, M:12, L:16, XL:28).
+  static const double radiusSmM = 12;
+  static const double radiusMdM = 16;
+  static const double radiusLgM = 20;
+  static const double radiusXlM = 28;
 
   static ThemeData light() {
     final colorScheme = ColorScheme.fromSeed(
@@ -343,17 +343,20 @@ class AppTheme {
       scaffoldBackgroundColor: _surfaceLight,
       fontFamily: 'Roboto',
       textTheme: _buildTextThemeMobile(Brightness.light),
+      pageTransitionsTheme: _mobilePageTransitionsTheme,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: Colors.transparent,
+        scrolledUnderElevation: 3,
+        shadowColor: Colors.black.withValues(alpha: 0.08),
+        backgroundColor: _cardLight,
         surfaceTintColor: Colors.transparent,
-        toolbarHeight: 58,
-        iconTheme: IconThemeData(color: colorScheme.onSurface, size: 20),
+        toolbarHeight: 56,
+        iconTheme: IconThemeData(color: colorScheme.onSurface, size: 22),
+        actionsIconTheme: IconThemeData(color: colorScheme.onSurface, size: 22),
         titleTextStyle: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
           letterSpacing: -0.2,
           color: colorScheme.onSurface,
         ),
@@ -374,45 +377,51 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusMdM),
-          borderSide: const BorderSide(color: _accent, width: 1.2),
+          borderSide: const BorderSide(color: _accent, width: 1.5),
         ),
         filled: true,
         fillColor: _surfaceContainerLight,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65), fontSize: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.65), fontSize: 14),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
           side: BorderSide(color: colorScheme.outline.withValues(alpha: 0.3)),
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.padded,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
         ),
       ),
       listTileTheme: ListTileThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSmM)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        minLeadingWidth: 32,
-        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        minLeadingWidth: 40,
       ),
       dividerTheme: DividerThemeData(
         color: colorScheme.outline.withValues(alpha: 0.08),
@@ -421,37 +430,38 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSmM)),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        labelStyle: const TextStyle(fontSize: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        labelStyle: const TextStyle(fontSize: 13),
       ),
       dialogTheme: DialogThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXlM)),
         titleTextStyle: TextStyle(
-          fontSize: 15,
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           color: colorScheme.onSurface,
         ),
-        contentTextStyle: TextStyle(fontSize: 12, height: 1.4, color: colorScheme.onSurface),
+        contentTextStyle: TextStyle(fontSize: 15, height: 1.5, color: colorScheme.onSurface),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 52,
+        height: 60,
         elevation: 0,
         backgroundColor: _cardLight,
         indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
-          size: 18,
+          size: 22,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
         )),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
               color: colorScheme.primary,
             );
           }
           return TextStyle(
-            fontSize: 9,
+            fontSize: 11,
             fontWeight: FontWeight.w500,
             color: colorScheme.onSurfaceVariant,
           );
@@ -463,15 +473,29 @@ class AppTheme {
         contentTextStyle: TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w500,
-          fontSize: 12,
+          fontSize: 14,
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: _cardLight,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+        dragHandleColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(radiusXlM)),
         ),
       ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: colorScheme.inverseSurface,
+          borderRadius: BorderRadius.circular(radiusSmM),
+        ),
+        textStyle: TextStyle(
+          fontSize: 12,
+          color: colorScheme.onInverseSurface,
+        ),
+      ),
+      splashFactory: InkSparkle.splashFactory,
     );
   }
 
@@ -496,17 +520,20 @@ class AppTheme {
       scaffoldBackgroundColor: _surfaceDark,
       fontFamily: 'Roboto',
       textTheme: _buildTextThemeMobile(Brightness.dark),
+      pageTransitionsTheme: _mobilePageTransitionsTheme,
       appBarTheme: AppBarTheme(
         centerTitle: false,
         elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: Colors.transparent,
+        scrolledUnderElevation: 3,
+        shadowColor: Colors.black.withValues(alpha: 0.25),
+        backgroundColor: _surfaceContainerDark,
         surfaceTintColor: Colors.transparent,
-        toolbarHeight: 58,
-        iconTheme: IconThemeData(color: colorScheme.onSurface, size: 20),
+        toolbarHeight: 56,
+        iconTheme: IconThemeData(color: colorScheme.onSurface, size: 22),
+        actionsIconTheme: IconThemeData(color: colorScheme.onSurface, size: 22),
         titleTextStyle: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
           letterSpacing: -0.2,
           color: colorScheme.onSurface,
         ),
@@ -522,68 +549,75 @@ class AppTheme {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(radiusMdM)),
         filled: true,
         fillColor: const Color(0xFF2C2C2C),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          minimumSize: const Size(0, 40),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
-          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.padded,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusMdM)),
         ),
       ),
       listTileTheme: ListTileThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusSmM)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-        minLeadingWidth: 32,
-        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        minLeadingWidth: 40,
       ),
       dialogTheme: DialogThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusXlM)),
         titleTextStyle: TextStyle(
-          fontSize: 15,
+          fontSize: 20,
           fontWeight: FontWeight.w600,
           color: colorScheme.onSurface,
         ),
-        contentTextStyle: TextStyle(fontSize: 12, height: 1.4, color: colorScheme.onSurface),
+        contentTextStyle: TextStyle(fontSize: 15, height: 1.5, color: colorScheme.onSurface),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        height: 52,
+        height: 60,
         elevation: 0,
         backgroundColor: _surfaceContainerDark,
         indicatorColor: colorScheme.primaryContainer.withValues(alpha: 0.9),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
-          size: 18,
+          size: 22,
           color: states.contains(WidgetState.selected) ? colorScheme.primary : colorScheme.onSurfaceVariant,
         )),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
               color: colorScheme.primary,
             );
           }
           return TextStyle(
-            fontSize: 9,
+            fontSize: 11,
             fontWeight: FontWeight.w500,
             color: colorScheme.onSurfaceVariant,
           );
@@ -595,19 +629,54 @@ class AppTheme {
         contentTextStyle: TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w500,
-          fontSize: 12,
+          fontSize: 14,
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: _surfaceContainerDark,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+        dragHandleColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.35),
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(radiusXlM)),
         ),
       ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: colorScheme.inverseSurface,
+          borderRadius: BorderRadius.circular(radiusSmM),
+        ),
+        textStyle: TextStyle(
+          fontSize: 12,
+          color: colorScheme.onInverseSurface,
+        ),
+      ),
+      splashFactory: InkSparkle.splashFactory,
     );
   }
 
-  /// Text theme pour MOBILE — toutes les tailles réduites.
+  /// Transitions de page modernes (Android : zoom Material 3 ; iOS : slide Cupertino).
+  /// Sur mobile en particulier, donne un vrai "feel" natif lors de la navigation push/pop.
+  static const PageTransitionsTheme _mobilePageTransitionsTheme =
+      PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: ZoomPageTransitionsBuilder(
+            allowEnterRouteSnapshotting: false,
+          ),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.linux: ZoomPageTransitionsBuilder(
+            allowEnterRouteSnapshotting: false,
+          ),
+          TargetPlatform.windows: ZoomPageTransitionsBuilder(
+            allowEnterRouteSnapshotting: false,
+          ),
+        },
+      );
+
+  /// Text theme pour MOBILE — échelle "Compact M3" : plus grosse et lisible que l'origine
+  /// (titleMedium=13, bodyLarge=13) mais plus compacte que M3 par défaut pour respecter
+  /// les layouts denses (cartes, chips, filtres) déjà conçus dans l'app.
   static TextTheme _buildTextThemeMobile(Brightness brightness) {
     final base = brightness == Brightness.light
         ? Typography.material2021().black
@@ -617,93 +686,102 @@ class AppTheme {
         : const Color(0xFFE6E1E5);
     return TextTheme(
       displayLarge: base.displayLarge?.copyWith(
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         letterSpacing: -0.5,
         color: color,
-        fontSize: 20,
+        fontSize: 28,
+        height: 1.15,
       ),
       displayMedium: base.displayMedium?.copyWith(
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         letterSpacing: -0.4,
         color: color,
-        fontSize: 18,
+        fontSize: 24,
+        height: 1.2,
       ),
       displaySmall: base.displaySmall?.copyWith(
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
         letterSpacing: -0.3,
         color: color,
-        fontSize: 16,
+        fontSize: 20,
+        height: 1.25,
       ),
       headlineLarge: base.headlineLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-        fontSize: 20,
+        fontWeight: FontWeight.w700,
+        fontSize: 22,
         letterSpacing: -0.3,
         height: 1.25,
         color: color,
       ),
       headlineMedium: base.headlineMedium?.copyWith(
-        fontWeight: FontWeight.w600,
-        fontSize: 17,
+        fontWeight: FontWeight.w700,
+        fontSize: 19,
         letterSpacing: -0.2,
         height: 1.3,
         color: color,
       ),
       headlineSmall: base.headlineSmall?.copyWith(
         fontWeight: FontWeight.w600,
-        fontSize: 14,
-        height: 1.35,
+        fontSize: 17,
+        height: 1.3,
         color: color,
       ),
       titleLarge: base.titleLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-        fontSize: 15,
+        fontWeight: FontWeight.w700,
+        fontSize: 16,
         letterSpacing: -0.2,
         height: 1.3,
         color: color,
       ),
       titleMedium: base.titleMedium?.copyWith(
         fontWeight: FontWeight.w600,
-        fontSize: 13,
-        height: 1.35,
+        fontSize: 14,
+        height: 1.4,
+        letterSpacing: 0.1,
         color: color,
       ),
       titleSmall: base.titleSmall?.copyWith(
         fontWeight: FontWeight.w600,
-        fontSize: 12,
+        fontSize: 13,
         height: 1.4,
+        letterSpacing: 0.1,
         color: color,
       ),
       bodyLarge: base.bodyLarge?.copyWith(
-        fontSize: 13,
+        fontSize: 14,
         height: 1.45,
+        letterSpacing: 0.15,
         color: color,
       ),
       bodyMedium: base.bodyMedium?.copyWith(
-        fontSize: 12,
+        fontSize: 13,
         height: 1.4,
+        letterSpacing: 0.2,
         color: color,
       ),
       bodySmall: base.bodySmall?.copyWith(
         fontSize: 11,
-        height: 1.35,
+        height: 1.4,
+        letterSpacing: 0.3,
         color: color.withValues(alpha: 0.85),
       ),
       labelLarge: base.labelLarge?.copyWith(
         fontWeight: FontWeight.w600,
-        fontSize: 12,
+        fontSize: 13,
         letterSpacing: 0.1,
         color: color,
       ),
       labelMedium: base.labelMedium?.copyWith(
         fontWeight: FontWeight.w500,
         fontSize: 11,
+        letterSpacing: 0.4,
         color: color,
       ),
       labelSmall: base.labelSmall?.copyWith(
         fontWeight: FontWeight.w500,
         fontSize: 10,
-        letterSpacing: 0.4,
-        color: color.withValues(alpha: 0.8),
+        letterSpacing: 0.45,
+        color: color.withValues(alpha: 0.85),
       ),
     );
   }

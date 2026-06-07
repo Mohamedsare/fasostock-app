@@ -33,6 +33,7 @@ import '../../providers/company_provider.dart';
 import '../../providers/offline_providers.dart';
 import '../../providers/permissions_provider.dart';
 import '../../shared/utils/format_currency.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import '../../shared/utils/save_bytes_file.dart';
 import 'warehouse_adjustment_dialog.dart';
 import 'warehouse_dispatch_invoice_dialog.dart';
@@ -251,6 +252,40 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
               .read(appDatabaseProvider)
               .enqueuePendingAction(
                 'warehouse_dispatch_invoice',
+                jsonEncode(payload),
+              );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openDispatchEditDialog(String invoiceId) async {
+    final companyId = context.read<CompanyProvider>().currentCompanyId;
+    if (companyId == null) return;
+    final products =
+        ref.read(productsStreamProvider(companyId)).valueOrNull ?? [];
+    final inv =
+        ref.read(warehouseInventoryStreamProvider(companyId)).valueOrNull ??
+            [];
+    final whQty = {for (final l in inv) l.productId: l.quantity};
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => WarehouseDispatchInvoiceDialog(
+        companyId: companyId,
+        products: products,
+        warehouseQuantities: whQty,
+        warehouseRepo: _repo,
+        editInvoiceId: invoiceId,
+        onSuccess: () async {
+          await _load(force: true, silent: true);
+          await _dispatchHistoryKey.currentState?.refresh();
+        },
+        onOfflineEnqueue: (payload) async {
+          await ref
+              .read(appDatabaseProvider)
+              .enqueuePendingAction(
+                'warehouse_update_dispatch_invoice',
                 jsonEncode(payload),
               );
         },
@@ -827,6 +862,58 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     }
   }
 
+  Widget _buildWarehouseTabBar() {
+    return TabBar(
+      controller: _tabController,
+      isScrollable: true,
+      tabAlignment: TabAlignment.start,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+      labelColor: Colors.white,
+      unselectedLabelColor: const Color(0xFF4A4643),
+      labelStyle: const TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 15,
+      ),
+      unselectedLabelStyle: const TextStyle(
+        fontWeight: FontWeight.w600,
+        fontSize: 15,
+      ),
+      indicatorSize: TabBarIndicatorSize.tab,
+      indicator: BoxDecoration(color: const Color(0xFFF97316)),
+      dividerHeight: 0,
+      overlayColor: const WidgetStatePropertyAll(Colors.transparent),
+      tabs: const [
+        Tab(text: 'Tableau de bord'),
+        Tab(text: 'Stock dépôt'),
+        Tab(text: 'Mouvements'),
+        Tab(text: 'Transfert'),
+        Tab(text: 'Historiques des bons'),
+      ],
+    );
+  }
+
+  PreferredSizeWidget _buildWarehouseAppBar(Widget tabBar) {
+    return AppBar(
+      toolbarHeight: 52,
+      title: const Text('Magasin'),
+      surfaceTintColor: Colors.transparent,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(56),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: tabBar,
+        ),
+      ),
+      actions: [
+        IconButton(
+          tooltip: 'Actualiser',
+          onPressed: _syncing ? null : () => _load(force: true),
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final permissions = context.watch<PermissionsProvider>();
@@ -941,60 +1028,43 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
     final dashboard = companyId.isEmpty
         ? null
         : _repo.computeDashboardFromLists(inventory, movements);
+    final showPurchaseValueKpi =
+        company.currentCompany?.warehouseKpiShowPurchaseValue ?? true;
+    final showSaleValueKpi = company.currentCompany?.warehouseKpiShowSaleValue ?? true;
     final listLoading =
         (invAsync.isLoading || movAsync.isLoading) &&
         inventory.isEmpty &&
         movements.isEmpty;
 
+    final shellMobile = Breakpoints.isMobile(MediaQuery.sizeOf(context).width);
+    final warehouseTabs = _buildWarehouseTabBar();
+
     return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 52,
-        title: const Text('Magasin'),
-        surfaceTintColor: Colors.transparent,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-            child: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              labelPadding: const EdgeInsets.symmetric(horizontal: 10),
-              labelColor: Colors.white,
-              unselectedLabelColor: const Color(0xFF4A4643),
-              labelStyle: const TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-              unselectedLabelStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(color: const Color(0xFFF97316)),
-              dividerHeight: 0,
-              overlayColor: const WidgetStatePropertyAll(Colors.transparent),
-              tabs: const [
-                Tab(text: 'Tableau de bord'),
-                Tab(text: 'Stock dépôt'),
-                Tab(text: 'Mouvements'),
-                Tab(text: 'Transfert'),
-                Tab(text: 'Historiques des bons'),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Actualiser',
-            onPressed: _syncing ? null : () => _load(force: true),
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-        ],
-      ),
+      appBar: shellMobile ? null : _buildWarehouseAppBar(warehouseTabs),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (shellMobile)
+            ColoredBox(
+              color: Theme.of(context).colorScheme.surface,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: IconButton(
+                      tooltip: 'Actualiser',
+                      onPressed: _syncing ? null : () => _load(force: true),
+                      icon: const Icon(Icons.refresh_rounded),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: warehouseTabs,
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: listLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -1020,6 +1090,8 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                           dispatchTotalsByInvoiceId: _dispatchTotalsByInvoiceId,
                           dispatchPaidAmountFromNotes:
                               _dispatchPaidAmountFromNotes,
+                          showPurchaseValueKpi: showPurchaseValueKpi,
+                          showSaleValueKpi: showSaleValueKpi,
                           onOpenShortcuts: () =>
                               context.go(AppRoutes.purchases),
                           onOpenReception: () {
@@ -1079,6 +1151,9 @@ class _WarehousePageState extends ConsumerState<WarehousePage>
                           key: _dispatchHistoryKey,
                           companyId: companyId,
                           warehouseRepo: _repo,
+                          onEditDispatch: companyId.isEmpty
+                              ? null
+                              : _openDispatchEditDialog,
                         ),
                       ),
                     ],
@@ -1563,9 +1638,11 @@ class _WarehouseTransfersTabState extends State<_WarehouseTransfersTab> {
             );
           }
           return Card(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+            child: FsHorizontalScrollShell(
+              builder: (context, c) => SingleChildScrollView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 headingRowColor: WidgetStateProperty.all(
                   Theme.of(
                     context,
@@ -1620,6 +1697,7 @@ class _WarehouseTransfersTabState extends State<_WarehouseTransfersTab> {
                     ],
                   );
                 }).toList(),
+                ),
               ),
             ),
           );
@@ -1708,6 +1786,8 @@ class _DashboardTab extends StatelessWidget {
     required this.dispatchRows,
     required this.dispatchTotalsByInvoiceId,
     required this.dispatchPaidAmountFromNotes,
+    required this.showPurchaseValueKpi,
+    required this.showSaleValueKpi,
     required this.onOpenShortcuts,
     required this.onOpenReception,
     required this.onOpenDispatch,
@@ -1725,6 +1805,8 @@ class _DashboardTab extends StatelessWidget {
   final List<WarehouseDispatchInvoiceSummary> dispatchRows;
   final Map<String, double> dispatchTotalsByInvoiceId;
   final double Function(String? notes) dispatchPaidAmountFromNotes;
+  final bool showPurchaseValueKpi;
+  final bool showSaleValueKpi;
   final VoidCallback onOpenShortcuts;
   final VoidCallback onOpenReception;
   final VoidCallback onOpenDispatch;
@@ -1874,18 +1956,20 @@ class _DashboardTab extends StatelessWidget {
               // Ratio plus élevé = cellules moins hautes (cartes plus compactes).
               childAspectRatio: cross == 1 ? 2.75 : 1.85,
               children: [
-                _KpiCard(
-                  title: 'Valeur au prix d’achat',
-                  value: formatCurrency(s.valueAtPurchasePrice),
-                  icon: Icons.payments_rounded,
-                  color: WarehouseUi.accentEmerald,
-                ),
-                _KpiCard(
-                  title: 'Valeur au prix de vente',
-                  value: formatCurrency(s.valueAtSalePrice),
-                  icon: Icons.trending_up_rounded,
-                  color: WarehouseUi.accentBlue,
-                ),
+                if (showPurchaseValueKpi)
+                  _KpiCard(
+                    title: 'Valeur au prix d’achat',
+                    value: formatCurrency(s.valueAtPurchasePrice),
+                    icon: Icons.payments_rounded,
+                    color: WarehouseUi.accentEmerald,
+                  ),
+                if (showSaleValueKpi)
+                  _KpiCard(
+                    title: 'Valeur au prix de vente',
+                    value: formatCurrency(s.valueAtSalePrice),
+                    icon: Icons.trending_up_rounded,
+                    color: WarehouseUi.accentBlue,
+                  ),
                 _KpiCard(
                   title: 'Références en stock',
                   value: '${s.skuCount}',
@@ -2199,9 +2283,11 @@ class _DashboardTab extends StatelessWidget {
                     ),
                   )
                 else
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                  FsHorizontalScrollShell(
+                    builder: (context, c) => SingleChildScrollView(
+                      controller: c,
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
                       columns: const [
                         DataColumn(label: Text('Produit')),
                         DataColumn(label: Text('Qte'), numeric: true),
@@ -2241,6 +2327,7 @@ class _DashboardTab extends StatelessWidget {
                         );
                       }).toList(),
                     ),
+                  ),
                   ),
               ],
             ),
@@ -2832,9 +2919,11 @@ class _StockTabState extends State<_StockTab> {
             );
           }
           return Card(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+            child: FsHorizontalScrollShell(
+              builder: (context, c) => SingleChildScrollView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 headingRowColor: WidgetStateProperty.all(
                   Theme.of(
                     context,
@@ -2941,6 +3030,7 @@ class _StockTabState extends State<_StockTab> {
                     ],
                   );
                 }).toList(),
+                ),
               ),
             ),
           );
@@ -3234,9 +3324,11 @@ class _MovementsTabPagedState extends State<_MovementsTabPaged> {
             );
           }
           return Card(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+            child: FsHorizontalScrollShell(
+              builder: (context, c) => SingleChildScrollView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 headingRowColor: WidgetStateProperty.all(
                   theme.colorScheme.surfaceContainerHighest.withValues(
                     alpha: 0.5,
@@ -3330,6 +3422,7 @@ class _MovementsTabPagedState extends State<_MovementsTabPaged> {
                     ],
                   );
                 }).toList(),
+                ),
               ),
             ),
           );

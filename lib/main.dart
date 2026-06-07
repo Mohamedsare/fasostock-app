@@ -14,6 +14,7 @@ import 'providers/company_provider.dart';
 import 'providers/permissions_provider.dart';
 import 'core/errors/app_error_handler.dart';
 import 'core/errors/crash_reporting.dart';
+import 'core/network/supabase_http_client_factory.dart';
 import 'navigation/app_router.dart';
 import 'app.dart';
 
@@ -96,6 +97,33 @@ bool _isKnownFlutterKeyboardAssertionFromPlatform(Object error, StackTrace stack
       st.contains('_assertEventIsRegular');
 }
 
+/// Plusieurs tentatives : coupure réseau / stockage session / TLS passagers au cold start.
+Future<void> _initializeSupabaseResilient(String url, String anonKey) async {
+  const maxAttempts = 4;
+  Object? lastErr;
+  StackTrace? lastSt;
+  for (var i = 0; i < maxAttempts; i++) {
+    if (i > 0) {
+      await Future<void>.delayed(Duration(milliseconds: 400 * i));
+    }
+    try {
+      await Supabase.initialize(
+        url: url,
+        anonKey: anonKey,
+        httpClient: buildSupabaseHttpClient(),
+      );
+      return;
+    } catch (e, st) {
+      lastErr = e;
+      lastSt = st;
+      if (kDebugMode) {
+        debugPrint('[FasoStock] Supabase.initialize tentative ${i + 1}/$maxAttempts : $e');
+      }
+    }
+  }
+  Error.throwWithStackTrace(lastErr!, lastSt!);
+}
+
 /// Charge Supabase puis affiche l'app (ou écran config / erreur) — évite l'écran blanc.
 class _AppLoader extends StatefulWidget {
   const _AppLoader();
@@ -107,10 +135,48 @@ class _AppLoader extends StatefulWidget {
 class _AppLoaderState extends State<_AppLoader> {
   late Future<Widget> _future = _load();
 
+  void _restartLoad() => setState(() => _future = _load());
+
+  MaterialApp _startupFailureApp(String message) {
+    final errorTheme = ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C)),
+    );
+    return MaterialApp(
+      theme: errorTheme,
+      debugShowCheckedModeBanner: false,
+      home: _StartupFailureScreen(
+        message: message,
+        onRetry: _restartLoad,
+        onOpenConfig: () => setState(() {
+          _future = Future.value(
+            MaterialApp(
+              theme: errorTheme,
+              debugShowCheckedModeBanner: false,
+              home: _ConfigSupabaseScreen(
+                onSaved: _restartLoad,
+                initialMessage:
+                    'Si le problème vient de l\'URL ou de la clé, corrigez-les ci-dessous puis enregistrez.\n\n'
+                    'Message précédent : $message',
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
   Future<Widget> _load() async {
     try {
       // initializeDateFormatting déjà fait dans runZonedGuarded avant runApp — évite double coût au démarrage.
-      final stored = await SupabaseConfigStorage.get();
+      ({String url, String anonKey})? stored;
+      try {
+        stored = await SupabaseConfigStorage.get();
+      } catch (e, st) {
+        AppErrorHandler.log(e, st);
+        CrashReporting.captureException(e, st);
+        stored = null;
+      }
       final String url = stored?.url ?? Env.supabaseUrl;
       final String anonKey = stored?.anonKey ?? Env.supabaseAnonKey;
 
@@ -127,7 +193,7 @@ class _AppLoaderState extends State<_AppLoader> {
         );
       }
 
-      await Supabase.initialize(url: url, anonKey: anonKey);
+      await _initializeSupabaseResilient(url, anonKey);
       final supabase = Supabase.instance.client;
       final authService = AuthService(supabase);
       final authProvider = AuthProvider(authService);
@@ -149,32 +215,9 @@ class _AppLoaderState extends State<_AppLoader> {
       );
     } catch (e, st) {
       AppErrorHandler.log(e, st);
+      CrashReporting.captureException(e, st);
       final message = AppErrorHandler.toUserMessage(e, fallback: 'Une erreur inattendue s\'est produite. Rouvrez l\'app.');
-      final errorTheme = ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C)),
-      );
-      return MaterialApp(
-        theme: errorTheme,
-        home: Scaffold(
-          body: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text('Erreur au démarrage', style: errorTheme.textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  Text(message, style: errorTheme.textTheme.bodyMedium),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
+      return _startupFailureApp(message);
     }
   }
 
@@ -185,18 +228,10 @@ class _AppLoaderState extends State<_AppLoader> {
       builder: (context, snapshot) {
         if (snapshot.hasData) return snapshot.data!;
         if (snapshot.hasError) {
+          AppErrorHandler.log(snapshot.error, snapshot.stackTrace);
+          CrashReporting.captureException(snapshot.error!, snapshot.stackTrace);
           final msg = AppErrorHandler.toUserMessage(snapshot.error, fallback: 'Erreur au chargement. Rouvrez l\'app.');
-          return MaterialApp(
-            theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C))),
-            home: Scaffold(
-              body: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(msg),
-                ),
-              ),
-            ),
-          );
+          return _startupFailureApp(msg);
         }
     return MaterialApp(
           theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFEA580C))),
@@ -221,6 +256,45 @@ class _AppLoaderState extends State<_AppLoader> {
           ),
         );
       },
+    );
+  }
+}
+
+class _StartupFailureScreen extends StatelessWidget {
+  const _StartupFailureScreen({
+    required this.message,
+    required this.onRetry,
+    required this.onOpenConfig,
+  });
+
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback onOpenConfig;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 24),
+              const Icon(Icons.error_outline, size: 48, color: Colors.red),
+              const SizedBox(height: 16),
+              Text('Erreur au démarrage', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(message, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 28),
+              FilledButton(onPressed: onRetry, child: const Text('Réessayer')),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: onOpenConfig, child: const Text('Configurer Supabase')),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

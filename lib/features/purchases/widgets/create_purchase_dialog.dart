@@ -235,9 +235,15 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
               ),
               const SizedBox(height: 16),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Articles', style: theme.textTheme.titleSmall),
+                  Expanded(
+                    child: Text(
+                      'Articles',
+                      style: theme.textTheme.titleSmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   if (productsLoading)
                     Padding(
                       padding: const EdgeInsets.only(right: 8),
@@ -292,10 +298,26 @@ class _CreatePurchaseDialogState extends ConsumerState<CreatePurchaseDialog> {
               ),
               const SizedBox(height: 16),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Total', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  Text(formatCurrency(_total), style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: theme.colorScheme.primary)),
+                  Expanded(
+                    child: Text(
+                      'Total',
+                      style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        formatCurrency(_total),
+                        style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: theme.colorScheme.primary),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ],

@@ -51,6 +51,26 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Future<void> _openSupportWhatsApp() async {
+    try {
+      final uri = Uri.parse('https://wa.me/$_supportPhoneE164');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Impossible d\'ouvrir WhatsApp')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      AppErrorHandler.log(e);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppErrorHandler.toUserMessage(e))),
+      );
+    }
+  }
+
   Future<void> _checkLockAndSubmit() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) return;
@@ -333,7 +353,7 @@ class _LoginPageState extends State<LoginPage> {
                   }
                 },
                 icon: SvgPicture.asset(
-                  'assets/whatsApp.svg',
+                  'assets/social.svg',
                   width: isMobile ? 20 : 24,
                   height: isMobile ? 20 : 24,
                   fit: BoxFit.contain,
@@ -411,7 +431,7 @@ class _LoginPageState extends State<LoginPage> {
     final spaceS = isMobile ? AppTheme.spaceSmM : AppTheme.spaceSm;
     final spaceX = isMobile ? AppTheme.spaceXlM : AppTheme.spaceXl;
     final radius = isMobile ? AppTheme.radiusXlM : AppTheme.radiusXl;
-    final logoSize = isMobile ? 56.0 : 80.0;
+    final logoSize = isMobile ? 56.0 : 96.0;
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -453,6 +473,31 @@ class _LoginPageState extends State<LoginPage> {
                                 fit: BoxFit.contain,
                                 errorBuilder: (_, _, _) =>
                                     const SizedBox.shrink(),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Center(
+                              child: RichText(
+                                text: TextSpan(
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: isMobile ? 22 : 30,
+                                  ),
+                                  children: [
+                                    TextSpan(
+                                      text: 'Faso',
+                                      style: TextStyle(
+                                        color: colorScheme.onSurface,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: 'Stock',
+                                      style: TextStyle(
+                                        color: colorScheme.primary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                             SizedBox(height: spaceL),
@@ -644,6 +689,40 @@ class _LoginPageState extends State<LoginPage> {
                                   ),
                                 ),
                               ],
+                            ),
+                            SizedBox(height: spaceM),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: _openSupportWhatsApp,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                  horizontal: 8,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        'Besoin d’aide ? Contact WhatsApp',
+                                        textAlign: TextAlign.center,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: spaceS),
+                                    SvgPicture.asset(
+                                      'assets/social.svg',
+                                      width: isMobile ? 16 : 18,
+                                      height: isMobile ? 16 : 18,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ],
                         ),

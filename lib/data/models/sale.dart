@@ -158,11 +158,33 @@ class Sale {
 }
 
 class StoreRef {
-  const StoreRef({required this.id, required this.name});
+  const StoreRef({
+    required this.id,
+    required this.name,
+    this.primaryColor,
+  });
+
   final String id;
   final String name;
-  static StoreRef fromJson(Map<String, dynamic> json) =>
-      StoreRef(id: json['id'] as String, name: json['name'] as String);
+
+  /// Ex. depuis `stores.primary_color` (facture / reçus).
+  final String? primaryColor;
+
+  static String? _readOptionalColor(dynamic v) {
+    if (v == null) return null;
+    if (v is String) {
+      final t = v.trim();
+      return t.isEmpty ? null : t;
+    }
+    final t = v.toString().trim();
+    return t.isEmpty ? null : t;
+  }
+
+  static StoreRef fromJson(Map<String, dynamic> json) => StoreRef(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        primaryColor: _readOptionalColor(json['primary_color']),
+      );
 }
 
 class CustomerRef {

@@ -16,6 +16,14 @@ double paidRealized(Sale sale) {
   return s;
 }
 
+/// Vente avec ligne POS « à crédit » (`method == other`) — aligné `saleHadCreditBooking` (web).
+bool saleHadCreditBooking(Sale sale) {
+  for (final p in sale.salePayments ?? const <SalePayment>[]) {
+    if (p.method == PaymentMethod.other) return true;
+  }
+  return false;
+}
+
 double remainingTotal(Sale sale) {
   return (sale.total - paidRealized(sale)).clamp(0.0, double.infinity);
 }

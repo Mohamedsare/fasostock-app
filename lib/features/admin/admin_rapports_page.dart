@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
 import '../../shared/utils/format_currency.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// Rapports ventes admin — design aligné tableau de bord.
@@ -77,9 +78,11 @@ class AdminRapportsPage extends StatelessWidget {
               final list = snap.data!;
               return AdminCard(
                 padding: EdgeInsets.zero,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
+                child: FsHorizontalScrollShell(
+                  builder: (context, c) => SingleChildScrollView(
+                    controller: c,
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
                     columns: const [
                       DataColumn(label: Text('Entreprise')),
                       DataColumn(label: Text('Nb ventes'), numeric: true),
@@ -93,6 +96,7 @@ class AdminRapportsPage extends StatelessWidget {
                       ],
                     )).toList(),
                   ),
+                ),
                 ),
               );
             },

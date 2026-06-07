@@ -8,6 +8,7 @@ import '../../../core/breakpoints.dart';
 import '../../../core/constants/permissions.dart';
 import '../../../core/errors/app_error_handler.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../data/models/stock_transfer.dart';
 import '../../../data/models/store.dart';
@@ -340,45 +341,17 @@ class _TransfersPageState extends ConsumerState<TransfersPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.swap_horiz_rounded,
-                          size: isMobile ? 22 : 28,
-                          color: theme.colorScheme.primary,
-                        ),
-                        SizedBox(width: spaceM),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Transferts',
-                                style: theme.textTheme.headlineSmall?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              SizedBox(height: isMobile ? 2 : 4),
-                              Text(
-                                'Transferts de stock entre boutiques',
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (canCreate && stores.isNotEmpty)
-                          FilledButton.icon(
-                            onPressed: () =>
-                                _openCreateTransfer(companyId, stores),
-                            icon: Icon(
-                              Icons.add_rounded,
-                              size: isMobile ? 16 : 20,
-                            ),
-                            label: const Text('Nouveau transfert'),
-                          ),
-                      ],
+                    FsMobilePageHeader(
+                      title: 'Transferts',
+                      subtitle: 'Transferts de stock entre boutiques',
+                      trailing: canCreate && stores.isNotEmpty && !isMobile
+                          ? FilledButton.icon(
+                              onPressed: () =>
+                                  _openCreateTransfer(companyId, stores),
+                              icon: const Icon(Icons.add_rounded, size: 20),
+                              label: const Text('Nouveau transfert'),
+                            )
+                          : null,
                     ),
                     if (error != null) ...[
                       SizedBox(height: isMobile ? 10 : 16),

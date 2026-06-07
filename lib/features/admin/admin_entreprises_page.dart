@@ -3,6 +3,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// Gestion entreprises + boutiques (équivalent AdminEntreprisesPage web).
@@ -53,12 +54,15 @@ class _AdminEntreprisesPageState extends State<AdminEntreprisesPage> {
                 padding: EdgeInsets.zero,
                 child: Column(
                   children: [
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                    FsHorizontalScrollShell(
+                      builder: (context, c) => SingleChildScrollView(
+                        controller: c,
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
                         columns: [
                           const DataColumn(label: Text('')),
                           DataColumn(label: Text('Nom', style: AdminPalette.dataTableHeader)),
+                          DataColumn(label: Text('Téléphone', style: AdminPalette.dataTableHeader)),
                           DataColumn(label: Text('Slug', style: AdminPalette.dataTableHeader)),
                           DataColumn(label: Text('Statut', style: AdminPalette.dataTableHeader)),
                           DataColumn(label: Text('Préd. IA', style: AdminPalette.dataTableHeader)),
@@ -75,6 +79,7 @@ class _AdminEntreprisesPageState extends State<AdminEntreprisesPage> {
                                 child: Icon(companyStores.isEmpty ? null : (isExpanded ? Icons.expand_more : Icons.chevron_right), size: 24, color: AdminPalette.title),
                               )),
                               DataCell(Text(c.name, style: AdminPalette.dataTableCell)),
+                              DataCell(Text(_companyPhone(companyStores), style: AdminPalette.dataTableCell)),
                               DataCell(Text(c.slug ?? '—', style: AdminPalette.dataTableCell)),
                               DataCell(Text(c.isActive ? 'Actif' : 'Inactif', style: TextStyle(color: c.isActive ? Colors.green : AdminPalette.subtitle, fontWeight: FontWeight.w500))),
                               DataCell(Text(c.aiPredictionsEnabled ? 'Oui' : 'Non', style: TextStyle(color: c.aiPredictionsEnabled ? Colors.green : AdminPalette.subtitle, fontWeight: FontWeight.w500))),
@@ -99,6 +104,7 @@ class _AdminEntreprisesPageState extends State<AdminEntreprisesPage> {
                           );
                         }).toList(),
                       ),
+                    ),
                     ),
                     if (_expandedCompanyId != null)
                       ...companies.where((c) => c.id == _expandedCompanyId).map((c) {
@@ -220,5 +226,15 @@ class _AdminEntreprisesPageState extends State<AdminEntreprisesPage> {
     if (confirmed == true) {
       await _doDelete(type: type, id: id);
     }
+  }
+
+  String _companyPhone(List<AdminStore> stores) {
+    for (final s in stores) {
+      if (s.isPrimary && s.phone != null && s.phone!.isNotEmpty) return s.phone!;
+    }
+    for (final s in stores) {
+      if (s.phone != null && s.phone!.isNotEmpty) return s.phone!;
+    }
+    return '—';
   }
 }

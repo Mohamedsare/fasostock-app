@@ -37,7 +37,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       final authService = AuthService(Supabase.instance.client);
       await authService.resetPasswordForEmail(
         email,
-        redirectTo: Uri.base.origin.isNotEmpty ? '${Uri.base.origin}/reset-password' : null,
+        redirectTo: Uri.base.origin.isNotEmpty
+            ? '${Uri.base.origin}/reset-password'
+            : null,
       );
       if (mounted) {
         setState(() {
@@ -55,6 +57,42 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     }
   }
 
+  Widget _brandHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
+    final logoSize = isMobile ? 56.0 : 88.0;
+    return Column(
+      children: [
+        Image.asset(
+          'assets/fs.png',
+          height: logoSize,
+          width: logoSize,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        ),
+        const SizedBox(height: 8),
+        RichText(
+          text: TextSpan(
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              fontSize: isMobile ? 22 : 28,
+            ),
+            children: [
+              TextSpan(
+                text: 'Faso',
+                style: TextStyle(color: theme.colorScheme.onSurface),
+              ),
+              TextSpan(
+                text: 'Stock',
+                style: TextStyle(color: theme.colorScheme.primary),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_sent) {
@@ -69,18 +107,25 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(Icons.mark_email_read_outlined, size: 48, color: Theme.of(context).colorScheme.primary),
+                    Center(child: _brandHeader(context)),
+                    const SizedBox(height: 20),
+                    Icon(
+                      Icons.mark_email_read_outlined,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'Demande envoyée',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Si un compte est associé à cet email, un lien de réinitialisation lui a été envoyé. Vérifiez votre boîte de réception (et les spams).',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 24),
                     FilledButton(
@@ -114,17 +159,21 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       icon: const Icon(Icons.arrow_back),
                       label: const Text('Retour'),
                     ),
+                    const SizedBox(height: 8),
+                    Center(child: _brandHeader(context)),
+                    const SizedBox(height: 16),
                     const SizedBox(height: 16),
                     Text(
                       'Mot de passe oublié',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Entrez votre email pour recevoir un lien de réinitialisation.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 24),
                     if (_error != null) ...[
@@ -134,7 +183,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                           color: Theme.of(context).colorScheme.errorContainer,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                        child: Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 16),
                     ],
@@ -148,8 +204,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       keyboardType: TextInputType.emailAddress,
                       autocorrect: false,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Email requis';
-                        if (!RegExp(r'^[\w.-]+@[\w.-]+\.\w+$').hasMatch(v.trim())) return 'Email invalide';
+                        if (v == null || v.trim().isEmpty) {
+                          return 'Email requis';
+                        }
+                        if (!RegExp(
+                          r'^[\w.-]+@[\w.-]+\.\w+$',
+                        ).hasMatch(v.trim())) {
+                          return 'Email invalide';
+                        }
                         return null;
                       },
                     ),
@@ -160,7 +222,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                           child: FilledButton(
                             onPressed: _loading ? null : _submit,
                             child: _loading
-                                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
                                 : const Text('Envoyer le lien'),
                           ),
                         ),

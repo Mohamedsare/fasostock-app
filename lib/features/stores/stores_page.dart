@@ -19,6 +19,7 @@ import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/save_bytes_file.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import 'widgets/create_store_dialog.dart';
 import 'widgets/edit_store_dialog.dart';
 
@@ -351,89 +352,28 @@ class _StoresPageState extends ConsumerState<StoresPage> {
     bool canCreate,
     String companyId,
   ) {
-    final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Boutiques',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('Actualiser'),
-                  ),
-                  if (canCreate)
-                    FilledButton.icon(
-                      onPressed: () => _openCreateDialog(companyId),
-                      icon: const Icon(Icons.add_rounded, size: 20),
-                      label: const Text('Nouvelle boutique'),
-                    ),
-                ],
-              ),
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Boutiques',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('Actualiser'),
-                  ),
-                  if (canCreate)
-                    FilledButton.icon(
-                      onPressed: () => _openCreateDialog(companyId),
-                      icon: const Icon(Icons.add_rounded, size: 20),
-                      label: const Text('Nouvelle boutique'),
-                    ),
-                ],
-              ),
-            ],
-          );
+    final mobile = FsMobilePageHeader.isMobileLayout(context);
+    return FsMobilePageHeader(
+      title: 'Boutiques',
+      subtitle: description,
+      trailing: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _refresh,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Actualiser'),
+          ),
+          if (canCreate && !mobile)
+            FilledButton.icon(
+              onPressed: () => _openCreateDialog(companyId),
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: const Text('Nouvelle boutique'),
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildErrorCard(BuildContext context, String error) {

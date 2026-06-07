@@ -255,6 +255,34 @@ class WarehouseRepository {
     }
   }
 
+  /// Met à jour un bon de sortie dépôt (client, notes, lignes) — même RPC que le web.
+  Future<void> updateDispatchInvoice({
+    required String companyId,
+    required String invoiceId,
+    String? customerId,
+    String? notes,
+    required List<WarehouseDispatchLineInput> lines,
+  }) async {
+    if (lines.isEmpty) {
+      throw UserFriendlyError('Ajoutez au moins une ligne produit.');
+    }
+    try {
+      await _client.rpc(
+        'warehouse_update_dispatch_invoice',
+        params: {
+          'p_company_id': companyId,
+          'p_invoice_id': invoiceId,
+          'p_customer_id': customerId,
+          'p_notes': notes,
+          'p_lines': lines.map((e) => e.toJson()).toList(),
+        },
+      );
+    } catch (e) {
+      if (e is UserFriendlyError) rethrow;
+      throw UserFriendlyError(_toSafeMessage(e));
+    }
+  }
+
   /// Ajustement d'inventaire dépôt (delta > 0 : entrée au coût indiqué ; delta < 0 : sortie).
   Future<void> registerAdjustment({
     required String companyId,

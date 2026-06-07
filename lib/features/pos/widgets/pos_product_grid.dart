@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/breakpoints.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 import '../../../data/models/product.dart';
 import 'pos_product_card.dart';
 
@@ -71,34 +72,37 @@ class PosProductTwoRowHorizontalStrip extends StatelessWidget {
 
     return SizedBox(
       height: stripH,
-      child: GridView.builder(
-        scrollDirection: Axis.horizontal,
-        // Garde plus de tuiles hors écran « vivantes » pour limiter le rechargement des images au scroll.
-        cacheExtent: 480,
-        padding: EdgeInsets.fromLTRB(
-          12,
-          4,
-          12,
-          ultraMobileStrip ? 8 : (viewportHeight != null && viewportHeight! < 300 ? 8 : 12),
+      child: FsHorizontalScrollShell(
+        builder: (context, c) => GridView.builder(
+          controller: c,
+          scrollDirection: Axis.horizontal,
+          // Garde plus de tuiles hors écran « vivantes » pour limiter le rechargement des images au scroll.
+          cacheExtent: 480,
+          padding: EdgeInsets.fromLTRB(
+            12,
+            4,
+            12,
+            ultraMobileStrip ? 8 : (viewportHeight != null && viewportHeight! < 300 ? 8 : 12),
+          ),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            mainAxisExtent: mainExtent,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemCount: products.length,
+          itemBuilder: (context, index) {
+            final p = products[index];
+            final stock = stockByProductId[p.id] ?? 0;
+            return PosProductCard(
+              key: ValueKey<String>('pos_strip_${p.id}'),
+              product: p,
+              stock: stock,
+              style: PosProductCardStyle.strip,
+              onTap: () => onAddToCart(p),
+            );
+          },
         ),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          mainAxisExtent: mainExtent,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-        ),
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          final p = products[index];
-          final stock = stockByProductId[p.id] ?? 0;
-          return PosProductCard(
-            key: ValueKey<String>('pos_strip_${p.id}'),
-            product: p,
-            stock: stock,
-            style: PosProductCardStyle.strip,
-            onTap: () => onAddToCart(p),
-          );
-        },
       ),
     );
   }

@@ -17,6 +17,9 @@ import '../../../core/errors/app_error_handler.dart';
 import '../../../core/utils/app_toast.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
+import '../../../shared/widgets/mobile/fs_pull_to_refresh.dart';
 import '../../../data/repositories/reports_repository.dart';
 
 /// Tableau de bord — offline-first : lecture Drift ; sync + Postgres Realtime alimentent les tables locales ;
@@ -449,7 +452,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
     return Scaffold(
       appBar: null,
-      body: RefreshIndicator(
+      body: FsPullToRefresh(
         onRefresh: () async {
           await company.refreshCompanies(context.read<AuthProvider>().user?.id);
           await _runSyncThenRefresh();
@@ -510,25 +513,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   Widget _buildHeader(BuildContext context, String description) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Tableau de bord',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.4,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          description,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
+    return FsMobilePageHeader(
+      title: 'Tableau de bord',
+      subtitle: description,
     );
   }
 
@@ -568,10 +555,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                           : FontWeight.w500,
                     ),
                   ),
-                  onSelected: (_) => setState(() {
-                    _scope = 'company';
-                    _loadDataFromOffline();
-                  }),
+                  onSelected: (_) {
+                    if (_scope == 'company') return;
+                    FsHaptic.selection();
+                    setState(() {
+                      _scope = 'company';
+                      _loadDataFromOffline();
+                    });
+                  },
                   selectedColor: theme.colorScheme.primary.withValues(
                     alpha: 0.2,
                   ),
@@ -598,14 +589,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             : FontWeight.w500,
                       ),
                     ),
-                    onSelected: (_) => setState(() {
-                      _scope = 'store';
-                      if (company.currentStoreId == null &&
-                          company.stores.isNotEmpty) {
-                        company.setCurrentStoreId(company.stores.first.id);
-                      }
-                      _loadDataFromOffline();
-                    }),
+                    onSelected: (_) {
+                      if (_scope == 'store') return;
+                      FsHaptic.selection();
+                      setState(() {
+                        _scope = 'store';
+                        if (company.currentStoreId == null &&
+                            company.stores.isNotEmpty) {
+                          company.setCurrentStoreId(company.stores.first.id);
+                        }
+                        _loadDataFromOffline();
+                      });
+                    },
                     selectedColor: theme.colorScheme.primary.withValues(
                       alpha: 0.2,
                     ),
@@ -688,10 +683,14 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       selectedColor: theme.colorScheme.primary.withValues(
                         alpha: 0.2,
                       ),
-                      onSelected: (_) => setState(() {
-                        _period = p;
-                        _loadDataFromOffline();
-                      }),
+                      onSelected: (_) {
+                        if (_period == p) return;
+                        FsHaptic.selection();
+                        setState(() {
+                          _period = p;
+                          _loadDataFromOffline();
+                        });
+                      },
                     );
                   }).toList(),
                 ),

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/errors/app_error_handler.dart';
 import '../models/company.dart';
 import '../models/store.dart';
+import 'stores_repository.dart';
 
 String _toSafeMessage(Object? e) => ErrorMapper.toMessage(e);
 
@@ -15,7 +16,7 @@ class CompanyRepository {
   final SupabaseClient _client;
 
   static const _companyFields =
-      'id, name, slug, business_type_slug, logo_url, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled';
+      'id, name, slug, business_type_slug, logo_url, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled, warehouse_kpi_show_purchase_value, warehouse_kpi_show_sale_value';
 
   /// Même bucket public que les logos boutique (`00006_store_logos_bucket.sql`).
   static const String _logosBucket = 'store-logos';
@@ -73,13 +74,9 @@ class CompanyRepository {
     }
   }
 
-  /// Boutiques actives d'une entreprise.
+  /// Boutiques actives d'une entreprise (mêmes champs que [StoresRepository] : signataire facture, pied de page, couleurs…).
   Future<List<Store>> getStoresForCompany(String companyId) async {
-    final data = await _client
-        .from('stores')
-        .select('id, company_id, name, code, address, logo_url, phone, email, description, is_active, is_primary, pos_discount_enabled, created_at')
-        .eq('company_id', companyId)
-        .eq('is_active', true);
-    return (data as List).map((e) => Store.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+    final list = await StoresRepository(_client).getStoresByCompany(companyId);
+    return list.where((s) => s.isActive).toList();
   }
 }

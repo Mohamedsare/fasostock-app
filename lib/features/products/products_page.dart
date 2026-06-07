@@ -18,6 +18,9 @@ import '../../../providers/products_page_provider.dart';
 import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_pull_to_refresh.dart';
+import '../../../shared/widgets/mobile/fs_responsive_dialog.dart';
 import '../../../shared/utils/share_csv.dart';
 import 'utils/products_csv.dart';
 import 'widgets/brands_section.dart';
@@ -207,7 +210,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     required List<Category> categories,
     required List<Brand> brands,
   }) {
-    showDialog<void>(
+    showFsResponsiveModal<void>(
       context: context,
       builder: (ctx) => ProductFormDialog(
         companyId: context.read<CompanyProvider>().currentCompanyId!,
@@ -233,7 +236,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     required List<Category> categories,
     required List<Brand> brands,
   }) {
-    showDialog<void>(
+    showFsResponsiveModal<void>(
       context: context,
       builder: (ctx) => ProductFormDialog(
         companyId: product.companyId,
@@ -289,7 +292,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
   void _openImportCsv() {
     final company = context.read<CompanyProvider>();
-    showDialog<void>(
+    showFsResponsiveModal<void>(
       context: context,
       builder: (ctx) => ImportProductsCsvDialog(
         companyId: company.currentCompanyId!,
@@ -305,27 +308,17 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   }
 
   Future<void> _deleteProduct(Product p) async {
-    final confirm = await showDialog<bool>(
+    final confirm = await showFsConfirm(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Supprimer ce produit ?'),
-        content: Text('« ${p.name} » sera supprimé (archivé).'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            child: const Text('Supprimer'),
-          ),
-        ],
-      ),
+      title: 'Supprimer ce produit ?',
+      message: '« ${p.name} » sera supprimé (archivé).',
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      icon: Icons.delete_outline_rounded,
+      dangerous: true,
     );
     if (confirm != true || !mounted) return;
+    FsHaptic.warning();
     try {
       // 1. Suppression en base (serveur) — garde le offline+sync cohérent
       await _repo.softDelete(p.id);
@@ -524,7 +517,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       children: [
         Scaffold(
           appBar: null,
-          body: RefreshIndicator(
+          body: FsPullToRefresh(
             onRefresh: _refresh,
             child: CustomScrollView(
               slivers: [
@@ -566,39 +559,18 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _TabChip(
-                          label: 'Produits',
-                          icon: Icons.inventory_2,
-                          selected: _tab == _ProductsTab.products,
-                          onTap: () {
-                            setState(() => _tab = _ProductsTab.products);
-                            if (context
-                                    .read<CompanyProvider>()
-                                    .currentStoreId !=
+                    child: _ProductsTabSelector(
+                      selected: _tab,
+                      onChanged: (next) {
+                        if (next == _tab) return;
+                        FsHaptic.selection();
+                        setState(() => _tab = next);
+                        if (next == _ProductsTab.products &&
+                            context.read<CompanyProvider>().currentStoreId !=
                                 null) {
-                              _refresh();
-                            }
-                          },
-                        ),
-                        _TabChip(
-                          label: 'Catégories',
-                          icon: Icons.category,
-                          selected: _tab == _ProductsTab.categories,
-                          onTap: () =>
-                              setState(() => _tab = _ProductsTab.categories),
-                        ),
-                        _TabChip(
-                          label: 'Marques',
-                          icon: Icons.sell,
-                          selected: _tab == _ProductsTab.brands,
-                          onTap: () =>
-                              setState(() => _tab = _ProductsTab.brands),
-                        ),
-                      ],
+                          _refresh();
+                        }
+                      },
                     ),
                   ),
                 ),
@@ -655,28 +627,28 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
               ],
             ),
           ),
+          /* FAB création produit. Sur mobile (< 600) on utilise la variante extended
+             pour la discoverabilité (icône + label "Produit"), sur desktop l'extended
+             "Nouveau produit" reste. Caché sur les onglets Catégories/Marques car ceux-ci
+             ont leurs propres boutons inline contextuels. */
           floatingActionButton:
               _tab == _ProductsTab.products && canCreateProduct
-              ? (MediaQuery.sizeOf(context).width < 900
-                    ? FloatingActionButton(
-                        onPressed: () =>
-                            _openCreate(categories: categories, brands: brands),
-                        backgroundColor: const Color(0xFFF97316),
-                        foregroundColor: Colors.white,
-                        elevation: 4,
-                        highlightElevation: 8,
-                        child: const Icon(Icons.add),
-                      )
-                    : FloatingActionButton.extended(
-                        onPressed: () =>
-                            _openCreate(categories: categories, brands: brands),
-                        backgroundColor: const Color(0xFFF97316),
-                        foregroundColor: Colors.white,
-                        elevation: 4,
-                        highlightElevation: 8,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Nouveau produit'),
-                      ))
+              ? FloatingActionButton.extended(
+                  onPressed: () {
+                    FsHaptic.selection();
+                    _openCreate(categories: categories, brands: brands);
+                  },
+                  backgroundColor: const Color(0xFFF97316),
+                  foregroundColor: Colors.white,
+                  elevation: 4,
+                  highlightElevation: 8,
+                  icon: const Icon(Icons.add_rounded),
+                  label: Text(
+                    MediaQuery.sizeOf(context).width < 600
+                        ? 'Produit'
+                        : 'Nouveau produit',
+                  ),
+                )
               : null,
         ),
         if (_syncingCatalogAfterImport)
@@ -1104,45 +1076,55 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   }
 }
 
-class _TabChip extends StatelessWidget {
-  const _TabChip({
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.onTap,
-  });
+/// Sélecteur d'onglet Material 3 (SegmentedButton). Sur mobile étroit (< 380 px),
+/// les libellés se cachent automatiquement pour ne garder que les icônes (gain de place).
+class _ProductsTabSelector extends StatelessWidget {
+  const _ProductsTabSelector({required this.selected, required this.onChanged});
 
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final VoidCallback onTap;
+  final _ProductsTab selected;
+  final ValueChanged<_ProductsTab> onChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-    return FilterChip(
-      selected: selected,
-      onSelected: (_) => onTap(),
-      selectedColor: primary.withValues(alpha: 0.2),
-      checkmarkColor: primary,
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: selected ? primary : theme.colorScheme.onSurfaceVariant,
+    final w = MediaQuery.sizeOf(context).width;
+    final compact = w < 380;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SegmentedButton<_ProductsTab>(
+        showSelectedIcon: false,
+        style: SegmentedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          textStyle: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
           ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: selected ? primary : theme.colorScheme.onSurface,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            ),
+          selectedBackgroundColor: theme.colorScheme.primary.withValues(
+            alpha: 0.18,
+          ),
+          selectedForegroundColor: theme.colorScheme.primary,
+        ),
+        segments: [
+          ButtonSegment(
+            value: _ProductsTab.products,
+            icon: const Icon(Icons.inventory_2_rounded),
+            label: compact ? null : const Text('Produits'),
+            tooltip: 'Produits',
+          ),
+          ButtonSegment(
+            value: _ProductsTab.categories,
+            icon: const Icon(Icons.category_rounded),
+            label: compact ? null : const Text('Catégories'),
+            tooltip: 'Catégories',
+          ),
+          ButtonSegment(
+            value: _ProductsTab.brands,
+            icon: const Icon(Icons.sell_rounded),
+            label: compact ? null : const Text('Marques'),
+            tooltip: 'Marques',
           ),
         ],
+        selected: {selected},
+        onSelectionChanged: (sel) => onChanged(sel.first),
       ),
     );
   }

@@ -20,6 +20,7 @@ import '../../data/repositories/warehouse_repository.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/offline_providers.dart';
 import '../../shared/utils/format_currency.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import '../pos/services/invoice_a4_pdf_service.dart';
 import 'warehouse_ui_helpers.dart';
 
@@ -31,10 +32,14 @@ class WarehouseDispatchHistoryPanel extends ConsumerStatefulWidget {
     super.key,
     required this.companyId,
     required this.warehouseRepo,
+    this.onEditDispatch,
   });
 
   final String companyId;
   final WarehouseRepository warehouseRepo;
+
+  /// Ouvre le formulaire de modification du bon (aligné web : icône crayon).
+  final void Function(String invoiceId)? onEditDispatch;
 
   @override
   WarehouseDispatchHistoryPanelState createState() =>
@@ -523,9 +528,11 @@ class WarehouseDispatchHistoryPanelState
                 ),
                 SliverToBoxAdapter(
                   child: Card(
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                    child: FsHorizontalScrollShell(
+                      builder: (context, c) => SingleChildScrollView(
+                        controller: c,
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
                         showCheckboxColumn: false,
                         headingRowColor: WidgetStateProperty.all(
                           theme.colorScheme.surfaceContainerHighest.withValues(
@@ -608,6 +615,29 @@ class WarehouseDispatchHistoryPanelState
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
+                                    if (widget.onEditDispatch != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(right: 6),
+                                        child: IconButton.filledTonal(
+                                          onPressed: () =>
+                                              widget.onEditDispatch!(r.id),
+                                          style: IconButton.styleFrom(
+                                            minimumSize: const Size(36, 36),
+                                            padding: EdgeInsets.zero,
+                                            backgroundColor: const Color(
+                                              0xFFEFF6FF,
+                                            ),
+                                            foregroundColor: const Color(
+                                              0xFF1D4ED8,
+                                            ),
+                                          ),
+                                          tooltip: 'Modifier le bon',
+                                          icon: const Icon(
+                                            Icons.edit_outlined,
+                                            size: 20,
+                                          ),
+                                        ),
+                                      ),
                                     OutlinedButton(
                                       onPressed: () async {
                                         final removed = await showDialog<bool>(
@@ -684,6 +714,7 @@ class WarehouseDispatchHistoryPanelState
                           );
                         }).toList(),
                       ),
+                    ),
                     ),
                   ),
                 ),
@@ -1439,18 +1470,28 @@ class _WarehouseDispatchDetailDialogState
                       ),
                       const Divider(height: 22),
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Total',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
+                          Expanded(
+                            child: Text(
+                              'Total',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          Text(
-                            formatCurrency(d.subtotal),
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w800,
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                formatCurrency(d.subtotal),
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -1556,18 +1597,28 @@ class _WarehouseDispatchDetailDialogState
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w700,
+          const SizedBox(width: 8),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                value,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ),
         ],

@@ -90,6 +90,7 @@ dependencies:
   flutter_secure_storage: ^10.0.0
   timezone: ^0.11.0
   qr_flutter: ^4.1.0
+  image: ^4.3.0
 
 dev_dependencies:
   flutter_test:
@@ -130,7 +131,7 @@ flutter:
   assets:
     - assets/fs.png
     - assets/fasostocklogo.png
-    - assets/whatsApp.svg
+    - assets/social.svg
     - assets/fonts/NotoSans-Regular.ttf
     - assets/fonts/NotoSans-Bold.ttf
     - assets/fonts/ArchivoBlack-Regular.ttf

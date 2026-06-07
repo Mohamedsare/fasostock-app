@@ -20,6 +20,7 @@ import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/utils/share_csv.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 import 'widgets/adjust_stock_dialog.dart';
 import 'widgets/stock_range_slider.dart';
 
@@ -1499,9 +1500,11 @@ class _StockTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
+    return FsHorizontalScrollShell(
+      builder: (context, c) => SingleChildScrollView(
+        controller: c,
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
         columnSpacing: 16,
         headingRowColor: WidgetStateProperty.all(
           theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
@@ -1620,6 +1623,7 @@ class _StockTable extends StatelessWidget {
             ],
           );
         }).toList(),
+        ),
       ),
     );
   }
@@ -1650,9 +1654,11 @@ class _MovementsTable extends StatelessWidget {
         ),
       );
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
+    return FsHorizontalScrollShell(
+      builder: (context, c) => SingleChildScrollView(
+        controller: c,
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
         headingRowColor: WidgetStateProperty.all(
           theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
         ),
@@ -1693,6 +1699,7 @@ class _MovementsTable extends StatelessWidget {
             ],
           );
         }).toList(),
+        ),
       ),
     );
   }

@@ -11,6 +11,8 @@ class Company {
     this.aiPredictionsEnabled = false,
     this.warehouseFeatureEnabled = true,
     this.storeQuotaIncreaseEnabled = true,
+    this.warehouseKpiShowPurchaseValue = true,
+    this.warehouseKpiShowSaleValue = true,
   });
 
   final String id;
@@ -27,6 +29,10 @@ class Company {
   final bool warehouseFeatureEnabled;
   /// Augmentation du quota de boutiques — désactivable par la plateforme.
   final bool storeQuotaIncreaseEnabled;
+  /// Carte KPI « Valeur au prix d'achat » sur le dépôt Magasin (plateforme).
+  final bool warehouseKpiShowPurchaseValue;
+  /// Carte KPI « Valeur au prix de vente » sur le dépôt Magasin (plateforme).
+  final bool warehouseKpiShowSaleValue;
 
   factory Company.fromJson(Map<String, dynamic> json) {
     return Company(
@@ -42,6 +48,8 @@ class Company {
       aiPredictionsEnabled: json['ai_predictions_enabled'] as bool? ?? false,
       warehouseFeatureEnabled: json['warehouse_feature_enabled'] as bool? ?? true,
       storeQuotaIncreaseEnabled: json['store_quota_increase_enabled'] as bool? ?? true,
+      warehouseKpiShowPurchaseValue: json['warehouse_kpi_show_purchase_value'] as bool? ?? true,
+      warehouseKpiShowSaleValue: json['warehouse_kpi_show_sale_value'] as bool? ?? true,
     );
   }
 }

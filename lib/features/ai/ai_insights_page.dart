@@ -11,6 +11,7 @@ import '../../../data/repositories/predictions_repository.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 
 /// Page Prédictions IA — alignée web : états (entreprise, désactivé, API), génération, cartes, graphique, listes.
 class AiInsightsPage extends StatefulWidget {
@@ -318,89 +319,32 @@ class _AiInsightsPageState extends State<AiInsightsPage> {
     VoidCallback? onGenerate,
   }) {
     final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
+    Widget? trailing;
+    if (showGenerateButton && onGenerate != null) {
+      trailing = FilledButton.icon(
+        onPressed: loading ? null : onGenerate,
+        icon: loading
+            ? SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: theme.colorScheme.onPrimary,
                 ),
+              )
+            : Icon(
+                Icons.auto_awesome_rounded,
+                size: 20,
+                color: theme.colorScheme.onPrimary,
               ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (showGenerateButton && onGenerate != null) ...[
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: loading ? null : onGenerate,
-                  icon: loading
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        )
-                      : Icon(Icons.auto_awesome_rounded, size: 20, color: theme.colorScheme.onPrimary),
-                  label: Text(loading ? 'Analyse…' : 'Générer les prédictions'),
-                ),
-              ],
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (showGenerateButton && onGenerate != null)
-                FilledButton.icon(
-                  onPressed: loading ? null : onGenerate,
-                  icon: loading
-                      ? SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        )
-                      : Icon(Icons.auto_awesome_rounded, size: 20, color: theme.colorScheme.onPrimary),
-                  label: Text(loading ? 'Analyse…' : 'Générer les prédictions'),
-                ),
-            ],
-          );
+        label: Text(loading ? 'Analyse…' : 'Générer les prédictions'),
+      );
+    }
+    return FsMobilePageHeader(
+      title: title,
+      subtitle: description,
+      trailing: trailing,
+    );
   }
 
   Widget _buildNoAccessCard(BuildContext context) {

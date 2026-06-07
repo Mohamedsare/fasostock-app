@@ -15,6 +15,9 @@ import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../transfers/widgets/transfer_product_visuals.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import 'widgets/create_purchase_dialog.dart';
 
 const int _purchasesPageSize = 20;
@@ -306,8 +309,27 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       );
     }
 
+    /* FAB création achat sur mobile : action principale 1-tap toujours visible.
+       Sur desktop, le bouton "Nouveau achat" en header reste plus naturel. */
+    final canCreatePurchase =
+        permissions.isOwner ||
+        permissions.hasPermission(Permissions.purchasesCreate);
+    final isMobileFab = MediaQuery.sizeOf(context).width < 600;
     return Scaffold(
       appBar: null,
+      floatingActionButton: (isMobileFab && canCreatePurchase)
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                FsHaptic.selection();
+                _openCreatePurchase(companyId, stores, suppliers);
+              },
+              backgroundColor: const Color(0xFFF97316),
+              foregroundColor: Colors.white,
+              elevation: 4,
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Achat'),
+            )
+          : null,
       body: RefreshIndicator(
         onRefresh: _refreshSync,
         child: SingleChildScrollView(
@@ -316,28 +338,19 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Achats',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  if (permissions.isOwner || permissions.hasPermission(Permissions.purchasesCreate))
-                    FilledButton.icon(
-                      onPressed: () => _openCreatePurchase(companyId, stores, suppliers),
-                      icon: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Nouveau achat'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Voir, modifier, annuler ou supprimer les achats.',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+              FsMobilePageHeader(
+                title: 'Achats',
+                subtitle: 'Voir, modifier, annuler ou supprimer les achats.',
+                trailing: (!isMobileFab &&
+                        (permissions.isOwner ||
+                            permissions.hasPermission(Permissions.purchasesCreate)))
+                    ? FilledButton.icon(
+                        onPressed: () =>
+                            _openCreatePurchase(companyId, stores, suppliers),
+                        icon: const Icon(Icons.add_rounded, size: 18),
+                        label: const Text('Nouveau achat'),
+                      )
+                    : null,
               ),
               const SizedBox(height: 20),
               Wrap(
@@ -427,9 +440,11 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
               else ...[
                 Card(
                   clipBehavior: Clip.antiAlias,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
+                  child: FsHorizontalScrollShell(
+                    builder: (context, c) => SingleChildScrollView(
+                      controller: c,
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
                       columns: const [
                         DataColumn(label: Text('Réf.')),
                         DataColumn(label: Text('Date')),
@@ -499,6 +514,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                         );
                       }).toList(),
                     ),
+                  ),
                   ),
                 ),
                 if (pageCount > 1) ...[

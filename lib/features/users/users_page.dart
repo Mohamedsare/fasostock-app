@@ -13,6 +13,7 @@ import '../../../data/repositories/users_repository.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import 'widgets/create_user_dialog.dart';
 
 /// Page Utilisateurs — liste des membres depuis Drift (offline+sync), activer/désactiver, retirer.
@@ -379,54 +380,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isWide) {
-    final theme = Theme.of(context);
-    final narrow = Breakpoints.isNarrow(MediaQuery.sizeOf(context).width);
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Utilisateurs',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Gérer les accès et les droits des utilisateurs de l\'entreprise',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Utilisateurs',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Gérer les accès et les droits des utilisateurs de l\'entreprise',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
+    return const FsMobilePageHeader(
+      title: 'Utilisateurs',
+      subtitle: 'Gérer les accès et les droits des utilisateurs de l\'entreprise',
+    );
   }
 
   Widget _buildErrorCard(BuildContext context, String errorMessage) {

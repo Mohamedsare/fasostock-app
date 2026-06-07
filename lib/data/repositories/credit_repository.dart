@@ -1,6 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/errors/app_error_handler.dart';
+import '../../core/errors/crash_reporting.dart';
+import '../models/append_payment_result.dart';
 import '../models/sale.dart';
 import 'sales_repository.dart';
 
@@ -11,10 +13,10 @@ class CreditRepository {
   final SupabaseClient _client;
 
   static const _creditListSelect =
-      'id, company_id, store_id, customer_id, sale_number, status, subtotal, discount, tax, total, created_by, created_at, updated_at, sale_mode, document_type, credit_due_at, credit_internal_note, store:stores(id, name), customer:customers(id, name, phone), sale_payments(id, method, amount, reference, created_at)';
+      'id, company_id, store_id, customer_id, sale_number, status, subtotal, discount, tax, total, created_by, created_at, updated_at, sale_mode, document_type, credit_due_at, credit_internal_note, store:stores(id, name, primary_color), customer:customers(id, name, phone), sale_payments(id, method, amount, reference, created_at)';
 
   static const _creditDetailSelect =
-      'id, company_id, store_id, customer_id, sale_number, status, subtotal, discount, tax, total, created_by, created_at, updated_at, sale_mode, document_type, credit_due_at, credit_internal_note, store:stores(id, name), customer:customers(id, name, phone, address), sale_items(id, sale_id, product_id, quantity, unit_price, discount, total, product:products(id,name,sku,unit)), sale_payments(id, method, amount, reference, created_at)';
+      'id, company_id, store_id, customer_id, sale_number, status, subtotal, discount, tax, total, created_by, created_at, updated_at, sale_mode, document_type, credit_due_at, credit_internal_note, store:stores(id, name, primary_color), customer:customers(id, name, phone, address), sale_items(id, sale_id, product_id, quantity, unit_price, discount, total, product:products(id,name,sku,unit)), sale_payments(id, method, amount, reference, created_at)';
 
   Map<String, dynamic>? _singleOrList(dynamic raw) {
     if (raw == null) return null;
@@ -83,7 +85,10 @@ class CreditRepository {
             map[id] = (fn != null && fn.isNotEmpty) ? fn : fallback(id);
           }
         }
-      } catch (_) {}
+      } catch (e, st) {
+        // Best-effort : on conserve les libellés de repli mais on trace l'échec.
+        CrashReporting.captureException(e, st);
+      }
     }
     return map;
   }
@@ -231,18 +236,19 @@ class CreditRepository {
     );
   }
 
-  Future<void> appendSalePayment({
+  Future<AppendPaymentResult> appendSalePayment({
     required String saleId,
     required PaymentMethod method,
     required double amount,
     String? reference,
   }) async {
-    await _client.rpc('append_sale_payment', params: {
+    final raw = await _client.rpc('append_sale_payment', params: {
       'p_sale_id': saleId,
       'p_method': method.value,
       'p_amount': amount,
       'p_reference': reference,
     });
+    return AppendPaymentResult.fromRpc(raw);
   }
 
   Future<void> updateSaleCreditMeta({

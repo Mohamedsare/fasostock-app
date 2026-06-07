@@ -653,20 +653,29 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                                     vertical: 2,
                                   ),
                                   child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(
-                                        _paymentLabels[p.method] ??
-                                            p.method.name,
-                                        style: theme.textTheme.bodySmall,
+                                      Expanded(
+                                        child: Text(
+                                          _paymentLabels[p.method] ??
+                                              p.method.name,
+                                          style: theme.textTheme.bodySmall,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
-                                      Text(
-                                        formatCurrency(p.amount),
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          alignment: Alignment.centerRight,
+                                          child: Text(
+                                            formatCurrency(p.amount),
+                                            style: theme.textTheme.bodyMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -683,20 +692,29 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                                   vertical: 6,
                                 ),
                                 child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(
-                                      'Remise',
-                                      style: theme.textTheme.bodyMedium,
+                                    Expanded(
+                                      child: Text(
+                                        'Remise',
+                                        style: theme.textTheme.bodyMedium,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
-                                    Text(
-                                      '-${formatCurrency(_sale!.discount)}',
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            color: theme.colorScheme.error,
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                    const SizedBox(width: 8),
+                                    Flexible(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        alignment: Alignment.centerRight,
+                                        child: Text(
+                                          '-${formatCurrency(_sale!.discount)}',
+                                          style: theme.textTheme.bodyMedium
+                                              ?.copyWith(
+                                                color: theme.colorScheme.error,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -705,18 +723,31 @@ class _SaleDetailDialogState extends ConsumerState<SaleDetailDialog> {
                             Padding(
                               padding: const EdgeInsets.only(top: 8, bottom: 4),
                               child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'Total',
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w900),
+                                  Expanded(
+                                    child: Text(
+                                      'Total',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                  Text(
-                                    formatCurrency(_sale!.total),
-                                    style: theme.textTheme.titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w900),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: FittedBox(
+                                      fit: BoxFit.scaleDown,
+                                      alignment: Alignment.centerRight,
+                                      child: Text(
+                                        formatCurrency(_sale!.total),
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),

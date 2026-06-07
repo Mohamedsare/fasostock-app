@@ -22,6 +22,11 @@ import '../../../providers/sales_page_provider.dart';
 import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../../shared/widgets/company_load_error_screen.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
+import '../../../shared/widgets/mobile/fs_pull_to_refresh.dart';
+import '../../../shared/widgets/mobile/fs_responsive_dialog.dart';
 import '../../../shared/utils/share_csv.dart';
 import 'utils/sales_csv.dart';
 import 'widgets/sale_detail_dialog.dart';
@@ -46,33 +51,31 @@ bool _isA4Invoice(Sale s) {
 Widget _documentTypeChip(Sale s, BuildContext context) {
   final theme = Theme.of(context);
   final isA4 = _isA4Invoice(s);
+  final fg = isA4
+      ? theme.colorScheme.onPrimaryContainer
+      : theme.colorScheme.onSurfaceVariant;
   return Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
       color: isA4
           ? theme.colorScheme.primaryContainer.withValues(alpha: 0.8)
           : theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(8),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
           isA4 ? Icons.description_rounded : Icons.receipt_long_rounded,
-          size: 14,
-          color: isA4
-              ? theme.colorScheme.onPrimaryContainer
-              : theme.colorScheme.onSurfaceVariant,
+          size: 16,
+          color: fg,
         ),
-        const SizedBox(width: 4),
+        const SizedBox(width: 6),
         Text(
           isA4 ? 'A4' : 'Thermique',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: isA4
-                ? theme.colorScheme.onPrimaryContainer
-                : theme.colorScheme.onSurfaceVariant,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: fg,
           ),
         ),
       ],
@@ -281,29 +284,17 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   Future<void> _cancelSale(Sale sale) async {
     if (!_cancelSaleInFlight.add(sale.id)) return;
     try {
-      final confirm = await showDialog<bool>(
+      final confirm = await showFsConfirm(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Annuler cette vente ?'),
-          content: const Text(
-            'Le stock sera rétabli. Cette action est irréversible.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Non'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error,
-              ),
-              child: const Text('Oui, annuler'),
-            ),
-          ],
-        ),
+        title: 'Annuler cette vente ?',
+        message: 'Le stock sera rétabli. Cette action est irréversible.',
+        confirmLabel: 'Oui, annuler',
+        cancelLabel: 'Non',
+        icon: Icons.cancel_outlined,
+        dangerous: true,
       );
       if (confirm != true || !mounted) return;
+      FsHaptic.warning();
       final companyId = context.read<CompanyProvider>().currentCompanyId;
       final storeId = context.read<SalesPageProvider>().filterStoreId;
       final params = (
@@ -382,29 +373,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     try {
       final companyId = context.read<CompanyProvider>().currentCompanyId;
       if (companyId == null || companyId.isEmpty || !mounted) return;
-      final confirm = await showDialog<bool>(
+      final confirm = await showFsConfirm(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Retirer cette vente de l\'historique ?'),
-          content: Text(
+        title: 'Retirer cette vente de l\'historique ?',
+        message:
             'La vente ${sale.saleNumber} est déjà annulée. Cette suppression est irréversible.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Non'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(ctx).colorScheme.error,
-              ),
-              child: const Text('Oui, supprimer'),
-            ),
-          ],
-        ),
+        confirmLabel: 'Oui, supprimer',
+        cancelLabel: 'Non',
+        icon: Icons.delete_outline_rounded,
+        dangerous: true,
       );
       if (confirm != true || !mounted) return;
+      FsHaptic.warning();
       await _repo.purgeCancelledAsOwner(
         companyId: companyId,
         saleNumber: sale.saleNumber,
@@ -506,6 +486,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     final permissions = context.watch<PermissionsProvider>();
     final provider = context.watch<SalesPageProvider>();
     final companyId = company.currentCompanyId;
+    final stores = company.stores;
+    final storeIds = stores.map((s) => s.id).toSet();
     final canAccessSales =
         permissions.hasPermission(Permissions.salesView) ||
         permissions.hasPermission(Permissions.salesCreate) ||
@@ -535,9 +517,16 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       );
     }
 
-    final storeIdForStream = provider.filterStoreId.isEmpty
-        ? null
-        : provider.filterStoreId;
+    final rawFilterStoreId = provider.filterStoreId;
+    final hasValidStoreFilter =
+        rawFilterStoreId.isNotEmpty && storeIds.contains(rawFilterStoreId);
+    final storeIdForStream = hasValidStoreFilter ? rawFilterStoreId : null;
+    if (rawFilterStoreId.isNotEmpty && !hasValidStoreFilter) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.read<SalesPageProvider>().setFilters(storeId: '');
+      });
+    }
     final asyncSales = ref.watch(
       salesStreamProvider((
         companyId: companyId ?? '',
@@ -576,7 +565,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         : null;
 
     final currentStoreId = company.currentStoreId;
-    final stores = company.stores;
     Store? currentStore;
     if (currentStoreId != null) {
       for (final s in stores) {
@@ -635,9 +623,33 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         ? 'Ventes — ${currentStore.name}'
         : 'Sélectionnez une boutique';
 
+    /* FAB mobile : action principale "Nouvelle vente" en 1 tap, toujours visible
+       même quand l'utilisateur scrolle. Le bouton du header reste pour le desktop. */
+    final width = MediaQuery.sizeOf(context).width;
+    final isMobile = width < 600;
+    final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
+    final showMobileFab =
+        isMobile && canCreateSale && currentStoreId != null;
+
     return Scaffold(
       appBar: null,
-      body: RefreshIndicator(
+      floatingActionButton: showMobileFab
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                FsHaptic.selection();
+                context.go(AppRoutes.posQuick(currentStoreId));
+              },
+              backgroundColor: const Color(0xFFF97316),
+              foregroundColor: Colors.white,
+              elevation: 4,
+              highlightElevation: 8,
+              icon: const Icon(Icons.point_of_sale_rounded),
+              label: Text(
+                width < 600 ? 'Vente' : 'Nouvelle vente',
+              ),
+            )
+          : null,
+      body: FsPullToRefresh(
         onRefresh: _refresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -718,22 +730,21 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     int salesCount,
     List<Sale> salesForExport,
   ) {
-    final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
+    final mobile = FsMobilePageHeader.isMobileLayout(context);
     final permissions = context.read<PermissionsProvider>();
     final canCreateSale = permissions.hasPermission(Permissions.salesCreate);
+    final storeId = context.read<CompanyProvider>().currentStoreId;
     final filledBtn =
-        canCreateSale && context.read<CompanyProvider>().currentStoreId != null
+        !mobile &&
+            canCreateSale &&
+            storeId != null
         ? FilledButton.icon(
-            onPressed: () {
-              final id = context.read<CompanyProvider>().currentStoreId;
-              if (id != null) context.go(AppRoutes.posQuick(id));
-            },
+            onPressed: () => context.go(AppRoutes.posQuick(storeId)),
             icon: const Icon(Icons.add_rounded, size: 20),
             label: const Text('Nouvelle vente'),
           )
         : null;
-    final actionWidgets = [
+    final children = <Widget>[
       OutlinedButton.icon(
         onPressed: salesCount == 0 ? null : () => _exportCsv(salesForExport),
         icon: const Icon(Icons.download_rounded, size: 18),
@@ -741,62 +752,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       ),
       ?filledBtn,
     ];
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Ventes',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(spacing: 8, runSpacing: 8, children: actionWidgets),
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Ventes',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Flexible(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.end,
-                  children: actionWidgets,
-                ),
-              ),
-            ],
-          );
+    return FsMobilePageHeader(
+      title: 'Ventes',
+      subtitle: description,
+      trailing: children.isEmpty
+          ? null
+          : Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.start,
+              children: children,
+            ),
+    );
   }
 
   Widget _buildActions(
@@ -1485,9 +1452,11 @@ class _SalesTable extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
+      child: FsHorizontalScrollShell(
+        builder: (context, c) => SingleChildScrollView(
+          controller: c,
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
           headingRowColor: WidgetStateProperty.all(
             theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
           ),
@@ -1592,6 +1561,7 @@ class _SalesTable extends StatelessWidget {
             );
           }).toList(),
         ),
+      ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/append_payment_result.dart';
 import '../models/legacy_credit.dart';
 
 class LegacyCreditRepository {
@@ -50,18 +51,19 @@ class LegacyCreditRepository {
     });
   }
 
-  Future<void> appendPayment({
+  Future<AppendPaymentResult> appendPayment({
     required String creditId,
     required String method,
     required double amount,
     String? reference,
   }) async {
-    await _client.rpc('append_legacy_customer_credit_payment', params: {
+    final raw = await _client.rpc('append_legacy_customer_credit_payment', params: {
       'p_credit_id': creditId,
       'p_method': method,
       'p_amount': amount,
       'p_reference': reference,
     });
+    return AppendPaymentResult.fromRpc(raw);
   }
 
   Future<void> delete({required String creditId}) async {

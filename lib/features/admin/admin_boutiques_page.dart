@@ -3,6 +3,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// Toutes les boutiques plateforme (équivalent AdminBoutiquesPage web).
@@ -61,9 +62,11 @@ class _AdminBoutiquesPageState extends State<AdminBoutiquesPage> {
                   const SizedBox(height: 12),
                   AdminCard(
                     padding: EdgeInsets.zero,
-                    child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: DataTable(
+                    child: FsHorizontalScrollShell(
+                      builder: (context, c) => SingleChildScrollView(
+                        controller: c,
+                        scrollDirection: Axis.horizontal,
+                        child: DataTable(
                         columns: [
                           DataColumn(label: Text('Entreprise', style: AdminPalette.dataTableHeader)),
                           DataColumn(label: Text('Boutique', style: AdminPalette.dataTableHeader)),
@@ -89,6 +92,7 @@ class _AdminBoutiquesPageState extends State<AdminBoutiquesPage> {
                           ],
                         )).toList(),
                       ),
+                    ),
                     ),
                   ),
                   if (stores.isEmpty) Padding(padding: const EdgeInsets.all(24), child: Center(child: Text('Aucune boutique.', style: TextStyle(color: AdminPalette.subtitle)))),

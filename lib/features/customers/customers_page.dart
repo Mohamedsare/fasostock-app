@@ -17,6 +17,11 @@ import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/csv_export.dart';
 import 'utils/customers_csv.dart';
 import '../../../shared/utils/share_csv.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
+import '../../../shared/widgets/mobile/fs_pull_to_refresh.dart';
+import '../../../shared/widgets/mobile/fs_responsive_dialog.dart';
 import 'widgets/create_customer_dialog.dart';
 import 'widgets/edit_customer_dialog.dart';
 
@@ -133,7 +138,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   void _openCreateDialog(String companyId) {
-    showDialog<void>(
+    showFsResponsiveModal<void>(
       context: context,
       builder: (ctx) => CreateCustomerDialog(
         companyId: companyId,
@@ -185,7 +190,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   void _openEditDialog(Customer customer) {
-    showDialog<void>(
+    showFsResponsiveModal<void>(
       context: context,
       builder: (ctx) => EditCustomerDialog(
         customer: customer,
@@ -201,27 +206,18 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   Future<void> _confirmDelete(Customer customer) async {
-    final confirm = await showDialog<bool>(
+    final confirm = await showFsConfirm(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Supprimer ce client ?'),
-        content: Text(
+      title: 'Supprimer ce client ?',
+      message:
           'Cette action est irréversible. Les ventes liées à ce client ne seront pas supprimées (le client sera simplement retiré).',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Supprimer'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      icon: Icons.person_remove_outlined,
+      dangerous: true,
     );
     if (confirm != true || !mounted) return;
+    FsHaptic.warning();
     final companyId = customer.companyId;
     try {
       await _repo.delete(customer.id);
@@ -370,7 +366,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
 
     return Scaffold(
       appBar: null,
-      body: RefreshIndicator(
+      body: FsPullToRefresh(
         onRefresh: _refresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -410,15 +406,24 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
           ),
         ),
       ),
+      /* FAB création client. Extended (icône + label) pour la discoverabilité ;
+         label adapté à la largeur : "Client" sur mobile, "Nouveau client" sinon. */
       floatingActionButton: canCreate && customers.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: () => _openCreateDialog(companyId),
+          ? FloatingActionButton.extended(
+              onPressed: () {
+                FsHaptic.selection();
+                _openCreateDialog(companyId);
+              },
               backgroundColor: const Color(0xFFF97316),
               foregroundColor: Colors.white,
               elevation: 4,
               highlightElevation: 8,
-              tooltip: 'Nouveau client',
-              child: const Icon(Icons.add_rounded, size: 28),
+              icon: const Icon(Icons.add_rounded),
+              label: Text(
+                MediaQuery.sizeOf(context).width < 600
+                    ? 'Client'
+                    : 'Nouveau client',
+              ),
             )
           : null,
     );
@@ -432,96 +437,37 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     String companyId,
     List<Customer> filtered,
   ) {
-    final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Clients',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
+    final mobile = FsMobilePageHeader.isMobileLayout(context);
+    Widget? trailing;
+    if (canCreate || filtered.isNotEmpty) {
+      trailing = Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          if (filtered.isNotEmpty)
+            IconButton.filled(
+              onPressed: () => _exportCsv(filtered),
+              icon: const Icon(Icons.download_rounded, size: 24),
+              tooltip: 'Enregistrer CSV',
+            ),
+          if (canCreate && !mobile)
+            IconButton.filled(
+              onPressed: () => _openCreateDialog(companyId),
+              icon: const Icon(Icons.add_rounded, size: 24),
+              style: IconButton.styleFrom(
+                backgroundColor: const Color(0xFFF97316),
+                foregroundColor: Colors.white,
               ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              if (canCreate || filtered.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (filtered.isNotEmpty)
-                      IconButton.filled(
-                        onPressed: () => _exportCsv(filtered),
-                        icon: const Icon(Icons.download_rounded, size: 24),
-                        tooltip: 'Enregistrer CSV',
-                      ),
-                    if (filtered.isNotEmpty && canCreate) const SizedBox(width: 8),
-                    if (canCreate)
-                      IconButton.filled(
-                        onPressed: () => _openCreateDialog(companyId),
-                        icon: const Icon(Icons.add_rounded, size: 24),
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFFF97316),
-                          foregroundColor: Colors.white,
-                        ),
-                        tooltip: 'Nouveau client',
-                      ),
-                  ],
-                ),
-              ],
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Clients',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (filtered.isNotEmpty)
-                IconButton.filled(
-                  onPressed: () => _exportCsv(filtered),
-                  icon: const Icon(Icons.download_rounded, size: 24),
-                  tooltip: 'Enregistrer CSV',
-                ),
-              if (filtered.isNotEmpty && canCreate) const SizedBox(width: 8),
-              if (canCreate)
-                IconButton.filled(
-                  onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 24),
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFFF97316),
-                    foregroundColor: Colors.white,
-                  ),
-                  tooltip: 'Nouveau client',
-                ),
-            ],
-          );
+              tooltip: 'Nouveau client',
+            ),
+        ],
+      );
+    }
+    return FsMobilePageHeader(
+      title: 'Clients',
+      subtitle: description,
+      trailing: trailing,
+    );
   }
 
   Widget _buildErrorCard(BuildContext context, String? error) {
@@ -630,9 +576,11 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
         side: BorderSide(color: theme.dividerColor),
       ),
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
+      child: FsHorizontalScrollShell(
+        builder: (context, c) => SingleChildScrollView(
+          controller: c,
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
           headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)),
           columns: const [
             DataColumn(label: Text('Nom')),
@@ -664,6 +612,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
             );
           }).toList(),
         ),
+      ),
       ),
     );
   }

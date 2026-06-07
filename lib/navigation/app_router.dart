@@ -46,6 +46,7 @@ import '../features/admin/admin_rapports_page.dart';
 import '../features/admin/admin_settings_page.dart';
 import '../features/admin/admin_ai_page.dart';
 import '../features/admin/admin_fonctionnalites_page.dart';
+import '../features/splash/splash_page.dart';
 
 /// Route d'attente au démarrage (évite l'écran blanc).
 const String _splashPath = '/_splash';
@@ -169,31 +170,7 @@ GoRouter createAppRouter(AuthProvider authProvider) {
     routes: [
       GoRoute(
         path: _splashPath,
-        builder: (context, state) => Container(
-          color: const Color(0xFFF1F5F9),
-          child: Scaffold(
-            backgroundColor: const Color(0xFFF1F5F9),
-            body: SafeArea(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(color: Color(0xFFEA580C)),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Chargement...',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey.shade800,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
+        builder: (context, state) => const SplashPage(),
       ),
       GoRoute(
         path: AppRoutes.login,

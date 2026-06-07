@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../../data/models/product.dart';
+import '../../../shared/widgets/mobile/fs_haptic.dart';
+import '../../../shared/widgets/mobile/fs_pull_to_refresh.dart';
 import 'pos_quick_product_card.dart';
 
-/// Grille produits caisse rapide avec pull-to-refresh.
+/// Grille produits caisse rapide avec pull-to-refresh + haptique à l'ajout au panier.
 class PosQuickProductGrid extends StatelessWidget {
   const PosQuickProductGrid({
     super.key,
@@ -22,7 +24,7 @@ class PosQuickProductGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     if (products.isEmpty) {
-      return RefreshIndicator(
+      return FsPullToRefresh(
         onRefresh: onRefresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -31,10 +33,7 @@ class PosQuickProductGrid extends StatelessWidget {
             child: Center(
               child: Text(
                 'Aucun produit',
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontSize: 15,
-                ),
+                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 15),
               ),
             ),
           ),
@@ -49,7 +48,7 @@ class PosQuickProductGrid extends StatelessWidget {
         final crossCount = w > 600 ? 4 : 2;
         // Même hauteur de cellule relative que la grille Facture A4 (image 98 + texte).
         final aspectRatio = w < 400 ? 0.76 : (w < 600 ? 0.84 : 0.90);
-        return RefreshIndicator(
+        return FsPullToRefresh(
           onRefresh: onRefresh,
           child: GridView.builder(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -67,7 +66,12 @@ class PosQuickProductGrid extends StatelessWidget {
               return PosQuickProductCard(
                 product: p,
                 stock: stock,
-                onTap: () => onAddToCart(p),
+                onTap: () {
+                  /* Retour haptique léger à chaque ajout au panier — c'est l'un des
+                     signaux les plus marquants d'app native sur Android/iOS. */
+                  FsHaptic.selection();
+                  onAddToCart(p);
+                },
               );
             },
           ),

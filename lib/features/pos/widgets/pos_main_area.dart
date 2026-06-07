@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/breakpoints.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 import '../../../data/models/category.dart';
 import '../../../data/models/customer.dart';
 import '../../../data/models/product.dart';
@@ -389,27 +390,30 @@ class PosMainArea extends StatelessWidget {
           ),
           SizedBox(
             height: stripUltraMobile ? 48 : 52,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.symmetric(horizontal: stripMode ? 12 : 16),
-              children: [
-                _CategoryChip(
-                  label: 'Tous',
-                  selected: selectedCategoryId == null,
-                  onSelected: () => onCategorySelected(null),
-                ),
-                const SizedBox(width: 8),
-                ...categories.map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _CategoryChip(
-                      label: c.name,
-                      selected: selectedCategoryId == c.id,
-                      onSelected: () => onCategorySelected(c.id),
+            child: FsHorizontalScrollShell(
+              builder: (context, c) => ListView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.symmetric(horizontal: stripMode ? 12 : 16),
+                children: [
+                  _CategoryChip(
+                    label: 'Tous',
+                    selected: selectedCategoryId == null,
+                    onSelected: () => onCategorySelected(null),
+                  ),
+                  const SizedBox(width: 8),
+                  ...categories.map(
+                    (c) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _CategoryChip(
+                        label: c.name,
+                        selected: selectedCategoryId == c.id,
+                        onSelected: () => onCategorySelected(c.id),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           SizedBox(height: stripMode ? 6 : 8),

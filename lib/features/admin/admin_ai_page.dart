@@ -4,6 +4,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// AI / chatbot landing (équivalent AdminAIPage web).
@@ -49,9 +50,11 @@ class _AdminAIPageState extends State<AdminAIPage> {
               final companies = snap.data!;
               return AdminCard(
                 padding: EdgeInsets.zero,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
+                child: FsHorizontalScrollShell(
+                  builder: (context, c) => SingleChildScrollView(
+                    controller: c,
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
                     columns: const [DataColumn(label: Text('Entreprise')), DataColumn(label: Text('Prédictions IA')), DataColumn(label: Text('Action'))],
                     rows: companies.map((c) => DataRow(
                       cells: [
@@ -65,6 +68,7 @@ class _AdminAIPageState extends State<AdminAIPage> {
                       ],
                     )).toList(),
                   ),
+                ),
                 ),
               );
             },
@@ -88,9 +92,11 @@ class _AdminAIPageState extends State<AdminAIPage> {
                       constraints: const BoxConstraints(maxHeight: 400),
                       child: SingleChildScrollView(
                         scrollDirection: Axis.vertical,
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: DataTable(
+                        child: FsHorizontalScrollShell(
+                          builder: (context, c) => SingleChildScrollView(
+                            controller: c,
+                            scrollDirection: Axis.horizontal,
+                            child: DataTable(
                             columns: const [DataColumn(label: Text('Date')), DataColumn(label: Text('Session')), DataColumn(label: Text('Rôle')), DataColumn(label: Text('Message'))],
                             rows: msgs.map((m) {
                               final created = m['created_at'] as String?;
@@ -110,6 +116,7 @@ class _AdminAIPageState extends State<AdminAIPage> {
                               ]);
                             }).toList(),
                           ),
+                        ),
                         ),
                       ),
                     ),

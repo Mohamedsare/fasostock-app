@@ -18,7 +18,6 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   final _formKey = GlobalKey<FormState>();
   final _companyNameController = TextEditingController();
-  final _companySlugController = TextEditingController();
   final _ownerFullNameController = TextEditingController();
   final _ownerEmailController = TextEditingController();
   final _ownerPasswordController = TextEditingController();
@@ -29,31 +28,14 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _loading = false;
 
   @override
-  void initState() {
-    super.initState();
-    _companyNameController.addListener(_syncSlug);
-  }
-
-  @override
   void dispose() {
-    _companyNameController.removeListener(_syncSlug);
     _companyNameController.dispose();
-    _companySlugController.dispose();
     _ownerFullNameController.dispose();
     _ownerEmailController.dispose();
     _ownerPasswordController.dispose();
     _firstStoreNameController.dispose();
     _firstStorePhoneController.dispose();
     super.dispose();
-  }
-
-  void _syncSlug() {
-    final name = _companyNameController.text.trim();
-    if (name.isEmpty) return;
-    final slug = _slugFromName(name);
-    if (_companySlugController.text != slug) {
-      _companySlugController.text = slug;
-    }
   }
 
   static String _slugFromName(String name) {
@@ -83,23 +65,31 @@ class _RegisterPageState extends State<RegisterPage> {
       _loading = true;
     });
     try {
-      final btParam =
-          GoRouterState.of(context).uri.queryParameters['businessType']?.trim();
-      final businessTypeSlug =
-          isValidBusinessTypeSlug(btParam) ? btParam : null;
+      final btParam = GoRouterState.of(
+        context,
+      ).uri.queryParameters['businessType']?.trim();
+      final businessTypeSlug = isValidBusinessTypeSlug(btParam)
+          ? btParam
+          : null;
+      final companyNameRaw = _companyNameController.text.trim();
+      final firstStoreName = _firstStoreNameController.text.trim();
+      final effectiveCompanyName = companyNameRaw.isEmpty
+          ? firstStoreName
+          : companyNameRaw;
+      final slug = _slugFromName(effectiveCompanyName);
       final authService = AuthService(Supabase.instance.client);
-      await authService.registerCompany(RegisterCompanyInput(
-        companyName: _companyNameController.text.trim(),
-        companySlug: _companySlugController.text.trim().isEmpty
-            ? _slugFromName(_companyNameController.text.trim())
-            : _companySlugController.text.trim(),
-        ownerEmail: _ownerEmailController.text.trim(),
-        ownerPassword: _ownerPasswordController.text,
-        ownerFullName: _ownerFullNameController.text.trim(),
-        firstStoreName: _firstStoreNameController.text.trim(),
-        firstStorePhone: _firstStorePhoneController.text.trim(),
-        businessTypeSlug: businessTypeSlug,
-      ));
+      await authService.registerCompany(
+        RegisterCompanyInput(
+          companyName: effectiveCompanyName,
+          companySlug: slug,
+          ownerEmail: _ownerEmailController.text.trim(),
+          ownerPassword: _ownerPasswordController.text,
+          ownerFullName: _ownerFullNameController.text.trim(),
+          firstStoreName: firstStoreName,
+          firstStorePhone: _firstStorePhoneController.text.trim(),
+          businessTypeSlug: businessTypeSlug,
+        ),
+      );
       if (mounted) {
         context.go(AppRoutes.login);
         AppToast.success(context, 'Compte créé. Connectez-vous.');
@@ -138,35 +128,32 @@ class _RegisterPageState extends State<RegisterPage> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Créer une entreprise',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                      'Bienvenue sur FasoStock',
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Inscription : entreprise, compte owner et première boutique.',
+                      'Créez votre compte, ajoutez votre entreprise et configurez votre première boutique.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _companyNameController,
                       decoration: const InputDecoration(
-                        labelText: "Nom de l'entreprise *",
+                        labelText: "Nom de l'entreprise (optionnel)",
                         border: OutlineInputBorder(),
                       ),
                       textCapitalization: TextCapitalization.words,
-                      validator: (v) => (v == null || v.trim().length < 2) ? 'Nom requis (2 car. min.)' : null,
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _companySlugController,
-                      decoration: const InputDecoration(
-                        labelText: 'Slug (rempli automatiquement)',
-                        hintText: 'mon-entreprise',
-                        border: OutlineInputBorder(),
-                      ),
-                      readOnly: true,
+                      validator: (v) {
+                        final t = v?.trim() ?? '';
+                        if (t.isEmpty) return null;
+                        return t.length < 2
+                            ? 'Nom trop court (2 car. min.)'
+                            : null;
+                      },
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -177,7 +164,9 @@ class _RegisterPageState extends State<RegisterPage> {
                         border: OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.phone,
-                      validator: (v) => (v == null || v.trim().length < 8) ? 'Téléphone requis (ex. 70 00 00 00)' : null,
+                      validator: (v) => (v == null || v.trim().length < 8)
+                          ? 'Téléphone requis (ex. 70 00 00 00)'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -187,7 +176,9 @@ class _RegisterPageState extends State<RegisterPage> {
                         border: OutlineInputBorder(),
                       ),
                       textCapitalization: TextCapitalization.words,
-                      validator: (v) => (v == null || v.trim().length < 2) ? 'Nom requis' : null,
+                      validator: (v) => (v == null || v.trim().length < 2)
+                          ? 'Nom requis'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -200,8 +191,14 @@ class _RegisterPageState extends State<RegisterPage> {
                       keyboardType: TextInputType.emailAddress,
                       autocorrect: false,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Email requis';
-                        if (!RegExp(r'^[\w.-]+@[\w.-]+\.\w+$').hasMatch(v.trim())) return 'Email invalide';
+                        if (v == null || v.trim().isEmpty) {
+                          return 'Email requis';
+                        }
+                        if (!RegExp(
+                          r'^[\w.-]+@[\w.-]+\.\w+$',
+                        ).hasMatch(v.trim())) {
+                          return 'Email invalide';
+                        }
                         return null;
                       },
                     ),
@@ -213,7 +210,9 @@ class _RegisterPageState extends State<RegisterPage> {
                         border: OutlineInputBorder(),
                       ),
                       obscureText: true,
-                      validator: (v) => (v == null || v.length < 8) ? 'Minimum 8 caractères' : null,
+                      validator: (v) => (v == null || v.length < 8)
+                          ? 'Minimum 8 caractères'
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -224,7 +223,9 @@ class _RegisterPageState extends State<RegisterPage> {
                         border: OutlineInputBorder(),
                       ),
                       textCapitalization: TextCapitalization.words,
-                      validator: (v) => (v == null || v.trim().length < 2) ? 'Nom de la boutique requis' : null,
+                      validator: (v) => (v == null || v.trim().length < 2)
+                          ? 'Nom de la boutique requis'
+                          : null,
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 16),
@@ -234,14 +235,25 @@ class _RegisterPageState extends State<RegisterPage> {
                           color: Theme.of(context).colorScheme.errorContainer,
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.onErrorContainer)),
+                        child: Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
+                          ),
+                        ),
                       ),
                     ],
                     const SizedBox(height: 24),
                     FilledButton(
                       onPressed: _loading ? null : _submit,
                       child: _loading
-                          ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
                           : const Text('Créer mon entreprise'),
                     ),
                     const SizedBox(height: 16),

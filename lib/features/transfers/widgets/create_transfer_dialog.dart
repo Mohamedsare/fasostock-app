@@ -383,9 +383,15 @@ class _CreateTransferDialogState extends ConsumerState<CreateTransferDialog> {
                 ),
               const SizedBox(height: 16),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Lignes', style: theme.textTheme.titleSmall),
+                  Expanded(
+                    child: Text(
+                      'Lignes',
+                      style: theme.textTheme.titleSmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                   if (productsLoading)
                     Text(
                       'Chargement…',

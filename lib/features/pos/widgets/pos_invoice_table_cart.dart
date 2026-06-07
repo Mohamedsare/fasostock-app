@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/breakpoints.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 import '../../../providers/pos_cart_settings_provider.dart';
 import '../../../shared/utils/format_currency.dart';
 import '../../pos_quick/pos_quick_constants.dart';
@@ -319,33 +321,22 @@ class PosInvoiceTableCart extends StatelessWidget {
             // Dans un parent déjà scrollable (ex. panier fusionné mobile), pas de scroll
             // vertical ici — hauteur libre + scroll horizontal seulement.
             if (!constraints.hasBoundedHeight) {
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minWidth: tableMinWidth),
-                  child: table,
+              return FsHorizontalScrollShell(
+                builder: (context, c) => SingleChildScrollView(
+                  controller: c,
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minWidth: tableMinWidth),
+                    child: table,
+                  ),
                 ),
               );
             }
 
-            return Scrollbar(
-              thumbVisibility: true,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.vertical,
-                primary: false,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  primary: false,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minWidth: tableMinWidth),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      child: table,
-                    ),
-                  ),
-                ),
-              ),
+            return _PosInvoiceBidirectionalScrollView(
+              minWidth: tableMinWidth,
+              child: table,
             );
           },
         );
@@ -388,5 +379,102 @@ class PosInvoiceTableCart extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Panier facture avec hauteur bornée : scroll vertical + horizontal, barres fines desktop
+/// (aligné UX web `fs-scroll-x`) + molette souris sur l’axe horizontal.
+class _PosInvoiceBidirectionalScrollView extends StatefulWidget {
+  const _PosInvoiceBidirectionalScrollView({
+    required this.minWidth,
+    required this.child,
+  });
+
+  final double minWidth;
+  final Widget child;
+
+  @override
+  State<_PosInvoiceBidirectionalScrollView> createState() =>
+      _PosInvoiceBidirectionalScrollViewState();
+}
+
+class _PosInvoiceBidirectionalScrollViewState
+    extends State<_PosInvoiceBidirectionalScrollView> {
+  late final ScrollController _v = ScrollController();
+  late final ScrollController _h = ScrollController();
+
+  @override
+  void dispose() {
+    _v.dispose();
+    _h.dispose();
+    super.dispose();
+  }
+
+  void _onWheelHorizontal(PointerSignalEvent event) {
+    if (!fsUseDesktopHorizontalScrollUx(context)) return;
+    if (event is! PointerScrollEvent) return;
+    if (event.kind != PointerDeviceKind.mouse) return;
+    final dy = event.scrollDelta.dy;
+    if (dy == 0) return;
+    if (event.scrollDelta.dx.abs() >= dy.abs()) return;
+    if (!_h.hasClients) return;
+    final pos = _h.position;
+    if (pos.maxScrollExtent <= 0) return;
+    final atStart = _h.offset <= 0 && dy < 0;
+    final atEnd = _h.offset >= pos.maxScrollExtent - 0.5 && dy > 0;
+    if (atStart || atEnd) return;
+    final next = (_h.offset + dy).clamp(0.0, pos.maxScrollExtent);
+    _h.jumpTo(next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final desktop = fsUseDesktopHorizontalScrollUx(context);
+
+    Widget horizontal = SingleChildScrollView(
+      controller: _h,
+      scrollDirection: Axis.horizontal,
+      primary: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minWidth: widget.minWidth),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: widget.child,
+        ),
+      ),
+    );
+
+    if (desktop) {
+      horizontal = Scrollbar(
+        controller: _h,
+        thickness: 5,
+        radius: const Radius.circular(999),
+        thumbVisibility: true,
+        child: horizontal,
+      );
+      horizontal = Listener(
+        onPointerSignal: _onWheelHorizontal,
+        child: horizontal,
+      );
+    }
+
+    Widget body = SingleChildScrollView(
+      controller: _v,
+      scrollDirection: Axis.vertical,
+      primary: false,
+      child: horizontal,
+    );
+
+    if (desktop) {
+      body = Scrollbar(
+        controller: _v,
+        thickness: 5,
+        radius: const Radius.circular(999),
+        thumbVisibility: true,
+        child: body,
+      );
+    }
+
+    return body;
   }
 }

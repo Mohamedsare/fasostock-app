@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../data/models/category.dart';
 import '../../../data/models/product.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 import '../pos_quick_constants.dart';
 import 'pos_quick_product_grid.dart';
 
@@ -85,29 +86,32 @@ class PosQuickLeftZone extends StatelessWidget {
           SizedBox(
             // Les FilterChip dépassent ~48px (padding + cible tactile) — 44px provoquait overflow.
             height: 52,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              children: [
-                _CategoryChip(
-                  label: 'Tous',
-                  categoryId: null,
-                  selected: selectedCategoryId == null,
-                  onSelected: () => onCategorySelected(null),
-                ),
-                const SizedBox(width: 8),
-                ...categories.map(
-                  (c) => Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _CategoryChip(
-                      label: c.name,
-                      categoryId: c.id,
-                      selected: selectedCategoryId == c.id,
-                      onSelected: () => onCategorySelected(c.id),
+            child: FsHorizontalScrollShell(
+              builder: (context, c) => ListView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: [
+                  _CategoryChip(
+                    label: 'Tous',
+                    categoryId: null,
+                    selected: selectedCategoryId == null,
+                    onSelected: () => onCategorySelected(null),
+                  ),
+                  const SizedBox(width: 8),
+                  ...categories.map(
+                    (c) => Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _CategoryChip(
+                        label: c.name,
+                        categoryId: c.id,
+                        selected: selectedCategoryId == c.id,
+                        onSelected: () => onCategorySelected(c.id),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),

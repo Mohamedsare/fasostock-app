@@ -10,6 +10,8 @@ import '../../../providers/auth_provider.dart';
 import '../../../providers/company_provider.dart';
 import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import 'widgets/create_supplier_dialog.dart';
 import 'widgets/edit_supplier_dialog.dart';
 
@@ -278,71 +280,23 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isWide) {
-    final theme = Theme.of(context);
     final permissions = context.watch<PermissionsProvider>();
     final companyId = context.watch<CompanyProvider>().currentCompanyId;
-    final narrow = MediaQuery.sizeOf(context).width < 560;
     const description = 'Gérer vos fournisseurs';
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Fournisseurs',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              if (companyId != null && permissions.hasPermission(Permissions.suppliersManage)) ...[
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Nouveau fournisseur'),
-                ),
-              ],
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Fournisseurs',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (companyId != null && permissions.hasPermission(Permissions.suppliersManage))
-                FilledButton.icon(
-                  onPressed: () => _openCreateDialog(companyId),
-                  icon: const Icon(Icons.add_rounded, size: 20),
-                  label: const Text('Nouveau fournisseur'),
-                ),
-            ],
-          );
+    final mobile = FsMobilePageHeader.isMobileLayout(context);
+    final canAdd =
+        companyId != null && permissions.hasPermission(Permissions.suppliersManage);
+    return FsMobilePageHeader(
+      title: 'Fournisseurs',
+      subtitle: description,
+      trailing: canAdd && !mobile
+          ? FilledButton.icon(
+              onPressed: () => _openCreateDialog(companyId),
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: const Text('Nouveau fournisseur'),
+            )
+          : null,
+    );
   }
 
   Widget _buildErrorCard(BuildContext context, String error) {
@@ -419,9 +373,11 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
         side: BorderSide(color: theme.dividerColor),
       ),
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
+      child: FsHorizontalScrollShell(
+        builder: (context, c) => SingleChildScrollView(
+          controller: c,
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
           headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)),
           columns: [
             const DataColumn(label: Text('Nom')),
@@ -455,6 +411,7 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
             ],
           )).toList(),
         ),
+      ),
       ),
     );
   }

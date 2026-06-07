@@ -23,8 +23,10 @@ import '../../../providers/offline_providers.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../shared/utils/csv_export.dart';
 import '../../../shared/utils/format_currency.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import '../../../shared/utils/share_csv.dart';
 import '../../../shared/utils/save_bytes_file.dart';
+import '../../../shared/widgets/fs_horizontal_scroll.dart';
 
 /// Page Rapports — offline-first : lecture Drift (même source que dashboard), sync + Realtime via tables locales,
 /// rafraîchissement comme le dashboard ([dashboardDataChangeTriggerStreamProvider]).
@@ -449,58 +451,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isWide, String description) {
-    final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Rapports',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Rapports',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
+    return FsMobilePageHeader(
+      title: 'Rapports',
+      subtitle: description,
+    );
   }
 
   Widget _buildErrorCard(BuildContext context) {
@@ -1232,9 +1186,11 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
               ),
             )
           else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
+            FsHorizontalScrollShell(
+              builder: (context, c) => SingleChildScrollView(
+                controller: c,
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
                 headingRowColor: WidgetStateProperty.all(theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5)),
                 columns: const [
                   DataColumn(label: Text('Produit')),
@@ -1268,6 +1224,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage> {
                     ],
                   );
                 }),
+              ),
               ),
             ),
           if (leastProducts.isNotEmpty) ...[

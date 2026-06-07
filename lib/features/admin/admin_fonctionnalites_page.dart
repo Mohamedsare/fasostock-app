@@ -5,6 +5,7 @@ import '../../core/errors/app_error_handler.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// Fonctionnalités par entreprise — aligné `admin-features-screen.tsx` (web).
@@ -38,6 +39,8 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
     bool? aiPredictionsEnabled,
     bool? warehouseFeatureEnabled,
     bool? storeQuotaIncreaseEnabled,
+    bool? warehouseKpiShowPurchaseValue,
+    bool? warehouseKpiShowSaleValue,
     int? storeQuota,
   }) async {
     if (_busy) return;
@@ -49,6 +52,8 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
         aiPredictionsEnabled: aiPredictionsEnabled,
         warehouseFeatureEnabled: warehouseFeatureEnabled,
         storeQuotaIncreaseEnabled: storeQuotaIncreaseEnabled,
+        warehouseKpiShowPurchaseValue: warehouseKpiShowPurchaseValue,
+        warehouseKpiShowSaleValue: warehouseKpiShowSaleValue,
         storeQuota: storeQuota,
       );
       if (!mounted) return;
@@ -97,7 +102,7 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
                   child: AdminPageHeader(
                     title: 'Fonctionnalités',
                     description:
-                        'Activez ou désactivez des modules pour chaque entreprise (Magasin, prédictions IA, possibilité d’augmenter le quota de boutiques).',
+                        'Activez ou désactivez des modules pour chaque entreprise (Magasin, KPIs valeur stock sur le dépôt, prédictions IA, quota de boutiques).',
                   ),
                 ),
                 IconButton.filledTonal(
@@ -141,10 +146,12 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
                 }
                 return AdminCard(
                   padding: EdgeInsets.zero,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(minWidth: 920),
+                  child: FsHorizontalScrollShell(
+                    builder: (context, c) => SingleChildScrollView(
+                      controller: c,
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                      constraints: const BoxConstraints(minWidth: 1180),
                       child: DataTable(
                         headingRowHeight: 48,
                         dataRowMinHeight: 52,
@@ -157,6 +164,36 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
                                 Icon(Icons.home_work_rounded, size: 18, color: AdminPalette.subtitle),
                                 const SizedBox(width: 6),
                                 Text('Magasin', style: AdminPalette.dataTableHeader),
+                              ],
+                            ),
+                          ),
+                          DataColumn(
+                            label: Row(
+                              children: [
+                                Icon(Icons.payments_rounded, size: 18, color: AdminPalette.subtitle),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'KPI achat',
+                                    style: AdminPalette.dataTableHeader,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          DataColumn(
+                            label: Row(
+                              children: [
+                                Icon(Icons.trending_up_rounded, size: 18, color: AdminPalette.subtitle),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'KPI vente',
+                                    style: AdminPalette.dataTableHeader,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -203,6 +240,51 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
                                     const SizedBox(width: 4),
                                     Text(
                                       c.warehouseFeatureEnabled ? 'Activé' : 'Désactivé',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AdminPalette.subtitle,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Switch.adaptive(
+                                      value: c.warehouseKpiShowPurchaseValue,
+                                      onChanged: _busy
+                                          ? null
+                                          : (v) =>
+                                                _updateCompany(c.id, warehouseKpiShowPurchaseValue: v),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      c.warehouseKpiShowPurchaseValue ? 'Visible' : 'Masqué',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: AdminPalette.subtitle,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              DataCell(
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Switch.adaptive(
+                                      value: c.warehouseKpiShowSaleValue,
+                                      onChanged: _busy
+                                          ? null
+                                          : (v) => _updateCompany(c.id, warehouseKpiShowSaleValue: v),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      c.warehouseKpiShowSaleValue ? 'Visible' : 'Masqué',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: AdminPalette.subtitle,
@@ -281,6 +363,7 @@ class _AdminFonctionnalitesPageState extends State<AdminFonctionnalitesPage> {
                         }).toList(),
                       ),
                     ),
+                  ),
                   ),
                 );
               },

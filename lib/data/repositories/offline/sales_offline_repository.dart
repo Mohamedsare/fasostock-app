@@ -49,26 +49,57 @@ class SalesOfflineRepository {
 
   Stream<List<Sale>> watchSales(String companyId, {String? storeId}) {
     if (companyId.isEmpty) return Stream.value([]);
-    final controller = StreamController<List<Sale>>();
+    // Broadcast : plusieurs [StreamProvider] / [ref.watch] sur le même flux (ventes + crédit).
+    final controller = StreamController<List<Sale>>.broadcast();
     StreamSubscription<dynamic>? subSales;
     StreamSubscription<List<LocalSalePayment>>? subPay;
-    Future<void> pump() async {
+    var pumpLoopActive = false;
+    var pumpAgain = false;
+
+    /// Une seule boucle de snapshot à la fois ; rafales Drift → au plus une relance après le snapshot courant.
+    Future<void> runPumpLoop() async {
+      if (pumpLoopActive) {
+        pumpAgain = true;
+        return;
+      }
+      pumpLoopActive = true;
       try {
-        final list = await _buildSalesSnapshot(companyId, storeId: storeId);
-        if (!controller.isClosed) controller.add(list);
-      } catch (e, st) {
-        if (!controller.isClosed) controller.addError(e, st);
+        while (!controller.isClosed) {
+          try {
+            final list = await _buildSalesSnapshot(companyId, storeId: storeId);
+            if (!controller.isClosed) controller.add(list);
+          } catch (e, st) {
+            if (!controller.isClosed) controller.addError(e, st);
+          }
+          if (!pumpAgain) break;
+          pumpAgain = false;
+        }
+      } finally {
+        pumpLoopActive = false;
+        if (pumpAgain && !controller.isClosed) {
+          pumpAgain = false;
+          unawaited(runPumpLoop());
+        }
       }
     }
 
+    // [onListen] à chaque nouvel abonné ; Drift n’est branché qu’une fois tant qu’il reste
+    // au moins un abonné. [onCancel] : dernier abonné retiré (comportement broadcast Dart).
     controller.onListen = () {
-      subSales = _db.watchLocalSales(companyId, storeId: storeId).listen((_) => pump());
-      subPay = _db.watchAllLocalSalePayments().listen((_) => pump());
-      pump();
+      if (subSales != null) return;
+      subSales = _db.watchLocalSales(companyId, storeId: storeId).listen((_) {
+        scheduleMicrotask(runPumpLoop);
+      });
+      subPay = _db.watchAllLocalSalePayments().listen((_) {
+        scheduleMicrotask(runPumpLoop);
+      });
+      scheduleMicrotask(runPumpLoop);
     };
-    controller.onCancel = () async {
-      await subSales?.cancel();
-      await subPay?.cancel();
+    controller.onCancel = () {
+      subSales?.cancel();
+      subPay?.cancel();
+      subSales = null;
+      subPay = null;
     };
     return controller.stream;
   }

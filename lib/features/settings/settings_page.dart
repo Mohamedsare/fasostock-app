@@ -19,6 +19,7 @@ import '../../../providers/company_provider.dart';
 import '../../../core/config/routes.dart';
 import '../../../providers/permissions_provider.dart';
 import '../../../providers/theme_mode_provider.dart';
+import '../../../shared/widgets/mobile/fs_mobile_page_header.dart';
 import '../../../providers/pos_cart_settings_provider.dart';
 import 'package:go_router/go_router.dart';
 
@@ -550,54 +551,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Widget _buildHeader(BuildContext context, bool isWide) {
-    final theme = Theme.of(context);
-    final narrow = MediaQuery.sizeOf(context).width < 560;
-    return narrow
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Paramètres',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.4,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Profil, compte et entreprise',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          )
-        : Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Paramètres',
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: -0.4,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Profil, compte et entreprise',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
+    return const FsMobilePageHeader(
+      title: 'Paramètres',
+      subtitle: 'Profil, compte et entreprise',
+    );
   }
 
   Widget _buildProfileCard(BuildContext context, AuthProvider auth) {

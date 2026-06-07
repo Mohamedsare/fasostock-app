@@ -828,7 +828,9 @@ class AppDatabase extends _$AppDatabase {
           await (delete(pendingActions)..where((t) => t.id.equals(r.id))).go();
           return;
         }
-      } catch (_) {}
+      } catch (_) {
+        // Payload JSON corrompu : on ignore cette ligne et on continue la recherche.
+      }
     }
   }
 

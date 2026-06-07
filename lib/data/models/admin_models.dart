@@ -1,3 +1,9 @@
+String? _trimOrNull(String? value) {
+  if (value == null) return null;
+  final t = value.trim();
+  return t.isEmpty ? null : t;
+}
+
 /// Entreprise (vue admin) — aligné avec AdminCompany.
 class AdminCompany {
   const AdminCompany({
@@ -9,6 +15,8 @@ class AdminCompany {
     this.aiPredictionsEnabled = false,
     this.warehouseFeatureEnabled = true,
     this.storeQuotaIncreaseEnabled = true,
+    this.warehouseKpiShowPurchaseValue = true,
+    this.warehouseKpiShowSaleValue = true,
     this.createdAt,
   });
   final String id;
@@ -19,6 +27,8 @@ class AdminCompany {
   final bool aiPredictionsEnabled;
   final bool warehouseFeatureEnabled;
   final bool storeQuotaIncreaseEnabled;
+  final bool warehouseKpiShowPurchaseValue;
+  final bool warehouseKpiShowSaleValue;
   final String? createdAt;
 
   factory AdminCompany.fromJson(Map<String, dynamic> json) {
@@ -31,6 +41,8 @@ class AdminCompany {
       aiPredictionsEnabled: json['ai_predictions_enabled'] as bool? ?? false,
       warehouseFeatureEnabled: json['warehouse_feature_enabled'] as bool? ?? true,
       storeQuotaIncreaseEnabled: json['store_quota_increase_enabled'] as bool? ?? true,
+      warehouseKpiShowPurchaseValue: json['warehouse_kpi_show_purchase_value'] as bool? ?? true,
+      warehouseKpiShowSaleValue: json['warehouse_kpi_show_sale_value'] as bool? ?? true,
       createdAt: json['created_at'] as String?,
     );
   }
@@ -43,6 +55,7 @@ class AdminStore {
     required this.companyId,
     required this.name,
     this.code,
+    this.phone,
     this.isActive = true,
     this.isPrimary = false,
     this.createdAt,
@@ -51,6 +64,7 @@ class AdminStore {
   final String companyId;
   final String name;
   final String? code;
+  final String? phone;
   final bool isActive;
   final bool isPrimary;
   final String? createdAt;
@@ -61,6 +75,7 @@ class AdminStore {
       companyId: json['company_id'] as String,
       name: json['name'] as String,
       code: json['code'] as String?,
+      phone: _trimOrNull(json['phone'] as String?),
       isActive: json['is_active'] as bool? ?? true,
       isPrimary: json['is_primary'] as bool? ?? false,
       createdAt: json['created_at'] as String?,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/models/category.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import '../pos_quick/pos_quick_constants.dart';
 
 /// En-tête 60px orange, aligné sur la caisse POS rapide.
@@ -116,27 +117,30 @@ class WarehousePosCategoryChips extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: 44,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          _PosStyleCategoryChip(
-            label: 'Tous',
-            selected: selectedCategoryId == null,
-            onSelected: () => onCategorySelected(null),
-          ),
-          const SizedBox(width: 8),
-          ...categories.map(
-            (c) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: _PosStyleCategoryChip(
-                label: c.name,
-                selected: selectedCategoryId == c.id,
-                onSelected: () => onCategorySelected(c.id),
+      child: FsHorizontalScrollShell(
+        builder: (context, c) => ListView(
+          controller: c,
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            _PosStyleCategoryChip(
+              label: 'Tous',
+              selected: selectedCategoryId == null,
+              onSelected: () => onCategorySelected(null),
+            ),
+            const SizedBox(width: 8),
+            ...categories.map(
+              (c) => Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _PosStyleCategoryChip(
+                  label: c.name,
+                  selected: selectedCategoryId == c.id,
+                  onSelected: () => onCategorySelected(c.id),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

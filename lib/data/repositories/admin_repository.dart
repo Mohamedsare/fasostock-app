@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/errors/crash_reporting.dart';
 import '../models/admin_models.dart';
 
 /// Admin plateforme — même API que adminApi (web). Réservé super_admin.
@@ -11,14 +12,14 @@ class AdminRepository {
     final data = await _client
         .from('companies')
         .select(
-          'id, name, slug, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled, created_at',
+          'id, name, slug, is_active, store_quota, ai_predictions_enabled, warehouse_feature_enabled, store_quota_increase_enabled, warehouse_kpi_show_purchase_value, warehouse_kpi_show_sale_value, created_at',
         )
         .order('created_at', ascending: false);
     return (data as List).map((e) => AdminCompany.fromJson(Map<String, dynamic>.from(e as Map))).toList();
   }
 
   Future<List<AdminStore>> listStores([String? companyId]) async {
-    var q = _client.from('stores').select('id, company_id, name, code, is_active, is_primary, created_at');
+    var q = _client.from('stores').select('id, company_id, name, code, phone, is_active, is_primary, created_at');
     if (companyId != null) q = q.eq('company_id', companyId);
     final data = await q.order('created_at', ascending: false);
     return (data as List).map((e) => AdminStore.fromJson(Map<String, dynamic>.from(e as Map))).toList();
@@ -31,6 +32,8 @@ class AdminRepository {
     bool? aiPredictionsEnabled,
     bool? warehouseFeatureEnabled,
     bool? storeQuotaIncreaseEnabled,
+    bool? warehouseKpiShowPurchaseValue,
+    bool? warehouseKpiShowSaleValue,
     int? storeQuota,
   }) async {
     final patch = <String, dynamic>{};
@@ -41,6 +44,12 @@ class AdminRepository {
     }
     if (storeQuotaIncreaseEnabled != null) {
       patch['store_quota_increase_enabled'] = storeQuotaIncreaseEnabled;
+    }
+    if (warehouseKpiShowPurchaseValue != null) {
+      patch['warehouse_kpi_show_purchase_value'] = warehouseKpiShowPurchaseValue;
+    }
+    if (warehouseKpiShowSaleValue != null) {
+      patch['warehouse_kpi_show_sale_value'] = warehouseKpiShowSaleValue;
     }
     if (storeQuota != null) {
       if (storeQuota < 1) {
@@ -78,7 +87,10 @@ class AdminRepository {
     try {
       final subs = await _client.from('company_subscriptions').select('id').eq('status', 'active');
       subsCount = (subs as List).length;
-    } catch (_) {}
+    } catch (e, st) {
+      // Best-effort : on garde subsCount=0 mais on remonte l'erreur pour diagnostic.
+      CrashReporting.captureException(e, st);
+    }
     return AdminStats(
       companiesCount: (companies as List).length,
       storesCount: (stores as List).length,

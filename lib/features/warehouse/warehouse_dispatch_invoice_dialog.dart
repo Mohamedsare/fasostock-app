@@ -43,6 +43,8 @@ class WarehouseDispatchInvoiceDialog extends ConsumerStatefulWidget {
     required this.warehouseRepo,
     required this.onSuccess,
     this.onOfflineEnqueue,
+    /// Si renseigné : chargement du bon existant et enregistrement via [WarehouseRepository.updateDispatchInvoice].
+    this.editInvoiceId,
   });
 
   final String companyId;
@@ -51,6 +53,7 @@ class WarehouseDispatchInvoiceDialog extends ConsumerStatefulWidget {
   final WarehouseRepository warehouseRepo;
   final Future<void> Function() onSuccess;
   final Future<void> Function(Map<String, dynamic> payload)? onOfflineEnqueue;
+  final String? editInvoiceId;
 
   @override
   ConsumerState<WarehouseDispatchInvoiceDialog> createState() =>
@@ -78,6 +81,14 @@ class _WarehouseDispatchInvoiceDialogState
   _DispatchPaymentMode? _paymentMode;
   String _cashPaidDraft = '';
   _DispatchMobileProvider? _mobileProvider;
+
+  /// Quantités d’origine par produit (édition) — stock affiché + baseline = max autorisé.
+  final Map<String, int> _editQtyBaseline = <String, int>{};
+
+  bool _loadingEdit = false;
+  String? _editLoadError;
+
+  bool get _isEditing => widget.editInvoiceId != null;
 
   List<Product> get _activeProducts =>
       widget.products
@@ -109,21 +120,22 @@ class _WarehouseDispatchInvoiceDialogState
 
   double get _grandTotal => _cart.fold(0.0, (s, c) => s + c.total);
 
-  int _effectiveStock(String productId) =>
-      widget.warehouseQuantities[productId] ?? 0;
-
-  bool _isProductShownInWarehouse(Product p) {
-    if (!p.isActive) return false;
-    if (!p.isAvailableInWarehouse) return false;
-    return _effectiveStock(p.id) > 0;
+  /// En édition, la quantité déjà sur le bon est « réintégrée » pour autoriser les ajustements.
+  int _maxStockForDispatch(String productId, Map<String, int> stockByProductId) {
+    final wh = stockByProductId[productId] ?? 0;
+    if (!_isEditing) return wh;
+    final base = _editQtyBaseline[productId] ?? 0;
+    return wh + base;
   }
 
   List<Product> _filteredProducts(Map<String, int> stockByProductId) {
     final search = _searchController.text.trim().toLowerCase();
     return _activeProducts.where((p) {
-      if (!_isProductShownInWarehouse(p)) return false;
-      final stock = stockByProductId[p.id] ?? 0;
-      if (stock <= 0) return false;
+      if (!p.isActive || !p.isAvailableInWarehouse) return false;
+      final maxS = _maxStockForDispatch(p.id, stockByProductId);
+      if (maxS <= 0 && !_cart.any((c) => c.productId == p.id)) {
+        return false;
+      }
       if (_selectedCategoryId != null && p.categoryId != _selectedCategoryId) {
         return false;
       }
@@ -194,7 +206,7 @@ class _WarehouseDispatchInvoiceDialogState
   }
 
   void _addToCart(Product p, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[p.id] ?? 0;
+    final stock = _maxStockForDispatch(p.id, stockByProductId);
     setState(() {
       PosCartItem? existing;
       try {
@@ -251,7 +263,7 @@ class _WarehouseDispatchInvoiceDialogState
     int delta,
     Map<String, int> stockByProductId,
   ) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _maxStockForDispatch(productId, stockByProductId);
     int? newQty;
     setState(() {
       final beforeLen = _cart.length;
@@ -283,7 +295,7 @@ class _WarehouseDispatchInvoiceDialogState
   }
 
   void _setQty(String productId, int value, Map<String, int> stockByProductId) {
-    final stock = stockByProductId[productId] ?? 0;
+    final stock = _maxStockForDispatch(productId, stockByProductId);
     PosCartItem? current;
     try {
       current = _cart.firstWhere((c) => c.productId == productId);
@@ -314,6 +326,7 @@ class _WarehouseDispatchInvoiceDialogState
 
   void _removeCartLine(String productId) {
     setState(() {
+      _editQtyBaseline.remove(productId);
       _cart = _cart.where((c) => c.productId != productId).toList();
       _qtyControllers[productId]?.dispose();
       _qtyControllers.remove(productId);
@@ -600,6 +613,108 @@ class _WarehouseDispatchInvoiceDialogState
     _mobileProvider = null;
     _selectedCategoryId = null;
     _searchController.clear();
+    _editQtyBaseline.clear();
+  }
+
+  void _applyPaymentFromNotes(String? notes) {
+    _paymentMode = null;
+    _cashPaidDraft = '';
+    _mobileProvider = null;
+    if (notes == null || notes.trim().isEmpty) return;
+    final t = notes.trim();
+    if (!t.startsWith(_dispatchPaymentNotePrefix) &&
+        !t.startsWith('__PAYMENT_INFO__::')) {
+      return;
+    }
+    final payloadStr = t.replaceFirst(RegExp(r'^__PAYMENT_INFO__::?'), '').trim();
+    if (payloadStr.isEmpty) return;
+    try {
+      final decoded = jsonDecode(payloadStr);
+      if (decoded is! Map) return;
+      final mode = (decoded['mode'] ?? '').toString().trim().toLowerCase();
+      switch (mode) {
+        case 'cash':
+          _paymentMode = _DispatchPaymentMode.cash;
+          final pa = decoded['paid_amount'];
+          if (pa is num) {
+            _cashPaidDraft = '${pa.round()}';
+          }
+          break;
+        case 'mobile_money':
+          _paymentMode = _DispatchPaymentMode.mobileMoney;
+          final mp = (decoded['mobile_provider'] ?? '')
+              .toString()
+              .toLowerCase();
+          if (mp.contains('orange')) {
+            _mobileProvider = _DispatchMobileProvider.orangeMoney;
+          } else if (mp.contains('moov')) {
+            _mobileProvider = _DispatchMobileProvider.moovMoney;
+          } else if (mp.contains('wave')) {
+            _mobileProvider = _DispatchMobileProvider.wave;
+          }
+          break;
+        case 'card':
+          _paymentMode = _DispatchPaymentMode.card;
+          break;
+        case 'credit':
+          _paymentMode = _DispatchPaymentMode.credit;
+          break;
+        default:
+          break;
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _loadEditInvoice() async {
+    final id = widget.editInvoiceId;
+    if (id == null) return;
+    setState(() {
+      _loadingEdit = true;
+      _editLoadError = null;
+    });
+    try {
+      final d = await widget.warehouseRepo.getDispatchInvoiceDetails(id);
+      if (!mounted) return;
+      _clearCartControllers();
+      _editQtyBaseline
+        ..clear()
+        ..addEntries(d.lines.map((e) => MapEntry(e.productId, e.quantity)));
+      final productById = {for (final p in widget.products) p.id: p};
+      final cart = <PosCartItem>[];
+      for (final line in d.lines) {
+        final p = productById[line.productId];
+        cart.add(
+          PosCartItem(
+            productId: line.productId,
+            name: p?.name ?? line.productName,
+            sku: p?.sku ?? line.productSku,
+            unit: p != null ? _defaultUnitForProduct(p) : line.productUnit,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            total: line.total,
+            imageUrl: p?.productImages?.isNotEmpty == true
+                ? p!.productImages!.first.url
+                : null,
+            linePriceUserSet: true,
+          ),
+        );
+      }
+      setState(() {
+        _cart = cart;
+        _customerId = d.customerId ?? '';
+        _applyPaymentFromNotes(d.notes);
+        _loadingEdit = false;
+      });
+      _ensureQtyControllersForCart();
+    } catch (e, st) {
+      WarehouseUi.logOp('dispatch_invoice_load_edit', e, st);
+      if (mounted) {
+        setState(() {
+          _loadingEdit = false;
+          _editLoadError = ErrorMapper.toMessage(e);
+        });
+      }
+    }
   }
 
   Customer? _resolveCustomer() {
@@ -652,11 +767,11 @@ class _WarehouseDispatchInvoiceDialogState
         AppToast.info(context, 'Indiquez un prix correct pour chaque article.');
         return;
       }
-      final wh = widget.warehouseQuantities[p.id] ?? 0;
-      if (qty > wh) {
+      final stockMax = _maxStockForDispatch(p.id, widget.warehouseQuantities);
+      if (qty > stockMax) {
         AppToast.info(
           context,
-          'Pas assez de stock pour « ${p.name} ». Disponible : $wh.',
+          'Pas assez de stock pour « ${p.name} ». Disponible : $stockMax.',
         );
         return;
       }
@@ -716,6 +831,83 @@ class _WarehouseDispatchInvoiceDialogState
           ? _mobileProvider!.value
           : null,
     };
+
+    if (_isEditing) {
+      if (customer.id.startsWith('pending:')) {
+        AppToast.info(
+          context,
+          'Synchronisez le client avant de modifier le bon.',
+        );
+        return;
+      }
+
+      final editPayload = <String, dynamic>{
+        'company_id': widget.companyId,
+        'invoice_id': widget.editInvoiceId!,
+        'customer_id': customer.id,
+        'notes': '$_dispatchPaymentNotePrefix${jsonEncode(paymentInfo)}',
+        'lines': inputs.map((e) => e.toJson()).toList(),
+      };
+
+      final canEnqueueOffline = widget.onOfflineEnqueue != null;
+
+      Future<void> afterQueuedLocally() async {
+        if (!mounted) return;
+        AppToast.success(
+          context,
+          'Modification enregistrée localement. Synchronisation au retour du réseau.',
+        );
+        await widget.onSuccess();
+        if (!mounted) return;
+        Navigator.of(context).pop();
+      }
+
+      setState(() => _saving = true);
+      try {
+        if (!ConnectivityService.instance.isOnline) {
+          if (!canEnqueueOffline) {
+            if (mounted) {
+              AppToast.info(
+                context,
+                'Connexion requise, ou configurez la file de synchronisation.',
+              );
+            }
+            return;
+          }
+          await widget.onOfflineEnqueue!(editPayload);
+          await afterQueuedLocally();
+          return;
+        }
+
+        try {
+          await widget.warehouseRepo.updateDispatchInvoice(
+            companyId: widget.companyId,
+            invoiceId: widget.editInvoiceId!,
+            customerId: customer.id.trim().isEmpty ? null : customer.id,
+            notes: editPayload['notes'] as String?,
+            lines: inputs,
+          );
+          if (!mounted) return;
+          AppToast.success(context, 'Bon modifié avec succès.');
+          await widget.onSuccess();
+          if (!mounted) return;
+          Navigator.of(context).pop();
+        } catch (e, st) {
+          WarehouseUi.logOp('dispatch_invoice_update', e, st);
+          if (canEnqueueOffline && ErrorMapper.isNetworkError(e)) {
+            await widget.onOfflineEnqueue!(editPayload);
+            await afterQueuedLocally();
+            return;
+          }
+          if (mounted) {
+            AppToast.error(context, ErrorMapper.toMessage(e));
+          }
+        }
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+      return;
+    }
 
     setState(() => _saving = true);
     try {
@@ -791,6 +983,17 @@ class _WarehouseDispatchInvoiceDialogState
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (_isEditing) {
+      _loadingEdit = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadEditInvoice();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _notesCtrl.dispose();
@@ -801,6 +1004,53 @@ class _WarehouseDispatchInvoiceDialogState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
+    if (_loadingEdit || _editLoadError != null) {
+      return Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: _loadingEdit
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Text(
+                          'Chargement du bon…',
+                          style: theme.textTheme.bodyLarge,
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        _editLoadError ?? 'Erreur',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Fermer'),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      );
+    }
 
     final stockByProductId = widget.warehouseQuantities;
     final filtered = _filteredProducts(stockByProductId);
@@ -865,7 +1115,9 @@ class _WarehouseDispatchInvoiceDialogState
           wide ? 16 : 12,
         ),
         child: PosCartPanel(
-          panelTitleOverride: 'Facture / sortie dépôt',
+          panelTitleOverride: _isEditing
+              ? 'Modifier le bon de sortie'
+              : 'Facture / sortie dépôt',
           cartItemCount: _cartItemCount,
           cartTiles: const [],
           scrollBodyWithFooter: true,
@@ -889,7 +1141,8 @@ class _WarehouseDispatchInvoiceDialogState
                 )
               : PosInvoiceTableCart(
                   cart: _cart,
-                  effectiveStock: (pid) => stockByProductId[pid] ?? 0,
+                  effectiveStock: (pid) =>
+                      _maxStockForDispatch(pid, stockByProductId),
                   qtyControllers: _qtyControllers,
                   puControllers: _puControllers,
                   onQtyDelta: (productId, delta) =>
@@ -1061,22 +1314,32 @@ class _WarehouseDispatchInvoiceDialogState
               ],
               const SizedBox(height: 12),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Total',
-                    style: TextStyle(
-                      color: PosQuickColors.textePrincipal,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
+                  Expanded(
+                    child: Text(
+                      'Total',
+                      style: TextStyle(
+                        color: PosQuickColors.textePrincipal,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(
-                    formatCurrency(_grandTotal),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 22,
-                      color: PosQuickColors.orangePrincipal,
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        formatCurrency(_grandTotal),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 22,
+                          color: PosQuickColors.orangePrincipal,
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -1107,7 +1370,9 @@ class _WarehouseDispatchInvoiceDialogState
                             ? 'Ajoutez des articles'
                             : _customerId.isEmpty
                             ? 'Choisissez le client (bandeau)'
-                            : 'Enregistrer le bon de sortie',
+                            : (_isEditing
+                                  ? 'Enregistrer les modifications'
+                                  : 'Enregistrer le bon de sortie'),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,

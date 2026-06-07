@@ -5,6 +5,7 @@ import '../../core/utils/app_toast.dart';
 import '../../data/models/admin_models.dart';
 import '../../data/repositories/admin_repository.dart';
 import '../../providers/auth_provider.dart';
+import '../../shared/widgets/fs_horizontal_scroll.dart';
 import 'shared/admin_ui.dart';
 
 /// Gestion utilisateurs plateforme (équivalent AdminUsersPage web).
@@ -132,9 +133,11 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
               }
               return AdminCard(
                 padding: EdgeInsets.zero,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
+                child: FsHorizontalScrollShell(
+                  builder: (context, c) => SingleChildScrollView(
+                    controller: c,
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
                     columns: [
                       DataColumn(label: Text('Nom', style: AdminPalette.dataTableHeader)),
                       DataColumn(label: Text('Email', style: AdminPalette.dataTableHeader)),
@@ -165,6 +168,7 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                       );
                     }).toList(),
                   ),
+                ),
                 ),
               );
             },

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Splash natif — aligné thème Flutter FasoStock (AppTheme primary) -->
+    <color name="faso_brand_orange">#FFE85D2C</color>
+    <color name="faso_splash_bg">#FFFFFFFF</color>
+    <color name="faso_splash_mark_fill">#26E85D2C</color>
+    <color name="faso_splash_mark_stroke">#99E85D2C</color>
 </resources>
