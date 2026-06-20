@@ -2148,7 +2148,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     );
   }
 
-  /// Recherche un produit par code-barres ou SKU (exact) et l'ajoute au panier.
+  /// Recherche un produit par code-barres ou SKU (exact, insensible à la casse) et l'ajoute au panier.
   void _addByBarcode(
     String code,
     List<Product> products,
@@ -2156,14 +2156,15 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
   ) {
     final trimmed = code.trim();
     if (trimmed.isEmpty) return;
+    final lower = trimmed.toLowerCase();
     Product? product;
     for (final p in products) {
       if (!p.isActive) continue;
-      if (p.barcode != null && p.barcode!.trim() == trimmed) {
+      if (p.barcode != null && p.barcode!.trim().toLowerCase() == lower) {
         product = p;
         break;
       }
-      if (p.sku != null && p.sku!.trim() == trimmed) {
+      if (p.sku != null && p.sku!.trim().toLowerCase() == lower) {
         product = p;
         break;
       }
