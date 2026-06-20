@@ -2148,7 +2148,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     );
   }
 
-  /// Recherche un produit par code-barres (exact) et l'ajoute au panier.
+  /// Recherche un produit par code-barres ou SKU (exact) et l'ajoute au panier.
   void _addByBarcode(
     String code,
     List<Product> products,
@@ -2158,13 +2158,18 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
     if (trimmed.isEmpty) return;
     Product? product;
     for (final p in products) {
-      if (p.barcode != null && p.barcode!.trim() == trimmed && p.isActive) {
+      if (!p.isActive) continue;
+      if (p.barcode != null && p.barcode!.trim() == trimmed) {
+        product = p;
+        break;
+      }
+      if (p.sku != null && p.sku!.trim() == trimmed) {
         product = p;
         break;
       }
     }
     if (product == null) {
-      AppToast.error(context, 'Aucun produit avec ce code-barres.');
+      AppToast.error(context, 'Aucun produit avec ce code-barres ou référence.');
       return;
     }
     if (!_isProductShownOnTill(product, stockByProductId)) {
