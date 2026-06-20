@@ -210,7 +210,7 @@ class _PosQuickPageState extends ConsumerState<PosQuickPage> {
       if (search.isEmpty) return true;
       if (p.name.toLowerCase().contains(search)) return true;
       if (p.sku?.toLowerCase().contains(search) ?? false) return true;
-      if (p.barcode?.contains(search) ?? false) return true;
+      if (p.barcode?.toLowerCase().contains(search) ?? false) return true;
       return false;
     }).toList();
   }
